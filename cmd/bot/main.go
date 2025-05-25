@@ -103,6 +103,10 @@ func main() {
 				log.Println("已回复，时间修改为60min后")
 				continue
 			}
+			if global.LongChainflag {
+				log.Println("正在进行长对话，不回复")
+				continue
+			}
 			err := service.SendMsg(c, config.Config.TargetId, "在干嘛")
 			if err != nil {
 				log.Println("发送消息失败:", err)

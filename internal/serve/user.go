@@ -22,6 +22,7 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 		return nil
 	}
 	var Emotion string
+	var Intention string
 	sendmsg := ""
 	switch resptext {
 	case "你好":
@@ -35,10 +36,15 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 		sendmsg = "[CQ:image,type=image,url=https://pan.heky.top/photo/v2-58816628de7a7812f1afd46fd411090c_b.jpg,title=image]"
 	case "能陪我聊聊吗":
 		sendmsg = "好"
+		global.Conversation = append(global.Conversation, aifunction.Message{Role: "user", Content: "能陪我聊聊吗"}, aifunction.Message{Role: "assistant", Content: "好"})
 		global.LongChainflag = true
 	default:
 		sendmsg = "?"
 		Emotion, err = JudgeEmotion(c, resptext)
+		if err != nil {
+			return err
+		}
+		Intention, err = JudgeIntention(c, resptext)
 		if err != nil {
 			return err
 		}
@@ -47,6 +53,15 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 	if global.Sleepflag {
 		log.Print("睡眠中")
 		time.Sleep(time.Second * 3)
+	}
+
+	if Intention == "想聊天" {
+		global.LongChainflag = true
+		err := ChatwithAi(c, resptext)
+		if err != nil {
+			return fmt.Errorf("ChatwithAi error in ResponseUserMsg: %v", err)
+		}
+		return nil
 	}
 
 	// 通过情感判断进行不同回应的测试
@@ -74,6 +89,15 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 
 func JudgeEmotion(c *websocket.Conn, resptext string) (result string, err error) {
 	prompt := "请帮我分析下这段话的情感，并在下面四个选项中选择：开心，生气，中性，哲学， 并只回复选项，例如：\"user: 哈哈哈\" resp: \"开心\", 不需要回答多余的内容"
+	resp, err := aifunction.Queryai(prompt, resptext)
+	if err != nil {
+		return "", err
+	}
+	return resp, nil
+}
+
+func JudgeIntention(c *websocket.Conn, resptext string) (result string, err error) {
+	prompt := "请帮我分析下这段话的意图，并在下面四个选项中选择：想聊天，想被鼓励，想倾诉，想听对方说话 并只回复选项，例如：\"user: 能陪我会儿吗\" resp: \"想倾诉\", 不需要回答多余的内容"
 	resp, err := aifunction.Queryai(prompt, resptext)
 	if err != nil {
 		return "", err

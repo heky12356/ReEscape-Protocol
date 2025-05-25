@@ -170,7 +170,7 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 		time.Sleep(time.Second * 3)
 	}
 
-	if Intention == "想聊天" || Intention == "想倾诉" {
+	if Intention == "想和对方聊天" || Intention == "想和对方倾诉" {
 		global.LongChainflag = true
 		err := ChatwithAi(c, resptext)
 		if err != nil {
@@ -203,7 +203,7 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 }
 
 func JudgeEmotion(c *websocket.Conn, resptext string) (result string, err error) {
-	prompt := "请帮我分析下这段话的情感，并在下面五个选项中选择：开心，生气，中性，哲学，敷衍， 并只回复选项，例如：\"user: 哈哈哈\" resp: \"开心\", 不需要回答多余的内容"
+	prompt := "请帮我分析下这段话的情感，并在下面五个选项中选择：开心，生气，中性，哲学，敷衍， 并只回复选项，例如：\"user: 哈哈哈\" resp: \"开心\", 不需要回答多余的内容，也不需要添加分号"
 	resp, err := aifunction.Queryai(prompt, resptext)
 	if err != nil {
 		return "", err
@@ -212,7 +212,7 @@ func JudgeEmotion(c *websocket.Conn, resptext string) (result string, err error)
 }
 
 func JudgeIntention(c *websocket.Conn, resptext string) (result string, err error) {
-	prompt := "请帮我分析下这段话的意图，并在下面六个选项中选择：想和对方聊天，想被对方鼓励，想和对方倾诉，安慰对方，鼓励对方，和对方道歉 并只回复选项，例如：\"user: 能陪我会儿吗\" resp: \"想和对方倾诉\", 不需要回答多余的内容"
+	prompt := "请帮我分析下这段话的意图，并在下面六个选项中选择：想和对方聊天，想被对方鼓励，想和对方倾诉，安慰对方，鼓励对方，和对方道歉 并只回复选项，例如：\"user: 能陪我会儿吗\" resp: \"想和对方倾诉\", 不需要回答多余的内容，也不需要添加分号"
 	resp, err := aifunction.Queryai(prompt, resptext)
 	if err != nil {
 		return "", err

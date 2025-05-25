@@ -50,8 +50,15 @@ func main() {
 			// log.Print(msg)
 			if msg.User_id == config.Config.TargetId && msg.Message_type == "private" {
 
+				// if !global.Aiflag && msg.Raw_message[0] != '/' {
+				// 	result, err := serve.JudgeEmotion(c, msg.Raw_message)
+				// 	if err != nil {
+				// 		log.Println("判断情感失败:", err)
+				// 	}
+				// 	log.Print("情感：" + result)
+				// }
 				if global.Aiflag && msg.Raw_message[0] != '/' {
-					resp, err := aifunction.Queryai(msg.Raw_message)
+					resp, err := aifunction.Queryai(config.Config.AiPrompt, msg.Raw_message)
 					if err != nil {
 						log.Println("使用ai发送消息失败:", err)
 					}

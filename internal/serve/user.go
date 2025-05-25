@@ -4,6 +4,7 @@ import (
 	"log"
 	"time"
 
+	"project-yume/internal/aifunction"
 	"project-yume/internal/config"
 	"project-yume/internal/global"
 	"project-yume/internal/service"
@@ -12,6 +13,10 @@ import (
 )
 
 func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
+	result, err := JudgeEmotion(c, resptext)
+	if err != nil {
+		return err
+	}
 	sendmsg := ""
 	switch resptext {
 	case "你好":
@@ -25,15 +30,41 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 		sendmsg = "[CQ:image,type=image,url=https://pan.heky.top/photo/v2-58816628de7a7812f1afd46fd411090c_b.jpg,title=image]"
 	default:
 		sendmsg = "?"
-		global.Sleepflag = true
+		// global.Sleepflag = true
 	}
 	if global.Sleepflag {
 		log.Print("睡眠中")
 		time.Sleep(time.Second * 3)
 	}
+
+	// 通过情感判断进行不同回应的测试
+	if sendmsg == "?" {
+		switch result {
+		case "开心":
+			sendmsg = "那很好了。"
+		case "生气":
+			sendmsg = "我做错什么了？"
+		case "中性":
+			sendmsg = "在忙"
+		case "哲学":
+			sendmsg = "乐"
+		default:
+			sendmsg = "?"
+		}
+	}
+
 	err = service.SendMsg(c, config.Config.TargetId, sendmsg)
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+func JudgeEmotion(c *websocket.Conn, resptext string) (result string, err error) {
+	prompt := "请帮我分析下这段话的情感，并在下面四个选项中选择：开心，生气，中性，哲学， 并只回复选项，例如：\"user: 哈哈哈\" resp: \"开心\", 不需要回答多余的内容"
+	resp, err := aifunction.Queryai(prompt, resptext)
+	if err != nil {
+		return "", err
+	}
+	return resp, nil
 }

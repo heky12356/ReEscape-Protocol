@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"fmt"
 	"log"
 	"time"
 
@@ -13,10 +14,14 @@ import (
 )
 
 func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
-	result, err := JudgeEmotion(c, resptext)
-	if err != nil {
-		return err
+	if global.LongChainflag {
+		err := ChatwithAi(c, resptext)
+		if err != nil {
+			return fmt.Errorf("ChatwithAi error: %v", err)
+		}
+		return nil
 	}
+	var Emotion string
 	sendmsg := ""
 	switch resptext {
 	case "你好":
@@ -28,8 +33,15 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 		sendmsg = "好吧"
 	case "我不信":
 		sendmsg = "[CQ:image,type=image,url=https://pan.heky.top/photo/v2-58816628de7a7812f1afd46fd411090c_b.jpg,title=image]"
+	case "能陪我聊聊吗":
+		sendmsg = "好"
+		global.LongChainflag = true
 	default:
 		sendmsg = "?"
+		Emotion, err = JudgeEmotion(c, resptext)
+		if err != nil {
+			return err
+		}
 		// global.Sleepflag = true
 	}
 	if global.Sleepflag {
@@ -39,7 +51,7 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 
 	// 通过情感判断进行不同回应的测试
 	if sendmsg == "?" {
-		switch result {
+		switch Emotion {
 		case "开心":
 			sendmsg = "那很好了。"
 		case "生气":
@@ -67,4 +79,28 @@ func JudgeEmotion(c *websocket.Conn, resptext string) (result string, err error)
 		return "", err
 	}
 	return resp, nil
+}
+
+func ChatwithAi(c *websocket.Conn, msg string) (err error) {
+	if msg == "不聊了" {
+		err := service.SendMsg(c, config.Config.TargetId, "好吧")
+		if err != nil {
+			return fmt.Errorf("SendMsg error in ChatwithAi: %v", err)
+		}
+		global.LongChainflag = false
+		return nil
+	}
+	filepath := "../../public/aichatlog/longchain/log_" + time.Now().Format("06-01-02") + ".txt"
+	Conversation := append(global.Conversation, aifunction.Message{Role: "user", Content: msg})
+	log.Print(Conversation)
+	NewConversation, result, err := aifunction.QueryaiWithChain(Conversation, filepath)
+	if err != nil {
+		return err
+	}
+	err = service.SendMsg(c, config.Config.TargetId, result)
+	if err != nil {
+		return err
+	}
+	global.Conversation = NewConversation
+	return nil
 }

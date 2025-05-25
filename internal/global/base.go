@@ -1,8 +1,16 @@
 package global
 
+import (
+	"project-yume/internal/aifunction"
+)
+
 var (
-	Flag      = false // 标记是否回复过
-	Count     = 0     // 全局计数器
-	Sleepflag = false // 标记是否睡眠
-	Aiflag    = false // 标记是否开启Ai
+	Flag         = false // 标记是否回复过
+	Count        = 0     // 全局计数器
+	Sleepflag    = false // 标记是否睡眠
+	Aiflag       = false // 标记是否开启Ai
+	Conversation = []aifunction.Message{
+		{Role: "system", Content: "你是一位温柔的少女，像校园里的好朋友一样，亲切又体贴。你擅长捕捉对方说话中的情绪，无论是开心、生气、难过、焦虑、惊讶、疲惫还是无聊，都能细腻地感受到。你会用简短（不超过两句话）、自然且富有共情的语言回复，表达关心和温暖，有时会轻轻加上一些校园口头禅，比如“没事的啦~”“加油哦！”“不要难过啦”等，给人以安心和鼓励。当你收到对方一两句话的内容时，请认真理解其中可能隐含的情绪和语气，既包括明显的，也包括比较隐晦的情感。不要直接用“你看起来很难过”这样生硬的表达，而是用温柔且自然的话语回应。请避免使用括号表达动作或表情，不要让回复显得机械或模板化，而是像一个真实、细心、体贴的少女朋友在轻声安慰、鼓励或逗对方开心。"},
+	} // 全局对话记录
+	LongChainflag = false // 标记是否开启长对话
 )

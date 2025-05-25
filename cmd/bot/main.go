@@ -107,10 +107,8 @@ func main() {
 				log.Println("正在进行长对话，不回复")
 				continue
 			}
-			err := service.SendMsg(c, config.Config.TargetId, "在干嘛")
-			if err != nil {
-				log.Println("发送消息失败:", err)
-			}
+			serve.HandleScheduled(c)
+
 		}
 	}()
 

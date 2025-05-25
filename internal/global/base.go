@@ -5,7 +5,16 @@ import (
 )
 
 var (
-	Flag         = false // 标记是否回复过
+	Flag = false // 标记是否回复过
+
+	Needcomfort = false // 标记是否需要回复安慰的话
+	Comfortflag = false // 标记是否回复过安慰的话
+
+	Needencourage = false // 标记是否需要回复鼓励的话
+	Encourageflag = false // 标记是否回复过鼓励的话
+
+	PerfunctoryFlag = false // 标记是否回复过敷衍的话
+
 	Count        = 0     // 全局计数器
 	Sleepflag    = false // 标记是否睡眠
 	Aiflag       = false // 标记是否开启Ai

@@ -21,8 +21,123 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 		}
 		return nil
 	}
+
 	var Emotion string
 	var Intention string
+
+	if global.PerfunctoryFlag {
+		Intention, err = JudgeIntention(c, resptext)
+		if err != nil {
+			return err
+		}
+		Emotion, err = JudgeEmotion(c, resptext)
+		if err != nil {
+			return err
+		}
+		if Emotion == "生气" {
+			err := service.SendMsg(c, config.Config.TargetId, "别生气")
+			if err != nil {
+				return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
+			}
+			global.PerfunctoryFlag = false
+			return nil
+		}
+		if Intention == "和对方道歉" {
+			err := service.SendMsg(c, config.Config.TargetId, "没事，我没生气")
+			if err != nil {
+				return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
+			}
+			err = service.SendMsg(c, config.Config.TargetId, "真的")
+			if err != nil {
+				return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
+			}
+			global.PerfunctoryFlag = false
+			return nil
+		}
+	}
+
+	if global.Needencourage {
+		if !global.Encourageflag {
+			Intention, err = JudgeIntention(c, resptext)
+			if err != nil {
+				return err
+			}
+			Emotion, err = JudgeEmotion(c, resptext)
+			if err != nil {
+				return err
+			}
+			if Emotion == "敷衍" {
+				err := service.SendMsg(c, config.Config.TargetId, "敷衍")
+				if err != nil {
+					return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
+				}
+				global.PerfunctoryFlag = true
+				return nil
+			}
+			if Intention == "鼓励对方" {
+				err := service.SendMsg(c, config.Config.TargetId, "嘿嘿")
+				if err != nil {
+					return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
+				}
+				err = service.SendMsg(c, config.Config.TargetId, "谢谢")
+				if err != nil {
+					return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
+				}
+				global.Encourageflag = true
+				return nil
+			} else {
+				err := service.SendMsg(c, config.Config.TargetId, "快鼓励我！！")
+				if err != nil {
+					return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
+				}
+				return nil
+			}
+		} else {
+			global.Needencourage = false
+		}
+	}
+
+	if global.Needcomfort {
+		if !global.Comfortflag {
+			Intention, err = JudgeIntention(c, resptext)
+			if err != nil {
+				return err
+			}
+			Emotion, err = JudgeEmotion(c, resptext)
+			if err != nil {
+				return err
+			}
+			if Emotion == "敷衍" {
+				err := service.SendMsg(c, config.Config.TargetId, "敷衍")
+				if err != nil {
+					return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
+				}
+				global.PerfunctoryFlag = true
+				return nil
+			}
+			if Intention == "安慰对方" {
+				err := service.SendMsg(c, config.Config.TargetId, "嘿嘿")
+				if err != nil {
+					return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
+				}
+				err = service.SendMsg(c, config.Config.TargetId, "谢谢")
+				if err != nil {
+					return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
+				}
+				global.Comfortflag = true
+				return nil
+			} else {
+				err := service.SendMsg(c, config.Config.TargetId, "sad")
+				if err != nil {
+					return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
+				}
+				return nil
+			}
+		} else {
+			global.Needcomfort = false
+		}
+	}
+
 	sendmsg := ""
 	switch resptext {
 	case "你好":
@@ -55,7 +170,7 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 		time.Sleep(time.Second * 3)
 	}
 
-	if Intention == "想聊天" {
+	if Intention == "想聊天" || Intention == "想倾诉" {
 		global.LongChainflag = true
 		err := ChatwithAi(c, resptext)
 		if err != nil {
@@ -88,7 +203,7 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 }
 
 func JudgeEmotion(c *websocket.Conn, resptext string) (result string, err error) {
-	prompt := "请帮我分析下这段话的情感，并在下面四个选项中选择：开心，生气，中性，哲学， 并只回复选项，例如：\"user: 哈哈哈\" resp: \"开心\", 不需要回答多余的内容"
+	prompt := "请帮我分析下这段话的情感，并在下面五个选项中选择：开心，生气，中性，哲学，敷衍， 并只回复选项，例如：\"user: 哈哈哈\" resp: \"开心\", 不需要回答多余的内容"
 	resp, err := aifunction.Queryai(prompt, resptext)
 	if err != nil {
 		return "", err
@@ -97,7 +212,7 @@ func JudgeEmotion(c *websocket.Conn, resptext string) (result string, err error)
 }
 
 func JudgeIntention(c *websocket.Conn, resptext string) (result string, err error) {
-	prompt := "请帮我分析下这段话的意图，并在下面四个选项中选择：想聊天，想被鼓励，想倾诉，想听对方说话 并只回复选项，例如：\"user: 能陪我会儿吗\" resp: \"想倾诉\", 不需要回答多余的内容"
+	prompt := "请帮我分析下这段话的意图，并在下面六个选项中选择：想和对方聊天，想被对方鼓励，想和对方倾诉，安慰对方，鼓励对方，和对方道歉 并只回复选项，例如：\"user: 能陪我会儿吗\" resp: \"想和对方倾诉\", 不需要回答多余的内容"
 	resp, err := aifunction.Queryai(prompt, resptext)
 	if err != nil {
 		return "", err
@@ -112,6 +227,7 @@ func ChatwithAi(c *websocket.Conn, msg string) (err error) {
 			return fmt.Errorf("SendMsg error in ChatwithAi: %v", err)
 		}
 		global.LongChainflag = false
+		log.Print("长对话ai聊天结束")
 		return nil
 	}
 	filepath := "../../public/aichatlog/longchain/log_" + time.Now().Format("06-01-02") + ".txt"

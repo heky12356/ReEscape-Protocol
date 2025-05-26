@@ -75,6 +75,8 @@ func main() {
 					}
 				}
 
+				global.ExplainStatus()
+
 				if msg.Raw_message == "/test" {
 					global.Aiflag = true
 				}
@@ -89,7 +91,7 @@ func main() {
 
 	// 定时发送消息
 
-	ticker := time.NewTicker(2 * time.Minute)
+	ticker := time.NewTicker(30 * time.Minute)
 	go func() {
 		for t := range ticker.C {
 			global.Count = (global.Count + 1) % 32

@@ -147,6 +147,8 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 	case "在忙呢":
 		global.Flag = true
 		sendmsg = "好吧"
+	case "难过了":
+		sendmsg = "别难过，开心点，加油！"
 	case "我不信":
 		sendmsg = "[CQ:image,type=image,url=https://pan.heky.top/photo/v2-58816628de7a7812f1afd46fd411090c_b.jpg,title=image]"
 	case "能陪我聊聊吗":
@@ -159,10 +161,6 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 		if err != nil {
 			return err
 		}
-		Intention, err = JudgeIntention(c, resptext)
-		if err != nil {
-			return err
-		}
 		// global.Sleepflag = true
 	}
 	if global.Sleepflag {
@@ -170,14 +168,7 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 		time.Sleep(time.Second * 3)
 	}
 
-	if Intention == "想和对方聊天" || Intention == "想和对方倾诉" {
-		global.LongChainflag = true
-		err := ChatwithAi(c, resptext)
-		if err != nil {
-			return fmt.Errorf("ChatwithAi error in ResponseUserMsg: %v", err)
-		}
-		return nil
-	}
+	tmpflag := false // 标记是否需要进行长对话判断，还在思考这里的逻辑要如何才比较好。
 
 	// 通过情感判断进行不同回应的测试
 	if sendmsg == "?" {
@@ -190,9 +181,27 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 			sendmsg = "在忙"
 		case "哲学":
 			sendmsg = "乐"
+		case "难过":
+			sendmsg, _ = Generate("sad")
+			tmpflag = true
 		default:
 			sendmsg = "?"
 		}
+	}
+
+	if !tmpflag {
+		Intention, err = JudgeIntention(c, resptext)
+		if err != nil {
+			return err
+		}
+	}
+	if (Intention == "想和对方聊天" || Intention == "想和对方倾诉") && tmpflag == false {
+		global.LongChainflag = true
+		err := ChatwithAi(c, resptext)
+		if err != nil {
+			return fmt.Errorf("ChatwithAi error in ResponseUserMsg: %v", err)
+		}
+		return nil
 	}
 
 	err = service.SendMsg(c, config.Config.TargetId, sendmsg)
@@ -203,7 +212,7 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 }
 
 func JudgeEmotion(c *websocket.Conn, resptext string) (result string, err error) {
-	prompt := "请帮我分析下这段话的情感，并在下面五个选项中选择：开心，生气，中性，哲学，敷衍， 并只回复选项，例如：\"user: 哈哈哈\" resp: \"开心\", 不需要回答多余的内容，也不需要添加分号"
+	prompt := "请帮我分析下这段话的情感，并在下面六个选项中选择：开心，生气，中性，哲学，敷衍，难过， 并只回复选项，例如：\"user: 哈哈哈\" resp: \"开心\", 不需要回答多余的内容，也不需要添加分号"
 	resp, err := aifunction.Queryai(prompt, resptext)
 	if err != nil {
 		return "", err

@@ -151,6 +151,8 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 		sendmsg = "别难过，开心点，加油！"
 	case "我不信":
 		sendmsg = "[CQ:image,type=image,url=https://pan.heky.top/photo/v2-58816628de7a7812f1afd46fd411090c_b.jpg,title=image]"
+	case "我想你了":
+		sendmsg = "是嘛？嘿嘿"
 	case "能陪我聊聊吗":
 		sendmsg = "好"
 		global.Conversation = append(global.Conversation, aifunction.Message{Role: "user", Content: "能陪我聊聊吗"}, aifunction.Message{Role: "assistant", Content: "好"})
@@ -183,19 +185,19 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 			sendmsg = "乐"
 		case "难过":
 			sendmsg, _ = Generate("sad")
-			tmpflag = true
 		default:
 			sendmsg = "?"
+			tmpflag = true
 		}
 	}
 
-	if !tmpflag {
+	if tmpflag {
 		Intention, err = JudgeIntention(c, resptext)
 		if err != nil {
 			return err
 		}
 	}
-	if (Intention == "想和对方聊天" || Intention == "想和对方倾诉") && tmpflag == false {
+	if (Intention == "想和对方聊天" || Intention == "想和对方倾诉") && tmpflag {
 		global.LongChainflag = true
 		err := ChatwithAi(c, resptext)
 		if err != nil {

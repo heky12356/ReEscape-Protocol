@@ -1,19 +1,18 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"os"
 	"os/signal"
 	"time"
 
-	"project-yume/internal/aifunction"
 	"project-yume/internal/config"
 	"project-yume/internal/connect"
 	"project-yume/internal/global"
 	"project-yume/internal/model"
 	"project-yume/internal/serve"
-	"project-yume/internal/service"
 
 	"github.com/gorilla/websocket"
 )
@@ -30,67 +29,61 @@ func main() {
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 
-	done := make(chan struct{})
+	// 定义上下文
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// 定义channel
+	ch := make(chan model.Msg)
 
 	// 启动协程读取消息
-	go func() {
-		defer close(done)
+	go func(ch chan model.Msg) {
 		for {
-			t, message, err := c.ReadMessage()
+			_, message, err := c.ReadMessage()
 			if err != nil {
 				log.Println("读取消息失败:", err)
-				return
+				continue
 			}
 			log.Printf("接收到消息: %s", message)
 			var msg model.Response
 			err = json.Unmarshal(message, &msg)
 			if err != nil {
 				log.Println("消息反序列化失败:", err)
-			}
-			// log.Print(msg)
-			if msg.User_id == config.Config.TargetId && msg.Message_type == "private" {
-
-				// if !global.Aiflag && msg.Raw_message[0] != '/' {
-				// 	result, err := serve.JudgeEmotion(c, msg.Raw_message)
-				// 	if err != nil {
-				// 		log.Println("判断情感失败:", err)
-				// 	}
-				// 	log.Print("情感：" + result)
-				// }
-				if global.Aiflag && msg.Raw_message[0] != '/' {
-					resp, err := aifunction.Queryai(config.Config.AiPrompt, msg.Raw_message)
-					if err != nil {
-						log.Println("使用ai发送消息失败:", err)
-					}
-					err = service.SendMsg(c, config.Config.TargetId, resp)
-					if err != nil {
-						log.Println("使用serve发送消息失败:", err)
-					}
-				}
-
-				if !global.Aiflag && msg.Raw_message[0] != '/' {
-					err := serve.ResponseUserMsg(c, msg.Raw_message)
-					if err != nil {
-						log.Println("使用serve发送消息失败:", err)
-					}
-				}
-
-				global.ExplainStatus()
-
-				if msg.Raw_message == "/test" {
-					global.Aiflag = true
-				}
-				if msg.Raw_message == "/end" {
-					global.Aiflag = false
-				}
+				continue
 			}
 
-			log.Println(t)
+			// 将消息存储到上下文
+			ch <- model.Msg{
+				Message:  msg.Raw_message,
+				User_id:  msg.User_id,
+				Group_id: msg.Group_id,
+				Time:     msg.Time,
+				Type: func() int {
+					if msg.Message_type == "group" {
+						return 0
+					}
+					return 1
+				}(),
+			}
 		}
-	}()
+	}(ch)
 
+	go func(ch chan model.Msg) {
+		for {
+			for msg := range ch {
+				if msg.User_id == config.Config.TargetId && msg.Type == 1 {
+					if msg.Message == "exit();" {
+						cancel()
+					}
+					err := serve.ResponseUserMsg(c, msg.Message)
+					if err != nil {
+						log.Println("使用serve发送消息失败:", err)
+					}
+					global.ExplainStatus()
+				}
+			}
+		}
+	}(ch)
 	// 定时发送消息
-
 	ticker := time.NewTicker(30 * time.Minute)
 	go func() {
 		for t := range ticker.C {
@@ -117,7 +110,7 @@ func main() {
 	// 主循环，处理中断信号
 	for {
 		select {
-		case <-done:
+		case <-ctx.Done():
 			return
 		case <-interrupt:
 			log.Println("接收到中断信号，关闭连接")
@@ -128,7 +121,7 @@ func main() {
 				return
 			}
 			select {
-			case <-done:
+			case <-ctx.Done():
 			case <-time.After(time.Second):
 			}
 			return

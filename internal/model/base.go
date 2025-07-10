@@ -1,5 +1,14 @@
 package model
 
+// goroutine之间消息
+type Msg struct {
+	Message  string `json:"message"`
+	User_id  int64  `json:"user_id"`
+	Group_id int64  `json:"group_id"`
+	Time     int64
+	Type     int // 0:群消息 1:私聊消息
+}
+
 type Message struct {
 	Action string      `json:"action"`
 	Params interface{} `json:"params"`

@@ -29,7 +29,7 @@ func HandleScheduled(c *websocket.Conn) {
 	if idx == 4 {
 		global.Needencourage = true
 	}
-	err := service.SendMsg(c, config.Config.TargetId, respmsgs[idx])
+	err := service.SendMsg(c, config.GetConfig().TargetId, respmsgs[idx])
 	if err != nil {
 		log.Println("发送消息失败 in HandleScheduled:", err)
 	}

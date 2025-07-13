@@ -8,14 +8,17 @@ import (
 	"github.com/joho/godotenv"
 )
 
-var Config struct {
+type Config struct {
 	Hostadd   string
 	GroupID   int64
 	TargetId  int64
 	AiKEY     string
 	AiBaseUrl string
 	AiPrompt  string
+	AiModel   string
 }
+
+var config *Config
 
 func init() {
 	err := godotenv.Load(".env")
@@ -23,10 +26,15 @@ func init() {
 	if err != nil {
 		log.Fatal("Error loading .env file")
 	}
-	Config.Hostadd = os.Getenv("HOSTADD")
-	Config.GroupID, _ = strconv.ParseInt(os.Getenv("GROUPID"), 10, 64)
-	Config.TargetId, _ = strconv.ParseInt(os.Getenv("TARGETID"), 10, 64)
-	Config.AiKEY = os.Getenv("AI_KEY")
-	Config.AiBaseUrl = os.Getenv("AI_BASEURL")
-	Config.AiPrompt = os.Getenv("AI_PROMPT")
+	config.Hostadd = os.Getenv("HOSTADD")
+	config.GroupID, _ = strconv.ParseInt(os.Getenv("GROUPID"), 10, 64)
+	config.TargetId, _ = strconv.ParseInt(os.Getenv("TARGETID"), 10, 64)
+	config.AiKEY = os.Getenv("AI_KEY")
+	config.AiBaseUrl = os.Getenv("AI_BASEURL")
+	config.AiPrompt = os.Getenv("AI_PROMPT")
+	config.AiModel = os.Getenv("AI_MODEL")
+}
+
+func GetConfig() *Config {
+	return config
 }

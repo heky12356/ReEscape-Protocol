@@ -38,7 +38,7 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 			return err
 		}
 		if Emotion == "生气" {
-			err := service.SendMsg(c, config.Config.TargetId, "别生气")
+			err := service.SendMsg(c, config.GetConfig().TargetId, "别生气")
 			if err != nil {
 				return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
 			}
@@ -46,11 +46,11 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 			return nil
 		}
 		if Intention == "和对方道歉" {
-			err := service.SendMsg(c, config.Config.TargetId, "没事，我没生气")
+			err := service.SendMsg(c, config.GetConfig().TargetId, "没事，我没生气")
 			if err != nil {
 				return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
 			}
-			err = service.SendMsg(c, config.Config.TargetId, "真的")
+			err = service.SendMsg(c, config.GetConfig().TargetId, "真的")
 			if err != nil {
 				return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
 			}
@@ -70,7 +70,7 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 				return err
 			}
 			if Emotion == "敷衍" {
-				err := service.SendMsg(c, config.Config.TargetId, "敷衍")
+				err := service.SendMsg(c, config.GetConfig().TargetId, "敷衍")
 				if err != nil {
 					return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
 				}
@@ -78,18 +78,18 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 				return nil
 			}
 			if Intention == "鼓励对方" {
-				err := service.SendMsg(c, config.Config.TargetId, "嘿嘿")
+				err := service.SendMsg(c, config.GetConfig().TargetId, "嘿嘿")
 				if err != nil {
 					return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
 				}
-				err = service.SendMsg(c, config.Config.TargetId, "谢谢")
+				err = service.SendMsg(c, config.GetConfig().TargetId, "谢谢")
 				if err != nil {
 					return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
 				}
 				global.Encourageflag = true
 				return nil
 			} else {
-				err := service.SendMsg(c, config.Config.TargetId, "快鼓励我！！")
+				err := service.SendMsg(c, config.GetConfig().TargetId, "快鼓励我！！")
 				if err != nil {
 					return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
 				}
@@ -111,7 +111,7 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 				return err
 			}
 			if Emotion == "敷衍" {
-				err := service.SendMsg(c, config.Config.TargetId, "敷衍")
+				err := service.SendMsg(c, config.GetConfig().TargetId, "敷衍")
 				if err != nil {
 					return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
 				}
@@ -119,18 +119,18 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 				return nil
 			}
 			if Intention == "安慰对方" {
-				err := service.SendMsg(c, config.Config.TargetId, "嘿嘿")
+				err := service.SendMsg(c, config.GetConfig().TargetId, "嘿嘿")
 				if err != nil {
 					return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
 				}
-				err = service.SendMsg(c, config.Config.TargetId, "谢谢")
+				err = service.SendMsg(c, config.GetConfig().TargetId, "谢谢")
 				if err != nil {
 					return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
 				}
 				global.Comfortflag = true
 				return nil
 			} else {
-				err := service.SendMsg(c, config.Config.TargetId, "sad")
+				err := service.SendMsg(c, config.GetConfig().TargetId, "sad")
 				if err != nil {
 					return fmt.Errorf("SendMsg error in ResponseUserMsg: %v", err)
 				}
@@ -209,7 +209,7 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 		return nil
 	}
 
-	err = service.SendMsg(c, config.Config.TargetId, sendmsg)
+	err = service.SendMsg(c, config.GetConfig().TargetId, sendmsg)
 	if err != nil {
 		return err
 	}
@@ -236,7 +236,7 @@ func JudgeIntention(c *websocket.Conn, resptext string) (result string, err erro
 
 func ChatwithAi(c *websocket.Conn, msg string) (err error) {
 	if msg == "不聊了" {
-		err := service.SendMsg(c, config.Config.TargetId, "好吧")
+		err := service.SendMsg(c, config.GetConfig().TargetId, "好吧")
 		if err != nil {
 			return fmt.Errorf("SendMsg error in ChatwithAi: %v", err)
 		}
@@ -251,9 +251,11 @@ func ChatwithAi(c *websocket.Conn, msg string) (err error) {
 	if err != nil {
 		return err
 	}
-	err = service.SendMsg(c, config.Config.TargetId, result)
-	if err != nil {
-		return err
+	for _, res := range result {
+		err := service.SendMsg(c, config.GetConfig().TargetId, res)
+		if err != nil {
+			return fmt.Errorf("SendMsg error in ChatwithAi: %v", err)
+		}
 	}
 	global.Conversation = NewConversation
 	return nil

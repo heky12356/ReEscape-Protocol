@@ -7,6 +7,8 @@ import (
 	"os"
 	"time"
 
+	"project-yume/internal/config"
+
 	openai "github.com/sashabaranov/go-openai"
 )
 
@@ -26,7 +28,7 @@ func Queryai(prompt string, msg string) (string, error) {
 	resp, err := client.CreateChatCompletion(
 		context.Background(),
 		openai.ChatCompletionRequest{
-			Model: "deepseek-chat",
+			Model: config.GetConfig().AiModel,
 			Messages: []openai.ChatCompletionMessage{
 				{Role: "system", Content: prompt},
 				{Role: "user", Content: msg},
@@ -49,12 +51,12 @@ func Queryai(prompt string, msg string) (string, error) {
 	return content, nil
 }
 
-func QueryaiWithChain(Conversation []openai.ChatCompletionMessage, filepath string) (NewConversation []openai.ChatCompletionMessage, result string, err error) {
+func QueryaiWithChain(Conversation []openai.ChatCompletionMessage, filepath string) (NewConversation []openai.ChatCompletionMessage, result []string, err error) {
 	// filepath := "../../public/aichatlog/log_" + time.Now().Format("06-01-02") + ".txt"
 	file, err := os.OpenFile(filepath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		log.Printf("Error opening file: %v\n", err)
-		return nil, "", err
+		return nil, nil, err
 	}
 	defer file.Close()
 
@@ -65,24 +67,28 @@ func QueryaiWithChain(Conversation []openai.ChatCompletionMessage, filepath stri
 	resp, err := client.CreateChatCompletion(
 		context.Background(),
 		openai.ChatCompletionRequest{
-			Model:       "deepseek-chat",
+			Model:       config.GetConfig().AiModel,
 			Messages:    Conversation,
 			Stream:      false,
 			MaxTokens:   2048,
 			Temperature: 1.5,
 			TopP:        1,
+			N:           1,
 		},
 	)
 	if err != nil {
-		return nil, "", fmt.Errorf("error in QueryaiWithChain : ChatCompletion error: %v", err)
+		return nil, nil, fmt.Errorf("error in QueryaiWithChain : ChatCompletion error: %v", err)
 	}
 
-	content := resp.Choices[0].Message.Content
-	// fmt.Print(content)
-	_, err = file.WriteString(content)
-	if err != nil {
-		return nil, "", fmt.Errorf("error in QueryaiWithChain : WriteString error: %v", err)
+	for _, chs := range resp.Choices {
+		content := chs.Message.Content
+		result = append(result, content)
+		_, err = file.WriteString(content)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error in QueryaiWithChain : WriteString error: %v", err)
+		}
+		Conversation = append(Conversation, chs.Message)
 	}
-	Conversation = append(Conversation, resp.Choices[0].Message)
-	return Conversation, content, nil
+	// fmt.Print(content)
+	return Conversation, result, nil
 }

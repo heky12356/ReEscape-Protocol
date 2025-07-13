@@ -9,7 +9,7 @@ import (
 var client *openai.Client
 
 func init() {
-	aiconfig := openai.DefaultConfig(config.Config.AiKEY)
-	aiconfig.BaseURL = config.Config.AiBaseUrl
+	aiconfig := openai.DefaultConfig(config.GetConfig().AiKEY)
+	aiconfig.BaseURL = config.GetConfig().AiBaseUrl
 	client = openai.NewClientWithConfig(aiconfig)
 }

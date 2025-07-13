@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	c, err := connect.Init(config.Config.Hostadd)
+	c, err := connect.Init(config.GetConfig().Hostadd)
 	if err != nil {
 		panic(err)
 	}
@@ -69,7 +69,7 @@ func main() {
 	go func(ch chan model.Msg) {
 		for {
 			for msg := range ch {
-				if msg.User_id == config.Config.TargetId && msg.Type == 1 {
+				if msg.User_id == config.GetConfig().TargetId && msg.Type == 1 {
 					if msg.Message == "exit();" {
 						cancel()
 					}

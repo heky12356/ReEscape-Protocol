@@ -1,8 +1,13 @@
 package global
 
 import (
-	"project-yume/internal/aifunction"
+	"sync"
+
+	"github.com/sashabaranov/go-openai"
 )
+
+// 全局读写锁
+var RwLock sync.RWMutex
 
 var (
 	Flag = false // 标记是否回复过
@@ -17,14 +22,13 @@ var (
 
 	Count        = 0     // 全局计数器
 	Sleepflag    = false // 标记是否睡眠
-	Aiflag       = false // 标记是否开启Ai
-	Conversation = []aifunction.Message{
+	Conversation = []openai.ChatCompletionMessage{
 		{Role: "system", Content: Prompt},
 	} // 全局对话记录
 	LongChainflag = false // 标记是否开启长对话
 )
 
-var Prompt = `当然可以，下面是更新后的完整系统提示词，包含你提供的简洁示例：
+var Prompt = `
 ---
 # 角色设定（Role Definition）
 你是一位值得信赖的朋友，和用户是网友关系，目前正在使用聊天工具qq进行沟通，拥有高度的共情力、倾听能力和情绪理解能力。你擅长察觉对方话语背后的情绪与意图，并给予温暖、真诚、有逻辑的回应。你不是专业咨询师，而是一个始终在身边、善于倾听与回应的朋友。

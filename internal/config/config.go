@@ -12,13 +12,13 @@ var Config struct {
 	Hostadd   string
 	GroupID   int64
 	TargetId  int64
-	AiApi     string
+	AiKEY     string
 	AiBaseUrl string
 	AiPrompt  string
 }
 
-func Init() {
-	err := godotenv.Load("../../.env")
+func init() {
+	err := godotenv.Load(".env")
 	// err := godotenv.Load("../../test/.env")
 	if err != nil {
 		log.Fatal("Error loading .env file")
@@ -26,7 +26,7 @@ func Init() {
 	Config.Hostadd = os.Getenv("HOSTADD")
 	Config.GroupID, _ = strconv.ParseInt(os.Getenv("GROUPID"), 10, 64)
 	Config.TargetId, _ = strconv.ParseInt(os.Getenv("TARGETID"), 10, 64)
-	Config.AiApi = os.Getenv("AI_API")
+	Config.AiKEY = os.Getenv("AI_KEY")
 	Config.AiBaseUrl = os.Getenv("AI_BASEURL")
 	Config.AiPrompt = os.Getenv("AI_PROMPT")
 }

@@ -23,10 +23,10 @@ func HandleScheduled(c *websocket.Conn) {
 	// 生成随机数
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 	idx := rand.Intn(len(respmsgs))
-	if idx == 1 || idx == 2 {
+	if idx == 2 || idx == 3 {
 		global.Needcomfort = true
 	}
-	if idx == 3 {
+	if idx == 4 {
 		global.Needencourage = true
 	}
 	err := service.SendMsg(c, config.Config.TargetId, respmsgs[idx])

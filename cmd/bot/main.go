@@ -18,7 +18,6 @@ import (
 )
 
 func main() {
-	config.Init()
 	c, err := connect.Init(config.Config.Hostadd)
 	if err != nil {
 		panic(err)

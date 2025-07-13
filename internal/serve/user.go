@@ -11,9 +11,12 @@ import (
 	"project-yume/internal/service"
 
 	"github.com/gorilla/websocket"
+	"github.com/sashabaranov/go-openai"
 )
 
 func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
+	defer global.RwLock.Unlock()
+	global.RwLock.Lock()
 	if global.LongChainflag {
 		err := ChatwithAi(c, resptext)
 		if err != nil {
@@ -155,7 +158,7 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 		sendmsg = "是嘛？嘿嘿"
 	case "能陪我聊聊吗":
 		sendmsg = "好"
-		global.Conversation = append(global.Conversation, aifunction.Message{Role: "user", Content: "能陪我聊聊吗"}, aifunction.Message{Role: "assistant", Content: "好"})
+		global.Conversation = append(global.Conversation, openai.ChatCompletionMessage{Role: "user", Content: "能陪我聊聊吗"}, openai.ChatCompletionMessage{Role: "assistant", Content: "好"})
 		global.LongChainflag = true
 	default:
 		sendmsg = "?"
@@ -179,12 +182,12 @@ func ResponseUserMsg(c *websocket.Conn, resptext string) (err error) {
 			sendmsg = "那很好了。"
 		case "生气":
 			sendmsg = "我做错什么了？"
-		case "中性":
-			sendmsg = "在忙"
+		// case "中性":
+		// 	sendmsg = "在忙"
 		case "哲学":
 			sendmsg = "乐"
-		case "难过":
-			sendmsg, _ = Generate("sad")
+		// case "难过":
+		// 	sendmsg, _ = Generate("sad")
 		default:
 			sendmsg = "?"
 			tmpflag = true
@@ -217,7 +220,7 @@ func JudgeEmotion(c *websocket.Conn, resptext string) (result string, err error)
 	prompt := "请帮我分析下这段话的情感，并在下面六个选项中选择：开心，生气，中性，哲学，敷衍，难过， 并只回复选项，例如：\"user: 哈哈哈\" resp: \"开心\", 不需要回答多余的内容，也不需要添加分号"
 	resp, err := aifunction.Queryai(prompt, resptext)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("Queryai error in JudgeEmotion: %v", err)
 	}
 	return resp, nil
 }
@@ -226,7 +229,7 @@ func JudgeIntention(c *websocket.Conn, resptext string) (result string, err erro
 	prompt := "请帮我分析下这段话的意图，并在下面六个选项中选择：想和对方聊天，想被对方鼓励，想和对方倾诉，安慰对方，鼓励对方，和对方道歉 并只回复选项，例如：\"user: 能陪我会儿吗\" resp: \"想和对方倾诉\", 不需要回答多余的内容，也不需要添加分号"
 	resp, err := aifunction.Queryai(prompt, resptext)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("Queryai error in QueryaiWithChain: %v", err)
 	}
 	return resp, nil
 }
@@ -241,9 +244,9 @@ func ChatwithAi(c *websocket.Conn, msg string) (err error) {
 		log.Print("长对话ai聊天结束")
 		return nil
 	}
-	filepath := "../../public/aichatlog/longchain/log_" + time.Now().Format("06-01-02") + ".txt"
-	Conversation := append(global.Conversation, aifunction.Message{Role: "user", Content: msg})
-	log.Print(Conversation)
+	filepath := "./public/aichatlog/longchain/log_" + time.Now().Format("06-01-02") + ".txt"
+	Conversation := append(global.Conversation, openai.ChatCompletionMessage{Role: "user", Content: msg})
+	// log.Print(Conversation)
 	NewConversation, result, err := aifunction.QueryaiWithChain(Conversation, filepath)
 	if err != nil {
 		return err

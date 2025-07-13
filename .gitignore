@@ -4,4 +4,4 @@ tip.md
 /public/aichatlog
 plan.drawio
 .$plan.drawio.bkp
-.env
+debug.env

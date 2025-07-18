@@ -2,12 +2,15 @@ package handler
 
 import (
 	"fmt"
+	"time"
+	
 	"project-yume/internal/aifunction"
 	"project-yume/internal/config"
 	"project-yume/internal/service"
 	"project-yume/internal/state"
 
 	"github.com/gorilla/websocket"
+	"github.com/sashabaranov/go-openai"
 )
 
 // MessageHandler 消息处理器接口
@@ -106,8 +109,120 @@ func (h *EmotionHandler) analyzeIntention(message string) (string, error) {
 }
 
 func (h *EmotionHandler) startAIChat(c *websocket.Conn, message string, sm *state.StateManager) error {
-	// 实现AI聊天逻辑
-	return fmt.Errorf("AI chat not implemented yet")
+	// 设置长对话标志
+	sm.SetFlag(state.FlagLongChain, true)
+	
+	// 获取当前对话历史
+	conversation := sm.GetConversation()
+	
+	// 如果是新对话，添加系统提示
+	if len(conversation) == 0 {
+		systemPrompt := config.GetConfig().AiPrompt
+		if systemPrompt == "" {
+			systemPrompt = "你是一个温暖、友善的聊天伙伴。请用自然、亲切的语气与用户对话，回复要简短而有趣。"
+		}
+		conversation = append(conversation, openai.ChatCompletionMessage{
+			Role:    "system",
+			Content: systemPrompt,
+		})
+	}
+	
+	// 添加用户消息到对话历史
+	conversation = append(conversation, openai.ChatCompletionMessage{
+		Role:    "user",
+		Content: message,
+	})
+	
+	// 生成日志文件路径
+	filepath := "./public/aichatlog/longchain/log_" + time.Now().Format("06-01-02") + ".txt"
+	
+	// 调用AI进行对话
+	newConversation, responses, err := aifunction.QueryaiWithChain(conversation, filepath)
+	if err != nil {
+		return fmt.Errorf("AI聊天失败: %v", err)
+	}
+	
+	// 发送AI回复
+	for _, response := range responses {
+		err := service.SendMsg(c, config.GetConfig().TargetId, response)
+		if err != nil {
+			return fmt.Errorf("发送AI回复失败: %v", err)
+		}
+	}
+	
+	// 更新对话历史
+	sm.SetConversation(newConversation)
+	
+	return nil
+}
+
+// LongChatHandler AI长对话处理器
+type LongChatHandler struct{}
+
+func NewLongChatHandler() *LongChatHandler {
+	return &LongChatHandler{}
+}
+
+func (h *LongChatHandler) CanHandle(message string, sm *state.StateManager) bool {
+	return sm.GetFlag(state.FlagLongChain)
+}
+
+func (h *LongChatHandler) Handle(c *websocket.Conn, message string, sm *state.StateManager) error {
+	// 检查是否要结束对话
+	if message == "不聊了" || message == "结束对话" || message == "再见" {
+		return h.endAIChat(c, sm)
+	}
+	
+	// 继续AI对话
+	return h.continueAIChat(c, message, sm)
+}
+
+func (h *LongChatHandler) continueAIChat(c *websocket.Conn, message string, sm *state.StateManager) error {
+	// 获取当前对话历史
+	conversation := sm.GetConversation()
+	
+	// 添加用户消息
+	conversation = append(conversation, openai.ChatCompletionMessage{
+		Role:    "user",
+		Content: message,
+	})
+	
+	// 生成日志文件路径
+	filepath := "./public/aichatlog/longchain/log_" + time.Now().Format("06-01-02") + ".txt"
+	
+	// 调用AI进行对话
+	newConversation, responses, err := aifunction.QueryaiWithChain(conversation, filepath)
+	if err != nil {
+		return fmt.Errorf("AI对话失败: %v", err)
+	}
+	
+	// 发送AI回复
+	for _, response := range responses {
+		err := service.SendMsg(c, config.GetConfig().TargetId, response)
+		if err != nil {
+			return fmt.Errorf("发送AI回复失败: %v", err)
+		}
+	}
+	
+	// 更新对话历史
+	sm.SetConversation(newConversation)
+	
+	return nil
+}
+
+func (h *LongChatHandler) endAIChat(c *websocket.Conn, sm *state.StateManager) error {
+	// 发送结束回复
+	err := service.SendMsg(c, config.GetConfig().TargetId, "好吧，有什么需要随时找我聊~")
+	if err != nil {
+		return fmt.Errorf("发送结束回复失败: %v", err)
+	}
+	
+	// 清理状态
+	sm.SetFlag(state.FlagLongChain, false)
+	sm.SetState(state.StateIdle)
+	sm.ClearConversation()
+	
+	return nil
 }
 
 // MessageProcessor 消息处理器管理器
@@ -118,6 +233,7 @@ type MessageProcessor struct {
 func NewMessageProcessor() *MessageProcessor {
 	return &MessageProcessor{
 		handlers: []MessageHandler{
+			NewLongChatHandler(), // 长对话处理器优先级最高
 			NewPresetHandler(),
 			NewEmotionHandler(),
 		},

@@ -186,17 +186,24 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 
 			log.Printf("处理用户消息: %s", msg.Message)
 			log.Printf("当前状态: %v", state.GetManager().GetState())
-			// 使用新的消息处理器
-			err := processor.Process(c, msg.Message)
+
+			// 使用新的消息处理器获取详细结果
+			result, err := processor.Process(c, msg.Message)
 			if err != nil {
 				log.Printf("消息处理失败: %v", err)
 				continue
 			}
 
 			// 记录到情感记忆（如果启用）
-			if cfg.EnableEmotionalMemory {
-				// 这里可以添加情感分析和记录逻辑
-				memoryManager.RecordInteraction(msg.User_id, msg.Message, "", "", "")
+			if cfg.EnableEmotionalMemory && result.Handled {
+				log.Printf("记录情感记忆 - 情感: %s, 意图: %s", result.Emotion, result.Intention)
+				memoryManager.RecordInteraction(
+					msg.User_id,
+					msg.Message,
+					result.Reply,
+					result.Emotion,
+					result.Intention,
+				)
 			}
 
 			// 更新状态

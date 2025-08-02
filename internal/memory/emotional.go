@@ -2,18 +2,25 @@ package memory
 
 import (
 	"encoding/json"
+	"log"
 	"os"
-	"time"
 	"sync"
+	"time"
 )
 
 // EmotionalMemory 情感记忆
 type EmotionalMemory struct {
-	UserID       int64                  `json:"user_id"`
-	Interactions []Interaction          `json:"interactions"`
-	Preferences  map[string]interface{} `json:"preferences"`
-	LastSeen     time.Time             `json:"last_seen"`
+	UserID       int64         `json:"user_id"`
+	Interactions []Interaction `json:"interactions"`
+	Preferences  Preferences   `json:"preferences"`
+	LastSeen     time.Time     `json:"last_seen"`
 	mu           sync.RWMutex
+}
+
+// Preferences 偏好
+type Preferences struct {
+	EmotionCount   map[string]int `json:"emotion_count"`
+	IntentionCount map[string]int `json:"intention_count"`
 }
 
 // Interaction 交互记录
@@ -51,20 +58,23 @@ func GetManager() *MemoryManager {
 func (mm *MemoryManager) RecordInteraction(userID int64, userMsg, botReply, emotion, intention string) {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
-	
+
 	if mm.memories[userID] == nil {
 		mm.memories[userID] = &EmotionalMemory{
 			UserID:       userID,
 			Interactions: make([]Interaction, 0),
-			Preferences:  make(map[string]interface{}),
-			LastSeen:     time.Now(),
+			Preferences: Preferences{
+				EmotionCount:   make(map[string]int),
+				IntentionCount: make(map[string]int),
+			},
+			LastSeen: time.Now(),
 		}
 	}
-	
+
 	memory := mm.memories[userID]
 	memory.mu.Lock()
 	defer memory.mu.Unlock()
-	
+
 	interaction := Interaction{
 		Timestamp: time.Now(),
 		UserMsg:   userMsg,
@@ -73,18 +83,18 @@ func (mm *MemoryManager) RecordInteraction(userID int64, userMsg, botReply, emot
 		Intention: intention,
 		Context:   mm.generateContext(memory),
 	}
-	
+
 	memory.Interactions = append(memory.Interactions, interaction)
 	memory.LastSeen = time.Now()
-	
+
 	// 保持最近100条记录
 	if len(memory.Interactions) > 100 {
 		memory.Interactions = memory.Interactions[len(memory.Interactions)-100:]
 	}
-	
+
 	// 更新偏好
 	mm.updatePreferences(memory, emotion, intention)
-	
+
 	// 异步保存到文件
 	go mm.saveToFile()
 }
@@ -93,27 +103,27 @@ func (mm *MemoryManager) RecordInteraction(userID int64, userMsg, botReply, emot
 func (mm *MemoryManager) GetRecentEmotions(userID int64, count int) []string {
 	mm.mu.RLock()
 	defer mm.mu.RUnlock()
-	
+
 	memory := mm.memories[userID]
 	if memory == nil {
 		return []string{}
 	}
-	
+
 	memory.mu.RLock()
 	defer memory.mu.RUnlock()
-	
+
 	emotions := make([]string, 0)
 	start := len(memory.Interactions) - count
 	if start < 0 {
 		start = 0
 	}
-	
+
 	for i := start; i < len(memory.Interactions); i++ {
 		if memory.Interactions[i].Emotion != "" {
 			emotions = append(emotions, memory.Interactions[i].Emotion)
 		}
 	}
-	
+
 	return emotions
 }
 
@@ -121,25 +131,25 @@ func (mm *MemoryManager) GetRecentEmotions(userID int64, count int) []string {
 func (mm *MemoryManager) GetConversationPattern(userID int64) string {
 	mm.mu.RLock()
 	defer mm.mu.RUnlock()
-	
+
 	memory := mm.memories[userID]
 	if memory == nil {
 		return "新用户"
 	}
-	
+
 	memory.mu.RLock()
 	defer memory.mu.RUnlock()
-	
+
 	// 分析最近的交互模式
 	recentCount := 10
 	if len(memory.Interactions) < recentCount {
 		recentCount = len(memory.Interactions)
 	}
-	
+
 	if recentCount == 0 {
 		return "新用户"
 	}
-	
+
 	// 统计情感分布
 	emotionCount := make(map[string]int)
 	for i := len(memory.Interactions) - recentCount; i < len(memory.Interactions); i++ {
@@ -148,7 +158,7 @@ func (mm *MemoryManager) GetConversationPattern(userID int64) string {
 			emotionCount[emotion]++
 		}
 	}
-	
+
 	// 判断主要情感
 	maxCount := 0
 	mainEmotion := ""
@@ -158,7 +168,7 @@ func (mm *MemoryManager) GetConversationPattern(userID int64) string {
 			mainEmotion = emotion
 		}
 	}
-	
+
 	// 根据主要情感返回模式
 	switch mainEmotion {
 	case "难过":
@@ -176,7 +186,7 @@ func (mm *MemoryManager) GetConversationPattern(userID int64) string {
 func (mm *MemoryManager) SuggestResponse(userID int64, currentMsg, emotion string) string {
 	pattern := mm.GetConversationPattern(userID)
 	recentEmotions := mm.GetRecentEmotions(userID, 5)
-	
+
 	// 基于历史情感和当前情感建议回复
 	switch pattern {
 	case "需要关怀":
@@ -184,16 +194,16 @@ func (mm *MemoryManager) SuggestResponse(userID int64, currentMsg, emotion strin
 			return "我一直都在这里陪着你"
 		}
 		return "看起来你心情好一些了"
-		
+
 	case "积极活跃":
 		if emotion == "开心" {
 			return "哈哈，你的好心情也感染到我了"
 		}
 		return "怎么了，遇到什么事了吗"
-		
+
 	case "情绪波动":
 		return "我们慢慢聊，不着急"
-		
+
 	default:
 		// 检查是否有情感变化趋势
 		if len(recentEmotions) >= 2 {
@@ -209,40 +219,39 @@ func (mm *MemoryManager) generateContext(memory *EmotionalMemory) string {
 	if len(memory.Interactions) == 0 {
 		return "初次对话"
 	}
-	
+
 	recent := memory.Interactions[len(memory.Interactions)-1]
 	return "上次聊到: " + recent.UserMsg[:min(20, len(recent.UserMsg))]
 }
 
 func (mm *MemoryManager) updatePreferences(memory *EmotionalMemory, emotion, intention string) {
 	// 更新情感偏好统计
-	if emotionCount, ok := memory.Preferences["emotion_count"].(map[string]int); ok {
-		emotionCount[emotion]++
-	} else {
-		memory.Preferences["emotion_count"] = map[string]int{emotion: 1}
-	}
-	
+	memory.Preferences.EmotionCount[emotion]++
 	// 更新意图偏好统计
-	if intentionCount, ok := memory.Preferences["intention_count"].(map[string]int); ok {
-		intentionCount[intention]++
-	} else {
-		memory.Preferences["intention_count"] = map[string]int{intention: 1}
-	}
+	memory.Preferences.IntentionCount[intention]++
 }
 
 func (mm *MemoryManager) saveToFile() {
 	mm.mu.RLock()
 	defer mm.mu.RUnlock()
-	
+
 	// 确保目录存在
-	os.MkdirAll("./public/memory", 0755)
-	
-	data, err := json.MarshalIndent(mm.memories, "", "  ")
+	err := os.MkdirAll("./public/memory", 0o755)
 	if err != nil {
+		log.Printf("创建目录失败: %v", err)
 		return
 	}
-	
-	os.WriteFile(mm.filePath, data, 0644)
+
+	data, err := json.MarshalIndent(mm.memories, "", "  ")
+	if err != nil {
+		log.Printf("序列化失败: %v", err)
+		return
+	}
+
+	err = os.WriteFile(mm.filePath, data, 0o644)
+	if err != nil {
+		log.Printf("写入文件失败: %v", err)
+	}
 }
 
 func (mm *MemoryManager) loadFromFile() {
@@ -250,7 +259,7 @@ func (mm *MemoryManager) loadFromFile() {
 	if err != nil {
 		return
 	}
-	
+
 	json.Unmarshal(data, &mm.memories)
 }
 

@@ -35,9 +35,12 @@ func main() {
 	log.Printf("WebSocket连接成功: %s", cfg.Hostadd)
 
 	// 初始化组件
+	// 初始化消息处理器
 	messageProcessor := handler.NewMessageProcessor()
-	var naturalScheduler *scheduler.NaturalScheduler
 
+	// 定义自然定时器
+	var naturalScheduler *scheduler.NaturalScheduler
+	// 通过config查看是否启用自然定时器
 	if cfg.EnableNaturalScheduler {
 		naturalScheduler = scheduler.NewNaturalScheduler()
 		log.Println("自然定时器已启用")
@@ -182,7 +185,7 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 			}
 
 			log.Printf("处理用户消息: %s", msg.Message)
-
+			log.Printf("当前状态: %v", state.GetManager().GetState())
 			// 使用新的消息处理器
 			err := processor.Process(c, msg.Message)
 			if err != nil {
@@ -200,6 +203,7 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 			state.GetManager().UpdateLastReply()
 
 			log.Println("消息处理完成")
+			log.Printf("当前状态: %v", state.GetManager().GetState())
 		}
 	}
 }
@@ -207,7 +211,7 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 // startScheduler 启动定时任务协程
 func startScheduler(c *websocket.Conn, scheduler *scheduler.NaturalScheduler, ctx context.Context) {
 	// 初始延迟
-	time.Sleep(30 * time.Second)
+	time.Sleep(time.Second)
 
 	for {
 		select {
@@ -231,7 +235,7 @@ func startScheduler(c *websocket.Conn, scheduler *scheduler.NaturalScheduler, ct
 				if err != nil {
 					log.Printf("定时消息发送失败: %v", err)
 				} else {
-					log.Println("定时消息发送成功")
+					log.Println("定时器触发成功")
 				}
 			}
 		}

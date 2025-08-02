@@ -10,6 +10,7 @@ import (
 )
 
 type Config struct {
+	// 基础配置
 	Hostadd   string
 	GroupID   int64
 	TargetId  int64
@@ -18,13 +19,44 @@ type Config struct {
 	AiPrompt  string
 	AiModel   string
 	
-	// 新增配置
+	// 调度器配置
 	EnableNaturalScheduler bool     // 启用自然定时器
 	EnableEmotionalMemory  bool     // 启用情感记忆
 	ActiveHours           []int    // 活跃时间段
 	SleepHours            []int    // 休息时间段
 	BaseInterval          int      // 基础发送间隔(分钟)
 	RandomFactor          float64  // 随机因子
+	
+	// AI配置增强
+	AiTemperature         float64  // AI温度参数
+	AiMaxTokens          int      // 最大token数
+	AiTimeout            int      // AI请求超时(秒)
+	AiRetryCount         int      // AI请求重试次数
+	AiRateLimit          int      // AI请求速率限制(每分钟)
+	
+	// 状态管理配置
+	StateIdleTimeout      int      // 空闲超时(分钟)
+	StateComfortThreshold int      // 安慰阈值
+	StateEncourageThreshold int    // 鼓励阈值
+	StateLongChatMinLength int     // 长对话最小长度
+	StateMaxConversationLen int    // 最大对话长度
+	
+	// 日志配置
+	LogLevel             string   // 日志级别
+	LogToFile            bool     // 是否记录到文件
+	LogMaxFiles          int      // 最大日志文件数
+	LogMaxSize           int      // 最大日志文件大小(MB)
+	
+	// 存储配置
+	DataDir              string   // 数据目录
+	LogDir               string   // 日志目录
+	BackupDir            string   // 备份目录
+	
+	// 功能开关
+	EnableDebugMode      bool     // 调试模式
+	EnableHealthCheck    bool     // 健康检查
+	EnableMetrics        bool     // 指标收集
+	EnableAutoBackup     bool     // 自动备份
 }
 
 var config = &Config{}
@@ -37,7 +69,7 @@ func init() {
 		log.Fatal("Error loading .env file")
 	}
 	
-	// 原有配置
+	// 基础配置
 	config.Hostadd = os.Getenv("HOSTADD")
 	config.GroupID, _ = strconv.ParseInt(os.Getenv("GROUPID"), 10, 64)
 	config.TargetId, _ = strconv.ParseInt(os.Getenv("TARGETID"), 10, 64)
@@ -46,17 +78,56 @@ func init() {
 	config.AiPrompt = os.Getenv("AI_PROMPT")
 	config.AiModel = os.Getenv("AI_MODEL")
 	
-	// 新增配置
+	// 调度器配置
 	config.EnableNaturalScheduler = getBoolEnv("ENABLE_NATURAL_SCHEDULER", true)
 	config.EnableEmotionalMemory = getBoolEnv("ENABLE_EMOTIONAL_MEMORY", true)
 	config.ActiveHours = getIntArrayEnv("ACTIVE_HOURS", []int{9, 10, 11, 14, 15, 16, 19, 20, 21})
 	config.SleepHours = getIntArrayEnv("SLEEP_HOURS", []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 22, 23})
 	config.BaseInterval = getIntEnv("BASE_INTERVAL", 45)
 	config.RandomFactor = getFloatEnv("RANDOM_FACTOR", 0.5)
+	
+	// AI配置增强
+	config.AiTemperature = getFloatEnv("AI_TEMPERATURE", 0.7)
+	config.AiMaxTokens = getIntEnv("AI_MAX_TOKENS", 2000)
+	config.AiTimeout = getIntEnv("AI_TIMEOUT", 30)
+	config.AiRetryCount = getIntEnv("AI_RETRY_COUNT", 3)
+	config.AiRateLimit = getIntEnv("AI_RATE_LIMIT", 20)
+	
+	// 状态管理配置
+	config.StateIdleTimeout = getIntEnv("STATE_IDLE_TIMEOUT", 30)
+	config.StateComfortThreshold = getIntEnv("STATE_COMFORT_THRESHOLD", 5)
+	config.StateEncourageThreshold = getIntEnv("STATE_ENCOURAGE_THRESHOLD", 3)
+	config.StateLongChatMinLength = getIntEnv("STATE_LONG_CHAT_MIN_LENGTH", 10)
+	config.StateMaxConversationLen = getIntEnv("STATE_MAX_CONVERSATION_LEN", 50)
+	
+	// 日志配置
+	config.LogLevel = getStringEnv("LOG_LEVEL", "INFO")
+	config.LogToFile = getBoolEnv("LOG_TO_FILE", true)
+	config.LogMaxFiles = getIntEnv("LOG_MAX_FILES", 7)
+	config.LogMaxSize = getIntEnv("LOG_MAX_SIZE", 10)
+	
+	// 存储配置
+	config.DataDir = getStringEnv("DATA_DIR", "./data")
+	config.LogDir = getStringEnv("LOG_DIR", "./logs")
+	config.BackupDir = getStringEnv("BACKUP_DIR", "./backup")
+	
+	// 功能开关
+	config.EnableDebugMode = getBoolEnv("ENABLE_DEBUG_MODE", false)
+	config.EnableHealthCheck = getBoolEnv("ENABLE_HEALTH_CHECK", true)
+	config.EnableMetrics = getBoolEnv("ENABLE_METRICS", false)
+	config.EnableAutoBackup = getBoolEnv("ENABLE_AUTO_BACKUP", true)
 }
 
 func GetConfig() *Config {
 	return config
+}
+
+func getStringEnv(key string, defaultValue string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	return value
 }
 
 func getBoolEnv(key string, defaultValue bool) bool {

@@ -11,23 +11,17 @@ import (
 type BotState int
 
 const (
+	// 空闲状态
 	StateIdle BotState = iota
 	StateNeedComfort
+	// 需求情感状态
 	StateNeedEncourage
+	// 长对话状态
 	StateLongChat
+	// 随机状态
 	StatePerfunctory
-)
-
-// 状态标志常量
-const (
-	FlagLongChain     = "long_chain"
-	FlagNeedComfort   = "need_comfort"
-	FlagNeedEncourage = "need_encourage"
-	FlagComfort       = "comfort"
-	FlagEncourage     = "encourage"
-	FlagPerfunctory   = "perfunctory"
-	FlagBusy          = "busy"
-	FlagSleep         = "sleep"
+	// 忙碌状态
+	StateBusy
 )
 
 // StateManager 状态管理器
@@ -42,6 +36,7 @@ type StateManager struct {
 
 var manager *StateManager
 
+// 初始化
 func init() {
 	manager = &StateManager{
 		currentState: StateIdle,
@@ -51,32 +46,23 @@ func init() {
 	}
 }
 
+// GetManager 获取状态管理器实例
 func GetManager() *StateManager {
 	return manager
 }
 
+// SetState 设置当前状态
 func (sm *StateManager) SetState(state BotState) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.currentState = state
 }
 
+// GetState 获取当前状态
 func (sm *StateManager) GetState() BotState {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.currentState
-}
-
-func (sm *StateManager) SetFlag(key string, value bool) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	sm.flags[key] = value
-}
-
-func (sm *StateManager) GetFlag(key string) bool {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.flags[key]
 }
 
 func (sm *StateManager) IncrementCounter(key string) {
@@ -97,6 +83,7 @@ func (sm *StateManager) UpdateLastReply() {
 	sm.lastReply = time.Now()
 }
 
+// GetTimeSinceLastReply 获取上次回复时间距离现在的时长
 func (sm *StateManager) GetTimeSinceLastReply() time.Duration {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -110,6 +97,7 @@ func (sm *StateManager) AddToConversation(msg openai.ChatCompletionMessage) {
 	sm.conversation = append(sm.conversation, msg)
 }
 
+// GetConversation 获取对话历史
 func (sm *StateManager) GetConversation() []openai.ChatCompletionMessage {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -119,12 +107,14 @@ func (sm *StateManager) GetConversation() []openai.ChatCompletionMessage {
 	return result
 }
 
+// SetConversation 设置对话历史
 func (sm *StateManager) SetConversation(conversation []openai.ChatCompletionMessage) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.conversation = conversation
 }
 
+// ClearConversation 清空对话历史
 func (sm *StateManager) ClearConversation() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()

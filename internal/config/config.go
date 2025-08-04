@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 
+	"project-yume/internal/character"
+
 	"github.com/joho/godotenv"
 )
 
@@ -18,6 +20,7 @@ type Config struct {
 	AiBaseUrl string
 	AiPrompt  string
 	AiModel   string
+	Character string
 
 	// 调度器配置
 	EnableNaturalScheduler bool    // 启用自然定时器
@@ -61,6 +64,8 @@ type Config struct {
 
 var config = &Config{}
 
+var cm *character.CharacterManager
+
 func init() {
 	// err := godotenv.Load(".env")
 	err := godotenv.Load("debug.env")
@@ -72,6 +77,7 @@ func init() {
 	// basePrompt
 	var basePrompt string = `
 	【技术指令】
+	0. 注意将无意义的乱码去掉
 	1. 回复时使用 $ 作为分段标记，每段内容应该简短自然
 	2. 每段长度控制在10-20字以内
 	3. 分段应该符合语义完整性
@@ -79,6 +85,8 @@ func init() {
 
 	【回复格式示例】
 	第一段内容$第二段内容$第三段内容
+
+	【角色】
 	`
 
 	// 基础配置
@@ -89,6 +97,7 @@ func init() {
 	config.AiBaseUrl = os.Getenv("AI_BASEURL")
 	config.AiPrompt = basePrompt + os.Getenv("AI_PROMPT")
 	config.AiModel = os.Getenv("AI_MODEL")
+	config.Character = os.Getenv("CHARACTER")
 
 	// 调度器配置
 	config.EnableNaturalScheduler = getBoolEnv("ENABLE_NATURAL_SCHEDULER", true)
@@ -128,6 +137,12 @@ func init() {
 	config.EnableHealthCheck = getBoolEnv("ENABLE_HEALTH_CHECK", true)
 	config.EnableMetrics = getBoolEnv("ENABLE_METRICS", false)
 	config.EnableAutoBackup = getBoolEnv("ENABLE_AUTO_BACKUP", true)
+
+	cm, err := character.NewCharacterManager("./config/character", config.Character)
+	if err != nil {
+		log.Fatalf("Failed to create character manager: %v", err)
+	}
+	config.AiPrompt += cm.GetPrompt()
 }
 
 func GetConfig() *Config {

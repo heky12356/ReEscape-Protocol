@@ -31,11 +31,12 @@ type Config struct {
 	RandomFactor           float64 // 随机因子
 
 	// AI配置增强
-	AiTemperature float64 // AI温度参数
+	AiTemperature float32 // AI温度参数
 	AiMaxTokens   int     // 最大token数
 	AiTimeout     int     // AI请求超时(秒)
 	AiRetryCount  int     // AI请求重试次数
 	AiRateLimit   int     // AI请求速率限制(每分钟)
+	AiTopP        float32 // AI top_p参数
 
 	// 状态管理配置
 	StateIdleTimeout        int // 空闲超时(分钟)
@@ -56,10 +57,11 @@ type Config struct {
 	BackupDir string // 备份目录
 
 	// 功能开关
-	EnableDebugMode   bool // 调试模式
-	EnableHealthCheck bool // 健康检查
-	EnableMetrics     bool // 指标收集
-	EnableAutoBackup  bool // 自动备份
+	EnableDebugMode    bool // 调试模式
+	EnableHealthCheck  bool // 健康检查
+	EnableMetrics      bool // 指标收集
+	EnableAutoBackup   bool // 自动备份
+	EnableOnlyLongChat bool // 仅长对话模式
 }
 
 var config = &Config{}
@@ -67,8 +69,8 @@ var config = &Config{}
 var cm *character.CharacterManager
 
 func init() {
-	// err := godotenv.Load(".env")
-	err := godotenv.Load("debug.env")
+	err := godotenv.Load(".env")
+	// err := godotenv.Load("debug.env")
 	// err := godotenv.Load("../../test/.env")
 	if err != nil {
 		log.Fatal("Error loading .env file")
@@ -108,11 +110,10 @@ func init() {
 	config.RandomFactor = getFloatEnv("RANDOM_FACTOR", 0.5)
 
 	// AI配置增强
-	config.AiTemperature = getFloatEnv("AI_TEMPERATURE", 0.7)
+	config.AiTemperature = float32(getFloatEnv("AI_TEMPERATURE", 1.0))
 	config.AiMaxTokens = getIntEnv("AI_MAX_TOKENS", 2000)
 	config.AiTimeout = getIntEnv("AI_TIMEOUT", 30)
-	config.AiRetryCount = getIntEnv("AI_RETRY_COUNT", 3)
-	config.AiRateLimit = getIntEnv("AI_RATE_LIMIT", 20)
+	config.AiTopP = float32(getFloatEnv("AI_TOP_P", 0.9))
 
 	// 状态管理配置
 	config.StateIdleTimeout = getIntEnv("STATE_IDLE_TIMEOUT", 30)
@@ -137,6 +138,7 @@ func init() {
 	config.EnableHealthCheck = getBoolEnv("ENABLE_HEALTH_CHECK", true)
 	config.EnableMetrics = getBoolEnv("ENABLE_METRICS", false)
 	config.EnableAutoBackup = getBoolEnv("ENABLE_AUTO_BACKUP", true)
+	config.EnableOnlyLongChat = getBoolEnv("ENABLE_ONLY_LONG_CHAT", false)
 
 	cm, err := character.NewCharacterManager("./config/character", config.Character)
 	if err != nil {

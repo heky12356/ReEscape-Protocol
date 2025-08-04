@@ -34,9 +34,9 @@ func Queryai(prompt string, msg string) (string, error) {
 				{Role: "user", Content: msg},
 			},
 			Stream:      false,
-			MaxTokens:   2048,
-			Temperature: 1.5,
-			TopP:        1,
+			MaxTokens:   config.GetConfig().AiMaxTokens,
+			Temperature: config.GetConfig().AiTemperature,
+			TopP:        config.GetConfig().AiTopP,
 		},
 	)
 	if err != nil {
@@ -70,9 +70,9 @@ func QueryaiWithChain(Conversation []openai.ChatCompletionMessage, filepath stri
 			Model:       config.GetConfig().AiModel,
 			Messages:    Conversation,
 			Stream:      false,
-			MaxTokens:   2048,
-			Temperature: 1.5,
-			TopP:        1,
+			MaxTokens:   config.GetConfig().AiMaxTokens,
+			Temperature: config.GetConfig().AiTemperature,
+			TopP:        config.GetConfig().AiTopP,
 			N:           1,
 		},
 	)

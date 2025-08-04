@@ -50,6 +50,11 @@ func main() {
 		log.Println("情感记忆系统已启用")
 	}
 
+	if cfg.EnableOnlyLongChat {
+		log.Println("仅长聊天模式已启用")
+		state.GetManager().SetState(state.StateLongChat)
+	}
+
 	// 监听中断信号
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)

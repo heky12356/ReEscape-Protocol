@@ -323,6 +323,9 @@ func (h *LongChatHandler) CanHandle(message string, sm *state.StateManager) bool
 }
 
 func (h *LongChatHandler) Handle(c *websocket.Conn, message, emotion, intention string, sm *state.StateManager) (string, error) {
+	if config.GetConfig().EnableOnlyLongChat {
+		return h.continueAIChat(c, message, sm)
+	}
 	// 检查是否要结束对话
 	wannaBye, err := h.analyzeWannaBye(message)
 	if err != nil {
@@ -548,6 +551,22 @@ func (mp *MessageProcessor) Process(c *websocket.Conn, message string) (*Process
 	sm := state.GetManager()
 	result := &ProcessResult{
 		Handled: false,
+	}
+
+	if config.GetConfig().EnableOnlyLongChat {
+		emotion, err := analyzeEmotion(message)
+		if err != nil {
+			return result, fmt.Errorf("分析情感失败: %v", err)
+		}
+		result.Emotion = emotion
+		result.Intention = "想和对方聊天"
+		reply, err := mp.handlers[2].Handle(c, message, emotion, result.Intention, sm)
+		if err != nil {
+			return result, err
+		}
+		result.Handled = true
+		result.Reply = reply
+		return result, nil
 	}
 
 	for _, handler := range mp.handlers {

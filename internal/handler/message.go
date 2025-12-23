@@ -15,6 +15,11 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
+type Message struct {
+	Type string `json:"type"`
+	Data string `json:"data"`
+}
+
 // MessageHandler 消息处理器接口
 type MessageHandler interface {
 	CanHandle(message string, sm *state.StateManager) bool
@@ -547,20 +552,20 @@ func NewMessageProcessor() *MessageProcessor {
 }
 
 // Process 处理消息并返回详细结果
-func (mp *MessageProcessor) Process(c *websocket.Conn, message string) (*ProcessResult, error) {
+func (mp *MessageProcessor) Process(c *websocket.Conn, message *Message) (*ProcessResult, error) {
 	sm := state.GetManager()
 	result := &ProcessResult{
 		Handled: false,
 	}
 
 	if config.GetConfig().EnableOnlyLongChat {
-		emotion, err := analyzeEmotion(message)
+		emotion, err := analyzeEmotion(message.Data)
 		if err != nil {
 			return result, fmt.Errorf("分析情感失败: %v", err)
 		}
 		result.Emotion = emotion
 		result.Intention = "想和对方聊天"
-		reply, err := mp.handlers[2].Handle(c, message, emotion, result.Intention, sm)
+		reply, err := mp.handlers[2].Handle(c, message.Data, emotion, result.Intention, sm)
 		if err != nil {
 			return result, err
 		}
@@ -570,19 +575,19 @@ func (mp *MessageProcessor) Process(c *websocket.Conn, message string) (*Process
 	}
 
 	for _, handler := range mp.handlers {
-		if handler.CanHandle(message, sm) {
-			emotion, err := analyzeEmotion(message)
+		if handler.CanHandle(message.Data, sm) {
+			emotion, err := analyzeEmotion(message.Data)
 			if err != nil {
 				return result, fmt.Errorf("分析情感失败: %v", err)
 			}
-			intention, err := analyzeIntention(message)
+			intention, err := analyzeIntention(message.Data)
 			if err != nil {
 				return result, fmt.Errorf("分析意图失败: %v", err)
 			}
 			result.Emotion = emotion
 			result.Intention = intention
 
-			reply, err := handler.Handle(c, message, emotion, intention, sm)
+			reply, err := handler.Handle(c, message.Data, emotion, intention, sm)
 			if err != nil {
 				return result, err
 			}

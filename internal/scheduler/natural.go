@@ -17,7 +17,7 @@ type nowState int
 const (
 	isLongChat nowState = iota
 	isBusy
-	suitTime
+	suitTime = 0 // 合适的时间
 )
 
 // NaturalScheduler 自然定时器

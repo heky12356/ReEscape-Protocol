@@ -14,6 +14,8 @@ import (
 type Config struct {
 	// 基础配置
 	Hostadd   string
+	WsPort    string
+	HttpPort  string
 	GroupID   int64
 	TargetId  int64
 	AiKEY     string
@@ -21,6 +23,7 @@ type Config struct {
 	AiPrompt  string
 	AiModel   string
 	Character string
+	Token     string
 
 	// 调度器配置
 	EnableNaturalScheduler bool    // 启用自然定时器
@@ -69,8 +72,8 @@ var config = &Config{}
 var cm *character.CharacterManager
 
 func init() {
-	err := godotenv.Load(".env")
-	// err := godotenv.Load("debug.env")
+	// err := godotenv.Load(".env")
+	err := godotenv.Load("debug.env")
 	// err := godotenv.Load("../../test/.env")
 	if err != nil {
 		log.Fatal("Error loading .env file")
@@ -84,6 +87,7 @@ func init() {
 	2. 每段长度控制在10-20字以内
 	3. 分段应该符合语义完整性
 	4. 避免在一个完整的句子中间分段
+	5. 不要使用emoji
 
 	【回复格式示例】
 	第一段内容$第二段内容$第三段内容
@@ -93,6 +97,8 @@ func init() {
 
 	// 基础配置
 	config.Hostadd = os.Getenv("HOSTADD")
+	config.WsPort = os.Getenv("WsPort")
+	config.HttpPort = os.Getenv("HttpPort")
 	config.GroupID, _ = strconv.ParseInt(os.Getenv("GROUPID"), 10, 64)
 	config.TargetId, _ = strconv.ParseInt(os.Getenv("TARGETID"), 10, 64)
 	config.AiKEY = os.Getenv("AI_KEY")
@@ -100,6 +106,7 @@ func init() {
 	config.AiPrompt = basePrompt + os.Getenv("AI_PROMPT")
 	config.AiModel = os.Getenv("AI_MODEL")
 	config.Character = os.Getenv("CHARACTER")
+	config.Token = os.Getenv("Token")
 
 	// 调度器配置
 	config.EnableNaturalScheduler = getBoolEnv("ENABLE_NATURAL_SCHEDULER", true)

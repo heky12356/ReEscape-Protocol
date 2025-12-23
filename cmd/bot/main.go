@@ -15,6 +15,7 @@ import (
 	"project-yume/internal/model"
 	"project-yume/internal/scheduler"
 	"project-yume/internal/state"
+	"project-yume/internal/utils"
 
 	"github.com/gorilla/websocket"
 )
@@ -27,7 +28,7 @@ func main() {
 	log.Printf("配置加载完成 - 目标用户: %d", cfg.TargetId)
 
 	// 建立连接
-	c, err := connect.Init(cfg.Hostadd)
+	c, err := connect.Init(cfg.Hostadd + ":" + cfg.WsPort)
 	if err != nil {
 		log.Fatalf("连接失败: %v", err)
 	}
@@ -192,8 +193,18 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 			log.Printf("处理用户消息: %s", msg.Message)
 			log.Printf("当前状态: %v", state.GetManager().GetState())
 
+			// 转换为内部消息格式
+			reqmsg := &handler.Message{}
+			if utils.IsCQCode(msg.Message) {
+				url := utils.ExtractImageURL(msg.Message)
+				reqmsg.Type = "image_url"
+				reqmsg.Data = url
+			} else {
+				reqmsg.Type = "text"
+				reqmsg.Data = msg.Message
+			}
 			// 使用新的消息处理器获取详细结果
-			result, err := processor.Process(c, msg.Message)
+			result, err := processor.Process(c, reqmsg)
 			if err != nil {
 				log.Printf("消息处理失败: %v", err)
 				continue
@@ -235,6 +246,7 @@ func startScheduler(c *websocket.Conn, scheduler *scheduler.NaturalScheduler, ct
 			log.Printf("下次发送间隔: %v", interval)
 
 			timer := time.NewTimer(interval)
+			// timer := time.NewTimer(1 * time.Minute)
 
 			select {
 			case <-ctx.Done():

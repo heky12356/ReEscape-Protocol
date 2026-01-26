@@ -261,12 +261,5 @@ func (mm *MemoryManager) loadFromFile() {
 		return
 	}
 
-	json.Unmarshal(data, &mm.memories)
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+	_ = json.Unmarshal(data, &mm.memories)
 }

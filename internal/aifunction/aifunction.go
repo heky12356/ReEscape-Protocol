@@ -3,42 +3,14 @@ package aifunction
 import (
 	"context"
 	"fmt"
-	"os"
-	"time"
 
 	"project-yume/internal/config"
-	"project-yume/internal/utils"
 
 	openai "github.com/sashabaranov/go-openai"
 )
 
-// 打开文件
-func openLogFile(filepath string) (*os.File, error) {
-	return os.OpenFile(filepath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-}
-
-// 记录消息日志
-func logInteraction(file *os.File, role, message string) {
-	if role == "User" {
-		timestamp := time.Now().Format("2006-01-02 15:04:05")
-		_, _ = fmt.Fprintf(file, "\n[%s] User:\n%s\n\n", timestamp, message)
-	} else {
-		_, _ = fmt.Fprintf(file, "\n[%s] AI:\n%s\n\n", time.Now().Format("2006-01-02 15:04:05"), message)
-	}
-}
 
 func Queryai(prompt string, msg string) (string, error) {
-	filepath := "./public/aichatlog/log_" + time.Now().Format("06-01-02") + ".txt"
-	file, err := openLogFile(filepath)
-	if err != nil {
-		utils.Error("Error opening file: %v\n", err)
-		return "", err
-	}
-	defer file.Close()
-
-	// 记录用户消息
-	logInteraction(file, "User", msg)
-
 	resp, err := client.CreateChatCompletion(
 		context.Background(),
 		openai.ChatCompletionRequest{
@@ -58,20 +30,11 @@ func Queryai(prompt string, msg string) (string, error) {
 	}
 
 	content := resp.Choices[0].Message.Content
-	logInteraction(file, "AI", content)
 	return content, nil
 }
 
-func QueryaiWithChain(Conversation []openai.ChatCompletionMessage, filepath string) (NewConversation []openai.ChatCompletionMessage, result []string, err error) {
-	file, err := openLogFile(filepath)
-	if err != nil {
-		utils.Error("Error opening file: %v\n", err)
-		return nil, nil, err
-	}
-	defer file.Close()
+func QueryaiWithChain(Conversation []openai.ChatCompletionMessage) (NewConversation []openai.ChatCompletionMessage, result []string, err error) {
 
-	// 记录用户消息
-	logInteraction(file, "User", Conversation[len(Conversation)-1].Content)
 
 	resp, err := client.CreateChatCompletion(
 		context.Background(),
@@ -92,7 +55,6 @@ func QueryaiWithChain(Conversation []openai.ChatCompletionMessage, filepath stri
 	for _, chs := range resp.Choices {
 		content := chs.Message.Content
 		result = append(result, content)
-		logInteraction(file, "AI", content)
 		Conversation = append(Conversation, chs.Message)
 	}
 	return Conversation, result, nil

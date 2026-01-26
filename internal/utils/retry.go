@@ -2,7 +2,6 @@ package utils
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -52,14 +51,14 @@ func Retry(fn RetryFunc, config RetryConfig) error {
 	
 	for i := 0; i <= config.MaxRetries; i++ {
 		if i > 0 {
-			log.Printf("🔄 重试第 %d 次，延迟 %v", i, delay)
+			Info("🔄 重试第 %d 次，延迟 %v", i, delay)
 			time.Sleep(delay)
 			delay = time.Duration(float64(delay) * config.Backoff)
 		}
 		
 		if err := fn(); err != nil {
 			lastErr = err
-			log.Printf("⚠️ 执行失败: %v", err)
+			Error("⚠️ 执行失败: %v", err)
 			continue
 		}
 		
@@ -73,7 +72,7 @@ func Retry(fn RetryFunc, config RetryConfig) error {
 func SafeExecute(fn func() error, context string) error {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("❌ %s 发生panic: %v", context, r)
+			Error("❌ %s 发生panic: %v", context, r)
 		}
 	}()
 	

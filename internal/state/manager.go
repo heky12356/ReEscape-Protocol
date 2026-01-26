@@ -2,12 +2,13 @@ package state
 
 import (
 	"encoding/json"
-	"log"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/sashabaranov/go-openai"
+
+	"project-yume/internal/utils"
 )
 
 // BotState 机器人状态枚举
@@ -234,7 +235,7 @@ func (sm *StateManager) saveConversationsToFile() {
 	// 确保目录存在
 	err := os.MkdirAll("./public/memory", 0o755)
 	if err != nil {
-		log.Printf("创建目录失败: %v", err)
+		utils.Error("创建目录失败: %v", err)
 		return
 	}
 
@@ -244,13 +245,13 @@ func (sm *StateManager) saveConversationsToFile() {
 
 	data, err := json.MarshalIndent(storage, "", "  ")
 	if err != nil {
-		log.Printf("序列化对话历史失败: %v", err)
+		utils.Error("序列化对话历史失败: %v", err)
 		return
 	}
 
 	err = os.WriteFile(sm.conversationFile, data, 0o644)
 	if err != nil {
-		log.Printf("写入对话历史文件失败: %v", err)
+		utils.Error("写入对话历史文件失败: %v", err)
 	}
 }
 
@@ -265,7 +266,7 @@ func (sm *StateManager) loadConversationsFromFile() {
 	var storage ConversationStorage
 	err = json.Unmarshal(data, &storage)
 	if err != nil {
-		log.Printf("解析对话历史文件失败: %v", err)
+		utils.Error("解析对话历史文件失败: %v", err)
 		return
 	}
 

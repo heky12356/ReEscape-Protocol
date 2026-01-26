@@ -1,13 +1,13 @@
 package scheduler
 
 import (
-	"log"
 	"math/rand"
 	"time"
 
 	"project-yume/internal/config"
 	"project-yume/internal/service"
 	"project-yume/internal/state"
+	"project-yume/internal/utils"
 
 	"github.com/gorilla/websocket"
 )
@@ -217,7 +217,7 @@ func (ns *NaturalScheduler) SendScheduledMessage(c *websocket.Conn) error {
 	// 看下是在长对话还是最近刚发过消息
 	nowstate := ns.ShouldSend()
 	if nowstate != suitTime {
-		log.Printf("当前状态不适合发送消息, state: %v", nowstate)
+		utils.Info("当前状态不适合发送消息, state: %v", nowstate)
 		return nil
 	}
 

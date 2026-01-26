@@ -2,12 +2,12 @@ package service
 
 import (
 	"encoding/json"
-	"fmt"
 	"math/rand"
 	"strings"
 	"time"
 
 	"project-yume/internal/model"
+	"project-yume/internal/utils"
 
 	"github.com/gorilla/websocket"
 )
@@ -27,7 +27,7 @@ func SendMsg(c *websocket.Conn, User_id int64, msg string) (err error) {
 		}
 		jsonData, err := json.Marshal(ws_msg)
 		if err != nil {
-			fmt.Println("Error marshaling JSON:", err)
+			utils.Error("Error marshaling JSON: %v", err)
 			return err
 		}
 
@@ -37,7 +37,7 @@ func SendMsg(c *websocket.Conn, User_id int64, msg string) (err error) {
 		// 通过 WebSocket 发送消息到 OneBot
 		err = c.WriteMessage(websocket.TextMessage, jsonData)
 		if err != nil {
-			fmt.Println("Write Error:", err)
+			utils.Error("Write Error: %v", err)
 			return err
 		}
 	}

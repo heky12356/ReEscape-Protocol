@@ -37,9 +37,9 @@ const colorReset = "\033[0m"
 
 // Logger 自定义日志器
 type Logger struct {
-	level      LogLevel
-	fileWriter io.Writer
-	enableFile bool
+	level       LogLevel
+	fileWriter  io.Writer
+	enableFile  bool
 	enableColor bool
 }
 
@@ -56,31 +56,31 @@ func NewLogger(level LogLevel, enableFile bool, enableColor bool) *Logger {
 		enableFile:  enableFile,
 		enableColor: enableColor,
 	}
-	
+
 	if enableFile {
 		if err := logger.initFileWriter(); err != nil {
 			log.Printf("初始化文件日志失败: %v", err)
 		}
 	}
-	
+
 	return logger
 }
 
 // initFileWriter 初始化文件写入器
 func (l *Logger) initFileWriter() error {
 	logDir := "./logs"
-	if err := os.MkdirAll(logDir, 0755); err != nil {
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		return err
 	}
-	
+
 	filename := fmt.Sprintf("bot_%s.log", time.Now().Format("2006-01-02"))
 	filepath := filepath.Join(logDir, filename)
-	
-	file, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+
+	file, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
 	if err != nil {
 		return err
 	}
-	
+
 	l.fileWriter = file
 	return nil
 }
@@ -90,11 +90,11 @@ func (l *Logger) log(level LogLevel, format string, args ...interface{}) {
 	if level < l.level {
 		return
 	}
-	
+
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 	levelName := levelNames[level]
 	message := fmt.Sprintf(format, args...)
-	
+
 	// 控制台输出（带颜色）
 	if l.enableColor {
 		color := levelColors[level]
@@ -102,11 +102,11 @@ func (l *Logger) log(level LogLevel, format string, args ...interface{}) {
 	} else {
 		fmt.Printf("[%s] %s %s\n", timestamp, levelName, message)
 	}
-	
+
 	// 文件输出（无颜色）
 	if l.enableFile && l.fileWriter != nil {
 		fileMessage := fmt.Sprintf("[%s] %s %s\n", timestamp, levelName, message)
-		l.fileWriter.Write([]byte(fileMessage))
+		_, _ = l.fileWriter.Write([]byte(fileMessage))
 	}
 }
 
@@ -155,5 +155,5 @@ func SetLevel(level LogLevel) {
 // LogWithContext 带上下文的日志
 func LogWithContext(context string, level LogLevel, format string, args ...interface{}) {
 	message := fmt.Sprintf("[%s] %s", context, fmt.Sprintf(format, args...))
-	defaultLogger.log(level, message)
+	defaultLogger.log(level, "%s", message)
 }

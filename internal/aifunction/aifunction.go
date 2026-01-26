@@ -3,11 +3,11 @@ package aifunction
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"time"
 
 	"project-yume/internal/config"
+	"project-yume/internal/utils"
 
 	openai "github.com/sashabaranov/go-openai"
 )
@@ -31,7 +31,7 @@ func Queryai(prompt string, msg string) (string, error) {
 	filepath := "./public/aichatlog/log_" + time.Now().Format("06-01-02") + ".txt"
 	file, err := openLogFile(filepath)
 	if err != nil {
-		log.Printf("Error opening file: %v\n", err)
+		utils.Error("Error opening file: %v\n", err)
 		return "", err
 	}
 	defer file.Close()
@@ -65,7 +65,7 @@ func Queryai(prompt string, msg string) (string, error) {
 func QueryaiWithChain(Conversation []openai.ChatCompletionMessage, filepath string) (NewConversation []openai.ChatCompletionMessage, result []string, err error) {
 	file, err := openLogFile(filepath)
 	if err != nil {
-		log.Printf("Error opening file: %v\n", err)
+		utils.Error("Error opening file: %v\n", err)
 		return nil, nil, err
 	}
 	defer file.Close()

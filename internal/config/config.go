@@ -1,12 +1,12 @@
 package config
 
 import (
-	"log"
 	"os"
 	"strconv"
 	"strings"
 
 	"project-yume/internal/character"
+	"project-yume/internal/utils"
 
 	"github.com/joho/godotenv"
 )
@@ -76,7 +76,8 @@ func init() {
 	err := godotenv.Load("debug.env")
 	// err := godotenv.Load("../../test/.env")
 	if err != nil {
-		log.Fatal("Error loading .env file")
+		utils.Error("Error loading .env file")
+		os.Exit(1)
 	}
 
 	// basePrompt
@@ -149,7 +150,8 @@ func init() {
 
 	cm, err := character.NewCharacterManager("./config/character", config.Character)
 	if err != nil {
-		log.Fatalf("Failed to create character manager: %v", err)
+		utils.Error("Failed to create character manager: %v", err)
+		os.Exit(1)
 	}
 	config.AiPrompt += cm.GetPrompt()
 }

@@ -2,10 +2,11 @@ package memory
 
 import (
 	"encoding/json"
-	"log"
 	"os"
 	"sync"
 	"time"
+
+	"project-yume/internal/utils"
 )
 
 // EmotionalMemory 情感记忆
@@ -238,19 +239,19 @@ func (mm *MemoryManager) saveToFile() {
 	// 确保目录存在
 	err := os.MkdirAll("./public/memory", 0o755)
 	if err != nil {
-		log.Printf("创建目录失败: %v", err)
+		utils.Error("创建目录失败: %v", err)
 		return
 	}
 
 	data, err := json.MarshalIndent(mm.memories, "", "  ")
 	if err != nil {
-		log.Printf("序列化失败: %v", err)
+		utils.Error("序列化失败: %v", err)
 		return
 	}
 
 	err = os.WriteFile(mm.filePath, data, 0o644)
 	if err != nil {
-		log.Printf("写入文件失败: %v", err)
+		utils.Error("写入文件失败: %v", err)
 	}
 }
 

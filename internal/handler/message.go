@@ -15,15 +15,10 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
-type Message struct {
-	Type string `json:"type"`
-	Data string `json:"data"`
-}
-
 // MessageHandler 消息处理器接口
 type MessageHandler interface {
 	CanHandle(message string, sm *state.StateManager) bool
-	Handle(c *websocket.Conn, message, emotion, intention string, sm *state.StateManager) (string, error)
+	Handle(c *websocket.Conn, message string, sm *state.StateManager) (string, error)
 }
 
 // PresetHandler 预设回复处理器
@@ -55,7 +50,7 @@ func (h *PresetHandler) CanHandle(message string, sm *state.StateManager) bool {
 }
 
 // Handle 处理消息
-func (h *PresetHandler) Handle(c *websocket.Conn, message, emotion, intention string, sm *state.StateManager) (string, error) {
+func (h *PresetHandler) Handle(c *websocket.Conn, message string, sm *state.StateManager) (string, error) {
 	response := h.responses[message]
 
 	// 特殊处理
@@ -80,7 +75,17 @@ func (h *EmotionHandler) CanHandle(message string, sm *state.StateManager) bool 
 	return sm.GetState() == state.StateIdle
 }
 
-func (h *EmotionHandler) Handle(c *websocket.Conn, message, emotion, intention string, sm *state.StateManager) (string, error) {
+func (h *EmotionHandler) Handle(c *websocket.Conn, message string, sm *state.StateManager) (string, error) {
+	// 在这里进行 AI 分析，只有真正需要处理时才调用
+	emotion, err := analyzeEmotion(message)
+	if err != nil {
+		return "", fmt.Errorf("分析情感失败: %v", err)
+	}
+	intention, err := analyzeIntention(message)
+	if err != nil {
+		return "", fmt.Errorf("分析意图失败: %v", err)
+	}
+
 	cfg := config.GetConfig()
 	userID := cfg.TargetId
 
@@ -327,7 +332,7 @@ func (h *LongChatHandler) CanHandle(message string, sm *state.StateManager) bool
 	return sm.GetState() == state.StateLongChat
 }
 
-func (h *LongChatHandler) Handle(c *websocket.Conn, message, emotion, intention string, sm *state.StateManager) (string, error) {
+func (h *LongChatHandler) Handle(c *websocket.Conn, message string, sm *state.StateManager) (string, error) {
 	if config.GetConfig().EnableOnlyLongChat {
 		return h.continueAIChat(c, message, sm)
 	}
@@ -552,20 +557,19 @@ func NewMessageProcessor() *MessageProcessor {
 }
 
 // Process 处理消息并返回详细结果
-func (mp *MessageProcessor) Process(c *websocket.Conn, message *Message) (*ProcessResult, error) {
+func (mp *MessageProcessor) Process(c *websocket.Conn, message string) (*ProcessResult, error) {
 	sm := state.GetManager()
 	result := &ProcessResult{
 		Handled: false,
 	}
 
 	if config.GetConfig().EnableOnlyLongChat {
-		emotion, err := analyzeEmotion(message.Data)
-		if err != nil {
-			return result, fmt.Errorf("分析情感失败: %v", err)
-		}
-		result.Emotion = emotion
+		// OnlyLongChat 模式下，直接交给 LongChatHandler 处理
+		// emotion 和 intention 分析可以在 Handler 内部做，或者这里简化处理
+		// 既然是 OnlyLongChat，我们假设都想聊
 		result.Intention = "想和对方聊天"
-		reply, err := mp.handlers[2].Handle(c, message.Data, emotion, result.Intention, sm)
+		// 注意：Interface 已经变了，不再传递 emotion/intention
+		reply, err := mp.handlers[2].Handle(c, message, sm)
 		if err != nil {
 			return result, err
 		}
@@ -575,25 +579,18 @@ func (mp *MessageProcessor) Process(c *websocket.Conn, message *Message) (*Proce
 	}
 
 	for _, handler := range mp.handlers {
-		if handler.CanHandle(message.Data, sm) {
-			emotion, err := analyzeEmotion(message.Data)
-			if err != nil {
-				return result, fmt.Errorf("分析情感失败: %v", err)
-			}
-			intention, err := analyzeIntention(message.Data)
-			if err != nil {
-				return result, fmt.Errorf("分析意图失败: %v", err)
-			}
-			result.Emotion = emotion
-			result.Intention = intention
-
-			reply, err := handler.Handle(c, message.Data, emotion, intention, sm)
+		if handler.CanHandle(message, sm) {
+			// 直接调用 Handle，无需预先分析
+			reply, err := handler.Handle(c, message, sm)
 			if err != nil {
 				return result, err
 			}
 
 			result.Handled = true
 			result.Reply = reply
+			// 注意：result.Emotion 和 result.Intention 现在可能为空，因为分析下放了
+			// 如果需要记录，得从 Handler 返回值里拿，但现在 Interface只返回 string, error
+			// 这是一个 Trade-off。通常 ProcessResult 主要用于日志。
 			return result, nil
 		}
 	}

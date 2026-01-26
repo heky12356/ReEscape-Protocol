@@ -193,18 +193,16 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 			log.Printf("处理用户消息: %s", msg.Message)
 			log.Printf("当前状态: %v", state.GetManager().GetState())
 
-			// 转换为内部消息格式
-			reqmsg := &handler.Message{}
+			// 提取消息内容（文本或图片URL）
+			var msgContent string
 			if utils.IsCQCode(msg.Message) {
-				url := utils.ExtractImageURL(msg.Message)
-				reqmsg.Type = "image_url"
-				reqmsg.Data = url
+				msgContent = utils.ExtractImageURL(msg.Message)
 			} else {
-				reqmsg.Type = "text"
-				reqmsg.Data = msg.Message
+				msgContent = msg.Message
 			}
+
 			// 使用新的消息处理器获取详细结果
-			result, err := processor.Process(c, reqmsg)
+			result, err := processor.Process(c, msgContent)
 			if err != nil {
 				log.Printf("消息处理失败: %v", err)
 				continue

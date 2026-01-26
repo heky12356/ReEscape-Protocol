@@ -12,18 +12,32 @@ import (
 	openai "github.com/sashabaranov/go-openai"
 )
 
+// 打开文件
+func openLogFile(filepath string) (*os.File, error) {
+	return os.OpenFile(filepath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+}
+
+// 记录消息日志
+func logInteraction(file *os.File, role, message string) {
+	if role == "User" {
+		timestamp := time.Now().Format("2006-01-02 15:04:05")
+		_, _ = fmt.Fprintf(file, "\n[%s] User:\n%s\n\n", timestamp, message)
+	} else {
+		_, _ = fmt.Fprintf(file, "\n[%s] AI:\n%s\n\n", time.Now().Format("2006-01-02 15:04:05"), message)
+	}
+}
+
 func Queryai(prompt string, msg string) (string, error) {
 	filepath := "./public/aichatlog/log_" + time.Now().Format("06-01-02") + ".txt"
-	file, err := os.OpenFile(filepath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	file, err := openLogFile(filepath)
 	if err != nil {
 		log.Printf("Error opening file: %v\n", err)
 		return "", err
 	}
 	defer file.Close()
 
-	// 记录对话时间
-	timestamp := time.Now().Format("2006-01-02 15:04:05")
-	file.WriteString(fmt.Sprintf("\n[%s] User:\n%s\n\n", timestamp, msg))
+	// 记录用户消息
+	logInteraction(file, "User", msg)
 
 	resp, err := client.CreateChatCompletion(
 		context.Background(),
@@ -44,25 +58,20 @@ func Queryai(prompt string, msg string) (string, error) {
 	}
 
 	content := resp.Choices[0].Message.Content
-	_, err = file.WriteString(content)
-	if err != nil {
-		return "", fmt.Errorf("error in Queryai : WriteString error: %v", err)
-	}
+	logInteraction(file, "AI", content)
 	return content, nil
 }
 
 func QueryaiWithChain(Conversation []openai.ChatCompletionMessage, filepath string) (NewConversation []openai.ChatCompletionMessage, result []string, err error) {
-	// filepath := "../../public/aichatlog/log_" + time.Now().Format("06-01-02") + ".txt"
-	file, err := os.OpenFile(filepath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	file, err := openLogFile(filepath)
 	if err != nil {
 		log.Printf("Error opening file: %v\n", err)
 		return nil, nil, err
 	}
 	defer file.Close()
 
-	// 记录对话时间
-	timestamp := time.Now().Format("2006-01-02 15:04:05")
-	file.WriteString(fmt.Sprintf("\n[%s] User:\n%s\n\n", timestamp, Conversation[len(Conversation)-1].Content))
+	// 记录用户消息
+	logInteraction(file, "User", Conversation[len(Conversation)-1].Content)
 
 	resp, err := client.CreateChatCompletion(
 		context.Background(),
@@ -83,12 +92,8 @@ func QueryaiWithChain(Conversation []openai.ChatCompletionMessage, filepath stri
 	for _, chs := range resp.Choices {
 		content := chs.Message.Content
 		result = append(result, content)
-		_, err = file.WriteString(content)
-		if err != nil {
-			return nil, nil, fmt.Errorf("error in QueryaiWithChain : WriteString error: %v", err)
-		}
+		logInteraction(file, "AI", content)
 		Conversation = append(Conversation, chs.Message)
 	}
-	// fmt.Print(content)
 	return Conversation, result, nil
 }

@@ -5,10 +5,10 @@ import (
 	"fmt"
 
 	"project-yume/internal/config"
+	"project-yume/internal/utils"
 
 	openai "github.com/sashabaranov/go-openai"
 )
-
 
 func Queryai(prompt string, msg string) (string, error) {
 	resp, err := client.CreateChatCompletion(
@@ -29,13 +29,11 @@ func Queryai(prompt string, msg string) (string, error) {
 		return "", fmt.Errorf("error in Queryai : ChatCompletion error: %v", err)
 	}
 
-	content := resp.Choices[0].Message.Content
+	content := utils.CleanThinkTag(resp.Choices[0].Message.Content)
 	return content, nil
 }
 
 func QueryaiWithChain(Conversation []openai.ChatCompletionMessage) (NewConversation []openai.ChatCompletionMessage, result []string, err error) {
-
-
 	resp, err := client.CreateChatCompletion(
 		context.Background(),
 		openai.ChatCompletionRequest{
@@ -53,8 +51,9 @@ func QueryaiWithChain(Conversation []openai.ChatCompletionMessage) (NewConversat
 	}
 
 	for _, chs := range resp.Choices {
-		content := chs.Message.Content
+		content := utils.CleanThinkTag(chs.Message.Content)
 		result = append(result, content)
+		chs.Message.Content = content
 		Conversation = append(Conversation, chs.Message)
 	}
 	return Conversation, result, nil

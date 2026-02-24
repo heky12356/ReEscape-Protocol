@@ -8,6 +8,7 @@ import (
 	"project-yume/internal/memory"
 	"project-yume/internal/service"
 	"project-yume/internal/state"
+	"project-yume/internal/utils"
 
 	"github.com/gorilla/websocket"
 	"github.com/sashabaranov/go-openai"
@@ -155,6 +156,13 @@ func (h *EmotionHandler) startAIChat(c *websocket.Conn, message string, sm *stat
 			systemPrompt = service.EnhancePromptWithMemory(userID, systemPrompt)
 		}
 
+		utils.Info("【AI对话启动】注入系统 Prompt (长度: %d): %s...", len(systemPrompt), func() string {
+			if len(systemPrompt) > 20 {
+				return systemPrompt[:20]
+			}
+			return systemPrompt
+		}())
+
 		conversation = append(conversation, openai.ChatCompletionMessage{
 			Role:    "system",
 			Content: systemPrompt,
@@ -221,6 +229,31 @@ func (h *LongChatHandler) continueAIChat(c *websocket.Conn, message string, sm *
 
 	// 获取当前对话历史
 	conversation := sm.GetConversation(userID)
+
+	// 如果对话历史为空（新对话），必须注入 System Prompt，否则 AI 会“裸奔”
+	if len(conversation) == 0 {
+		systemPrompt := cfg.AiPrompt
+		if systemPrompt == "" {
+			systemPrompt = "你是一个温暖、友善的聊天伙伴。请用自然、亲切的语气与用户对话，回复要简短而有趣。"
+		}
+
+		// 情感记忆增强系统提示词
+		if cfg.EnableEmotionalMemory {
+			systemPrompt = service.EnhancePromptWithMemory(userID, systemPrompt)
+		}
+
+		utils.Info("【AI对话启动】(OnlyLongChat) 注入系统 Prompt (长度: %d): %s...", len(systemPrompt), func() string {
+			if len(systemPrompt) > 20 {
+				return systemPrompt[:20]
+			}
+			return systemPrompt
+		}())
+
+		conversation = append(conversation, openai.ChatCompletionMessage{
+			Role:    "system",
+			Content: systemPrompt,
+		})
+	}
 
 	// 添加用户消息
 	conversation = append(conversation, openai.ChatCompletionMessage{

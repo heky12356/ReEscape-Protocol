@@ -26,7 +26,7 @@ func sendAIFallbackReply(c *websocket.Conn, userID int64) (string, error) {
 // MessageHandler 消息处理器接口
 type MessageHandler interface {
 	CanHandle(message string, sm *state.StateManager) bool
-	Handle(c *websocket.Conn, message string, sm *state.StateManager) (string, error)
+	Handle(c *websocket.Conn, message string, sm *state.StateManager) (*ProcessResult, error)
 }
 
 // PresetHandler 预设回复处理器
@@ -58,7 +58,7 @@ func (h *PresetHandler) CanHandle(message string, sm *state.StateManager) bool {
 }
 
 // Handle 处理消息
-func (h *PresetHandler) Handle(c *websocket.Conn, message string, sm *state.StateManager) (string, error) {
+func (h *PresetHandler) Handle(c *websocket.Conn, message string, sm *state.StateManager) (*ProcessResult, error) {
 	response := h.responses[message]
 
 	// 特殊处理
@@ -69,7 +69,13 @@ func (h *PresetHandler) Handle(c *websocket.Conn, message string, sm *state.Stat
 		sm.SetState(state.StateLongChat)
 	}
 
-	return response, service.SendMsg(c, config.GetConfig().TargetId, response)
+	if err := service.SendMsg(c, config.GetConfig().TargetId, response); err != nil {
+		return nil, err
+	}
+	return &ProcessResult{
+		Handled: true,
+		Reply:   response,
+	}, nil
 }
 
 // EmotionHandler 情感分析处理器
@@ -83,15 +89,15 @@ func (h *EmotionHandler) CanHandle(message string, sm *state.StateManager) bool 
 	return sm.GetState() == state.StateIdle
 }
 
-func (h *EmotionHandler) Handle(c *websocket.Conn, message string, sm *state.StateManager) (string, error) {
+func (h *EmotionHandler) Handle(c *websocket.Conn, message string, sm *state.StateManager) (*ProcessResult, error) {
 	// 在这里进行 AI 分析，只有真正需要处理时才调用
 	emotion, err := service.AnalyzeEmotion(message)
 	if err != nil {
-		return "", fmt.Errorf("分析情感失败: %v", err)
+		return nil, fmt.Errorf("分析情感失败: %v", err)
 	}
 	intention, err := service.AnalyzeIntention(message)
 	if err != nil {
-		return "", fmt.Errorf("分析意图失败: %v", err)
+		return nil, fmt.Errorf("分析意图失败: %v", err)
 	}
 
 	cfg := config.GetConfig()
@@ -110,7 +116,7 @@ func (h *EmotionHandler) Handle(c *websocket.Conn, message string, sm *state.Sta
 	default:
 		if intention == "想和对方聊天" || intention == "想和对方倾诉" {
 			sm.SetState(state.StateLongChat)
-			return h.startAIChat(c, message, sm)
+			return h.startAIChat(c, message, sm, emotion, intention)
 		}
 		response = "?"
 	}
@@ -120,7 +126,15 @@ func (h *EmotionHandler) Handle(c *websocket.Conn, message string, sm *state.Sta
 		response = h.optimizeResponseWithMemory(userID, message, emotion, intention, response)
 	}
 
-	return response, service.SendMsg(c, cfg.TargetId, response)
+	if err := service.SendMsg(c, cfg.TargetId, response); err != nil {
+		return nil, err
+	}
+	return &ProcessResult{
+		Handled:   true,
+		Emotion:   emotion,
+		Intention: intention,
+		Reply:     response,
+	}, nil
 }
 
 // optimizeResponseWithMemory 基于情感记忆优化回复
@@ -142,7 +156,7 @@ func (h *EmotionHandler) optimizeResponseWithMemory(userID int64, message, emoti
 	return service.AdjustResponseByPattern(originalResponse, pattern, emotion)
 }
 
-func (h *EmotionHandler) startAIChat(c *websocket.Conn, message string, sm *state.StateManager) (string, error) {
+func (h *EmotionHandler) startAIChat(c *websocket.Conn, message string, sm *state.StateManager, emotion, intention string) (*ProcessResult, error) {
 	cfg := config.GetConfig()
 	userID := cfg.TargetId
 
@@ -190,23 +204,33 @@ func (h *EmotionHandler) startAIChat(c *websocket.Conn, message string, sm *stat
 		utils.Error("AI chat failed, sending fallback reply: %v", err)
 		fallback, sendErr := sendAIFallbackReply(c, cfg.TargetId)
 		if sendErr != nil {
-			return "", fmt.Errorf("AI chat failed and fallback send failed: %v / %v", err, sendErr)
+			return nil, fmt.Errorf("AI chat failed and fallback send failed: %v / %v", err, sendErr)
 		}
-		return fallback, nil
+		return &ProcessResult{
+			Handled:   true,
+			Emotion:   emotion,
+			Intention: intention,
+			Reply:     fallback,
+		}, nil
 	}
 
 	// 发送AI回复
 	for _, response := range responses {
 		err := service.SendMsg(c, config.GetConfig().TargetId, response)
 		if err != nil {
-			return "", fmt.Errorf("发送AI回复失败: %v", err)
+			return nil, fmt.Errorf("发送AI回复失败: %v", err)
 		}
 	}
 
 	// 更新对话历史
 	sm.SetConversation(userID, newConversation)
 
-	return responses[len(responses)-1], nil
+	return &ProcessResult{
+		Handled:   true,
+		Emotion:   emotion,
+		Intention: intention,
+		Reply:     responses[len(responses)-1],
+	}, nil
 }
 
 // LongChatHandler AI长对话处理器
@@ -220,24 +244,42 @@ func (h *LongChatHandler) CanHandle(message string, sm *state.StateManager) bool
 	return sm.GetState() == state.StateLongChat
 }
 
-func (h *LongChatHandler) Handle(c *websocket.Conn, message string, sm *state.StateManager) (string, error) {
+func (h *LongChatHandler) Handle(c *websocket.Conn, message string, sm *state.StateManager) (*ProcessResult, error) {
+	emotion, err := service.AnalyzeEmotion(message)
+	if err != nil {
+		return nil, fmt.Errorf("分析情感失败: %v", err)
+	}
+	intention, err := service.AnalyzeIntention(message)
+	if err != nil {
+		return nil, fmt.Errorf("分析意图失败: %v", err)
+	}
+
 	if config.GetConfig().EnableOnlyLongChat {
-		return h.continueAIChat(c, message, sm)
+		return h.continueAIChat(c, message, sm, emotion, intention)
 	}
 	// 检查是否要结束对话
 	wannaBye, err := service.AnalyzeWannaBye(message)
 	if err != nil {
-		return "", fmt.Errorf("分析是否要结束对话失败: %v", err)
+		return nil, fmt.Errorf("分析是否要结束对话失败: %v", err)
 	}
 	if wannaBye == "想结束对话" {
-		return "", h.endAIChat(c, sm)
+		reply, err := h.endAIChat(c, sm)
+		if err != nil {
+			return nil, err
+		}
+		return &ProcessResult{
+			Handled:   true,
+			Emotion:   emotion,
+			Intention: intention,
+			Reply:     reply,
+		}, nil
 	}
 
 	// 继续AI对话
-	return h.continueAIChat(c, message, sm)
+	return h.continueAIChat(c, message, sm, emotion, intention)
 }
 
-func (h *LongChatHandler) continueAIChat(c *websocket.Conn, message string, sm *state.StateManager) (string, error) {
+func (h *LongChatHandler) continueAIChat(c *websocket.Conn, message string, sm *state.StateManager, emotion, intention string) (*ProcessResult, error) {
 	cfg := config.GetConfig()
 	userID := cfg.TargetId
 
@@ -286,33 +328,44 @@ func (h *LongChatHandler) continueAIChat(c *websocket.Conn, message string, sm *
 		utils.Error("AI conversation failed, sending fallback reply: %v", err)
 		fallback, sendErr := sendAIFallbackReply(c, cfg.TargetId)
 		if sendErr != nil {
-			return "", fmt.Errorf("AI conversation failed and fallback send failed: %v / %v", err, sendErr)
+			return nil, fmt.Errorf("AI conversation failed and fallback send failed: %v / %v", err, sendErr)
 		}
-		return fallback, nil
+		return &ProcessResult{
+			Handled:   true,
+			Emotion:   emotion,
+			Intention: intention,
+			Reply:     fallback,
+		}, nil
 	}
 
 	// 发送AI回复
 	for _, response := range responses {
 		err := service.SendMsg(c, cfg.TargetId, response)
 		if err != nil {
-			return "", fmt.Errorf("发送AI回复失败: %v", err)
+			return nil, fmt.Errorf("发送AI回复失败: %v", err)
 		}
 	}
 
 	// 更新对话历史
 	sm.SetConversation(userID, newConversation)
 
-	return responses[len(responses)-1], nil
+	return &ProcessResult{
+		Handled:   true,
+		Emotion:   emotion,
+		Intention: intention,
+		Reply:     responses[len(responses)-1],
+	}, nil
 }
 
-func (h *LongChatHandler) endAIChat(c *websocket.Conn, sm *state.StateManager) error {
+func (h *LongChatHandler) endAIChat(c *websocket.Conn, sm *state.StateManager) (string, error) {
 	cfg := config.GetConfig()
 	userID := cfg.TargetId
 
 	// 发送结束回复
-	err := service.SendMsg(c, userID, "好吧，那拜拜。")
+	reply := "好吧，那拜拜。"
+	err := service.SendMsg(c, userID, reply)
 	if err != nil {
-		return fmt.Errorf("发送结束回复失败: %v", err)
+		return "", fmt.Errorf("发送结束回复失败: %v", err)
 	}
 
 	// 重置状态
@@ -320,7 +373,7 @@ func (h *LongChatHandler) endAIChat(c *websocket.Conn, sm *state.StateManager) e
 	// 清空历史消息
 	// sm.ClearConversation(userID)
 
-	return nil
+	return reply, nil
 }
 
 // ProcessResult 消息处理结果
@@ -349,46 +402,37 @@ func NewMessageProcessor() *MessageProcessor {
 // Process 处理消息并返回详细结果
 func (mp *MessageProcessor) Process(c *websocket.Conn, message string) (*ProcessResult, error) {
 	sm := state.GetManager()
-	result := &ProcessResult{
-		Handled: false,
-	}
 
 	if config.GetConfig().EnableOnlyLongChat {
-		// OnlyLongChat 模式下，直接交给 LongChatHandler 处理
-		// emotion 和 intention 分析可以在 Handler 内部做，或者这里简化处理
-		// 既然是 OnlyLongChat，我们假设都想聊
-		result.Intention = "想和对方聊天"
-		// 注意：Interface 已经变了，不再传递 emotion/intention
-		reply, err := mp.handlers[2].Handle(c, message, sm)
+		result, err := mp.handlers[2].Handle(c, message, sm)
 		if err != nil {
-			return result, err
+			return &ProcessResult{}, err
 		}
-		result.Handled = true
-		result.Reply = reply
+		if result == nil {
+			return &ProcessResult{}, nil
+		}
 		return result, nil
 	}
 
 	for _, handler := range mp.handlers {
-		if handler.CanHandle(message, sm) {
-			// 直接调用 Handle，无需预先分析
-			reply, err := handler.Handle(c, message, sm)
-			if err != nil {
-				return result, err
-			}
-
-			result.Handled = true
-			result.Reply = reply
-			// 注意：result.Emotion 和 result.Intention 现在可能为空，因为分析下放了
-			// 如果需要记录，得从 Handler 返回值里拿，但现在 Interface只返回 string, error
-			// 这是一个 Trade-off。通常 ProcessResult 主要用于日志。
-			return result, nil
+		if !handler.CanHandle(message, sm) {
+			continue
 		}
+
+		result, err := handler.Handle(c, message, sm)
+		if err != nil {
+			return &ProcessResult{}, err
+		}
+		if result == nil {
+			return &ProcessResult{}, nil
+		}
+		return result, nil
 	}
 
 	// 如果没有处理器能处理，返回默认回复
 	err := service.SendMsg(c, config.GetConfig().TargetId, "?")
-	result.Reply = "?"
-	result.Handled = true
-
-	return result, err
+	return &ProcessResult{
+		Handled: true,
+		Reply:   "?",
+	}, err
 }

@@ -57,6 +57,11 @@ func GetManager() *MemoryManager {
 
 // RecordInteraction 记录交互
 func (mm *MemoryManager) RecordInteraction(userID int64, userMsg, botReply, emotion, intention string) {
+	if emotion == "" || intention == "" {
+		utils.Warn("skip RecordInteraction due to empty emotion/intention: emotion=%q intention=%q", emotion, intention)
+		return
+	}
+
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 

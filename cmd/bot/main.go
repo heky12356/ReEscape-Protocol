@@ -211,14 +211,18 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 
 			// 记录到情感记忆（如果启用）
 			if cfg.EnableEmotionalMemory && result.Handled {
-				utils.Info("记录情感记忆 - 情感: %s, 意图: %s", result.Emotion, result.Intention)
-				memoryManager.RecordInteraction(
-					msg.User_id,
-					msg.Message,
-					result.Reply,
-					result.Emotion,
-					result.Intention,
-				)
+				if result.Emotion != "" && result.Intention != "" {
+					utils.Info("记录情感记忆 - 情感: %s, 意图: %s", result.Emotion, result.Intention)
+					memoryManager.RecordInteraction(
+						msg.User_id,
+						msg.Message,
+						result.Reply,
+						result.Emotion,
+						result.Intention,
+					)
+				} else {
+					utils.Warn("跳过情感记忆写入，emotion/intention 无效: emotion=%q intention=%q", result.Emotion, result.Intention)
+				}
 			}
 
 			// 更新状态

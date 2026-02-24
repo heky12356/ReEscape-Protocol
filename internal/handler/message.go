@@ -14,6 +14,15 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
+const aiFallbackReply = "?"
+
+func sendAIFallbackReply(c *websocket.Conn, userID int64) (string, error) {
+	if err := service.SendMsg(c, userID, aiFallbackReply); err != nil {
+		return "", err
+	}
+	return aiFallbackReply, nil
+}
+
 // MessageHandler 消息处理器接口
 type MessageHandler interface {
 	CanHandle(message string, sm *state.StateManager) bool
@@ -178,7 +187,12 @@ func (h *EmotionHandler) startAIChat(c *websocket.Conn, message string, sm *stat
 	// 调用AI进行对话
 	newConversation, responses, err := aifunction.QueryaiWithChain(conversation)
 	if err != nil {
-		return "", fmt.Errorf("AI聊天失败: %v", err)
+		utils.Error("AI chat failed, sending fallback reply: %v", err)
+		fallback, sendErr := sendAIFallbackReply(c, cfg.TargetId)
+		if sendErr != nil {
+			return "", fmt.Errorf("AI chat failed and fallback send failed: %v / %v", err, sendErr)
+		}
+		return fallback, nil
 	}
 
 	// 发送AI回复
@@ -269,7 +283,12 @@ func (h *LongChatHandler) continueAIChat(c *websocket.Conn, message string, sm *
 	// 调用AI进行对话
 	newConversation, responses, err := aifunction.QueryaiWithChain(conversation)
 	if err != nil {
-		return "", fmt.Errorf("AI对话失败: %v", err)
+		utils.Error("AI conversation failed, sending fallback reply: %v", err)
+		fallback, sendErr := sendAIFallbackReply(c, cfg.TargetId)
+		if sendErr != nil {
+			return "", fmt.Errorf("AI conversation failed and fallback send failed: %v / %v", err, sendErr)
+		}
+		return fallback, nil
 	}
 
 	// 发送AI回复

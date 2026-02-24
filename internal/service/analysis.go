@@ -5,6 +5,7 @@ import (
 
 	"project-yume/internal/aifunction"
 	"project-yume/internal/memory"
+	"project-yume/internal/utils"
 
 	"github.com/sashabaranov/go-openai"
 )
@@ -12,13 +13,23 @@ import (
 // AnalyzeEmotion 分析情感
 func AnalyzeEmotion(message string) (string, error) {
 	prompt := "请帮我分析下这段话的情感，并在下面六个选项中选择：开心，生气，中性，哲学，敷衍，难过， 并只回复选项，例如：\"user: 哈哈哈\" resp: \"开心\", 不需要回答多余的内容，也不需要添加分号"
-	return aifunction.Queryai(prompt, message)
+	result, err := aifunction.Queryai(prompt, message)
+	if err != nil {
+		utils.Warn("AnalyzeEmotion fallback to 中性 due to AI error: %v", err)
+		return "中性", nil
+	}
+	return result, nil
 }
 
 // AnalyzeIntention 分析意图
 func AnalyzeIntention(message string) (string, error) {
 	prompt := "请帮我分析下这段话的意图，并在下面六个选项中选择：想和对方聊天，想被对方鼓励，想和对方倾诉，安慰对方，鼓励对方，和对方道歉 并只回复选项，例如：\"user: 能陪我会儿吗\" resp: \"想和对方倾诉\", 不需要回答多余的内容，也不需要添加分号"
-	return aifunction.Queryai(prompt, message)
+	result, err := aifunction.Queryai(prompt, message)
+	if err != nil {
+		utils.Warn("AnalyzeIntention fallback to 想和对方聊天 due to AI error: %v", err)
+		return "想和对方聊天", nil
+	}
+	return result, nil
 }
 
 // AnalyzeWannaBye 分析是否想结束对话
@@ -55,7 +66,12 @@ func AnalyzeWannaBye(message string) (string, error) {
 
 	只回复选项，不需要其他内容。
 	`
-	return aifunction.Queryai(prompt, message)
+	result, err := aifunction.Queryai(prompt, message)
+	if err != nil {
+		utils.Warn("AnalyzeWannaBye fallback to 想继续 due to AI error: %v", err)
+		return "想继续", nil
+	}
+	return result, nil
 }
 
 // EnhancePromptWithMemory 基于情感记忆增强AI提示词

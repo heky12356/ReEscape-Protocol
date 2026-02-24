@@ -121,6 +121,8 @@ func init() {
 	config.AiTemperature = float32(getFloatEnv("AI_TEMPERATURE", 1.0))
 	config.AiMaxTokens = getIntEnv("AI_MAX_TOKENS", 2000)
 	config.AiTimeout = getIntEnv("AI_TIMEOUT", 30)
+	config.AiRetryCount = getIntEnv("AI_RETRY_COUNT", 3)
+	config.AiRateLimit = getIntEnv("AI_RATE_LIMIT", 20)
 	config.AiTopP = float32(getFloatEnv("AI_TOP_P", 0.9))
 
 	// 状态管理配置

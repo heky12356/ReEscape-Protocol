@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 
+	"project-yume/internal/connect"
 	"project-yume/internal/model"
 	"project-yume/internal/utils"
 
@@ -26,7 +27,7 @@ func SendGroupMsg(c *websocket.Conn, GroupId int64, msg string) (err error) {
 	}
 
 	// 通过 WebSocket 发送消息到 OneBot
-	err = c.WriteMessage(websocket.TextMessage, jsonData)
+	err = connect.WriteMessage(c, websocket.TextMessage, jsonData)
 	if err != nil {
 		utils.Error("Write Error: %v", err)
 		return err
@@ -51,7 +52,7 @@ func SendGroupMsgEmoji(c *websocket.Conn, Message_id int64) (err error) {
 	}
 
 	// 通过 WebSocket 发送消息到 OneBot
-	err = c.WriteMessage(websocket.TextMessage, jsonData)
+	err = connect.WriteMessage(c, websocket.TextMessage, jsonData)
 	if err != nil {
 		utils.Error("Write Error: %v", err)
 		return err

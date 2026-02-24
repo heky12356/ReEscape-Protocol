@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"project-yume/internal/connect"
 	"project-yume/internal/model"
 	"project-yume/internal/utils"
 
@@ -35,7 +36,7 @@ func SendMsg(c *websocket.Conn, User_id int64, msg string) (err error) {
 		time.Sleep(time.Duration(rand.Intn(2000)+1000) * time.Millisecond)
 
 		// 通过 WebSocket 发送消息到 OneBot
-		err = c.WriteMessage(websocket.TextMessage, jsonData)
+		err = connect.WriteMessage(c, websocket.TextMessage, jsonData)
 		if err != nil {
 			utils.Error("Write Error: %v", err)
 			return err

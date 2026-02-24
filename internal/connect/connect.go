@@ -23,5 +23,7 @@ func Init(host string) (*websocket.Conn, error) {
 		utils.Error("连接失败: %v", err)
 		return nil, err
 	}
+
+	ensureOutboundWriter(c)
 	return c, nil
 }

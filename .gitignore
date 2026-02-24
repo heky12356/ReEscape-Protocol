@@ -2,7 +2,9 @@
 /test
 tip.md
 /public/aichatlog
+/public/memory
 plan.drawio
 .$plan.drawio.bkp
 debug.env
 logs
+task.md

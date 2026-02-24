@@ -33,7 +33,7 @@ func main() {
 		utils.Error("连接失败: %v", err)
 		os.Exit(1)
 	}
-	defer c.Close()
+	defer connect.Close(c)
 	utils.Info("WebSocket连接成功: %s", cfg.Hostadd)
 
 	// 初始化组件
@@ -93,7 +93,7 @@ func main() {
 			utils.Info("接收到中断信号，正在关闭...")
 
 			// 优雅关闭
-			err := c.WriteMessage(websocket.CloseMessage,
+			err := connect.WriteMessage(c, websocket.CloseMessage,
 				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 			if err != nil {
 				utils.Error("发送关闭消息失败: %v", err)

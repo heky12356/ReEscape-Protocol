@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"time"
 
+	"project-yume/internal/admin"
 	"project-yume/internal/config"
 	"project-yume/internal/connect"
 	"project-yume/internal/handler"
@@ -63,6 +64,9 @@ func main() {
 
 	// 定义上下文
 	ctx, cancel := context.WithCancel(context.Background())
+
+	// 启动管理后台 HTTP 服务
+	go admin.Start(ctx)
 
 	// 定义消息通道
 	msgChan := make(chan model.Msg, 100) // 增加缓冲区

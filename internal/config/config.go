@@ -13,17 +13,19 @@ import (
 
 type Config struct {
 	// 基础配置
-	Hostadd   string
-	WsPort    string
-	HttpPort  string
-	GroupID   int64
-	TargetId  int64
-	AiKEY     string
-	AiBaseUrl string
-	AiPrompt  string
-	AiModel   string
-	Character string
-	Token     string
+	Hostadd      string
+	WsPort       string
+	HttpPort     string
+	GroupID      int64
+	TargetId     int64
+	AiKEY        string
+	AiBaseUrl    string
+	AiPrompt     string
+	AiModel      string
+	AiProfile    string
+	AiConfigFile string
+	Character    string
+	Token        string
 
 	// 调度器配置
 	EnableNaturalScheduler bool    // 启用自然定时器
@@ -69,7 +71,10 @@ type Config struct {
 
 var config = &Config{}
 
-var cm *character.CharacterManager
+var (
+	cm               *character.CharacterManager
+	systemBasePrompt string
+)
 
 func init() {
 	envFile := os.Getenv("ENV_FILE")
@@ -88,7 +93,7 @@ func init() {
 	2. 每段长度控制在10-20字以内
 	3. 分段应该符合语义完整性
 	4. 避免在一个完整的句子中间分段
-	5. 不要使用emoji
+	5. 不要使用表情
 
 	【回复格式示例】
 	第一段内容$第二段内容$第三段内容
@@ -105,7 +110,10 @@ func init() {
 	config.AiKEY = os.Getenv("AI_KEY")
 	config.AiBaseUrl = os.Getenv("AI_BASEURL")
 	config.AiPrompt = basePrompt + os.Getenv("AI_PROMPT")
+	systemBasePrompt = basePrompt
 	config.AiModel = os.Getenv("AI_MODEL")
+	config.AiProfile = getStringEnv("AI_PROFILE", "default")
+	config.AiConfigFile = GetAIConfigFilePath()
 	config.Character = os.Getenv("CHARACTER")
 	config.Token = os.Getenv("Token")
 
@@ -124,6 +132,10 @@ func init() {
 	config.AiRetryCount = getIntEnv("AI_RETRY_COUNT", 3)
 	config.AiRateLimit = getIntEnv("AI_RATE_LIMIT", 20)
 	config.AiTopP = float32(getFloatEnv("AI_TOP_P", 0.9))
+
+	if err := loadActiveAIProfileIntoConfig(); err != nil {
+		utils.Warn("load ai profile config failed, fallback env values: %v", err)
+	}
 
 	// 状态管理配置
 	config.StateIdleTimeout = getIntEnv("STATE_IDLE_TIMEOUT", 30)

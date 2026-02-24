@@ -9,6 +9,8 @@ plan.drawio
 .env.*
 !.env.example
 !.env.enhanced.example
+config/ai_profiles.json
+config/character
 debug.env
 logs
 task.md

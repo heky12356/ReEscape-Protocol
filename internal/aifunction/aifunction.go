@@ -27,6 +27,7 @@ const (
 var (
 	aiLimiterOnce sync.Once
 	aiLimiter     *tokenBucketLimiter
+	aiLimiterMu   sync.Mutex
 )
 
 type tokenBucketLimiter struct {
@@ -75,6 +76,9 @@ func (l *tokenBucketLimiter) Wait(ctx context.Context) error {
 }
 
 func getAILimiter() *tokenBucketLimiter {
+	aiLimiterMu.Lock()
+	defer aiLimiterMu.Unlock()
+
 	aiLimiterOnce.Do(func() {
 		rateLimit := config.GetConfig().AiRateLimit
 		if rateLimit <= 0 {
@@ -83,6 +87,13 @@ func getAILimiter() *tokenBucketLimiter {
 		aiLimiter = newTokenBucketLimiter(rateLimit)
 	})
 	return aiLimiter
+}
+
+func ResetRateLimiter() {
+	aiLimiterMu.Lock()
+	defer aiLimiterMu.Unlock()
+	aiLimiter = nil
+	aiLimiterOnce = sync.Once{}
 }
 
 func backoffDelay(attempt int) time.Duration {
@@ -177,6 +188,11 @@ func createChatCompletionWithPolicy(request openai.ChatCompletionRequest) (opena
 		}
 
 		attemptCtx, cancelAttempt := context.WithTimeout(context.Background(), timeout)
+		client := getClient()
+		if client == nil {
+			cancelAttempt()
+			return openai.ChatCompletionResponse{}, fmt.Errorf("ai client is not initialized")
+		}
 		resp, lastErr = client.CreateChatCompletion(attemptCtx, request)
 		cancelAttempt()
 

@@ -1,0 +1,16 @@
+{
+  "active": "default",
+  "profiles": {
+    "default": {
+      "aiBaseUrl": "https://api.openai.com/v1",
+      "aiModel": "gpt-4o-mini",
+      "aiKey": "your_api_key",
+      "aiTemperature": 1,
+      "aiMaxTokens": 2000,
+      "aiTimeout": 30,
+      "aiRetryCount": 3,
+      "aiRateLimit": 20,
+      "aiTopP": 0.9
+    }
+  }
+}

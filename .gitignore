@@ -5,6 +5,10 @@ tip.md
 /public/memory
 plan.drawio
 .$plan.drawio.bkp
+.env
+.env.*
+!.env.example
+!.env.enhanced.example
 debug.env
 logs
 task.md

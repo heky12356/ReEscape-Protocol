@@ -72,12 +72,12 @@ var config = &Config{}
 var cm *character.CharacterManager
 
 func init() {
-	// err := godotenv.Load(".env")
-	err := godotenv.Load("debug.env")
-	// err := godotenv.Load("../../test/.env")
-	if err != nil {
-		utils.Error("Error loading .env file")
-		os.Exit(1)
+	envFile := os.Getenv("ENV_FILE")
+	if envFile == "" {
+		envFile = ".env"
+	}
+	if err := godotenv.Load(envFile); err != nil {
+		utils.Warn("env file not loaded (%s), fallback to system env only: %v", envFile, err)
 	}
 
 	// basePrompt

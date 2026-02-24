@@ -1,0 +1,21 @@
+#!/usr/bin/env sh
+set -eu
+
+PATTERN='sk-[A-Za-z0-9]{16,}|(AI_KEY|OPENAI_API_KEY)[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9._-]{16,}|Authorization[[:space:]]*[:=][[:space:]]*["'"'"']?Bearer[[:space:]]+[A-Za-z0-9._-]{16,}'
+
+staged_files="$(git diff --cached --name-only --diff-filter=ACMR | grep -Ev '^(\.env\.example|\.env\.enhanced\.example|\.githooks/pre-commit)$' || true)"
+
+if [ -z "$staged_files" ]; then
+  exit 0
+fi
+
+matches="$(printf '%s\n' "$staged_files" | xargs git grep --cached -nI -E "$PATTERN" -- 2>/dev/null || true)"
+
+if [ -n "$matches" ]; then
+  echo "ERROR: detected possible plaintext secret in staged files:"
+  echo "$matches"
+  echo "Please move secrets to environment variables before commit."
+  exit 1
+fi
+
+exit 0

@@ -16,7 +16,6 @@ type Config struct {
 	Hostadd      string
 	WsPort       string
 	HttpPort     string
-	GroupID      int64
 	TargetId     int64
 	AiKEY        string
 	AiBaseUrl    string
@@ -43,29 +42,23 @@ type Config struct {
 	AiRateLimit   int     // AI请求速率限制(每分钟)
 	AiTopP        float32 // AI top_p参数
 
-	// 状态管理配置
-	StateIdleTimeout        int // 空闲超时(分钟)
-	StateComfortThreshold   int // 安慰阈值
-	StateEncourageThreshold int // 鼓励阈值
-	StateLongChatMinLength  int // 长对话最小长度
-	StateMaxConversationLen int // 最大对话长度
-
 	// 日志配置
-	LogLevel    string // 日志级别
-	LogToFile   bool   // 是否记录到文件
-	LogMaxFiles int    // 最大日志文件数
-	LogMaxSize  int    // 最大日志文件大小(MB)
+	LogLevel       string // 日志级别
+	LogToFile      bool   // 是否记录到文件
+	LogFormat      string // 日志格式，text/json
+	LogEnableColor bool   // 控制台日志颜色
+
+	// 可观测性配置
+	RequestIDHeader      string // 请求 ID Header
+	EnableHealthEndpoint bool   // 启用健康检查接口
+	EnableMetrics        bool   // 启用指标接口
+	MetricsPath          string // 指标接口路径
 
 	// 存储配置
-	DataDir   string // 数据目录
-	LogDir    string // 日志目录
-	BackupDir string // 备份目录
+	DataDir string // 数据目录
+	LogDir  string // 日志目录
 
 	// 功能开关
-	EnableDebugMode    bool // 调试模式
-	EnableHealthCheck  bool // 健康检查
-	EnableMetrics      bool // 指标收集
-	EnableAutoBackup   bool // 自动备份
 	EnableOnlyLongChat bool // 仅长对话模式
 }
 
@@ -105,7 +98,6 @@ func init() {
 	config.Hostadd = os.Getenv("HOSTADD")
 	config.WsPort = os.Getenv("WsPort")
 	config.HttpPort = os.Getenv("HttpPort")
-	config.GroupID, _ = strconv.ParseInt(os.Getenv("GROUPID"), 10, 64)
 	config.TargetId, _ = strconv.ParseInt(os.Getenv("TARGETID"), 10, 64)
 	config.AiKEY = os.Getenv("AI_KEY")
 	config.AiBaseUrl = os.Getenv("AI_BASEURL")
@@ -137,29 +129,21 @@ func init() {
 		utils.Warn("load ai profile config failed, fallback env values: %v", err)
 	}
 
-	// 状态管理配置
-	config.StateIdleTimeout = getIntEnv("STATE_IDLE_TIMEOUT", 30)
-	config.StateComfortThreshold = getIntEnv("STATE_COMFORT_THRESHOLD", 5)
-	config.StateEncourageThreshold = getIntEnv("STATE_ENCOURAGE_THRESHOLD", 3)
-	config.StateLongChatMinLength = getIntEnv("STATE_LONG_CHAT_MIN_LENGTH", 10)
-	config.StateMaxConversationLen = getIntEnv("STATE_MAX_CONVERSATION_LEN", 50)
-
 	// 日志配置
 	config.LogLevel = getStringEnv("LOG_LEVEL", "INFO")
 	config.LogToFile = getBoolEnv("LOG_TO_FILE", true)
-	config.LogMaxFiles = getIntEnv("LOG_MAX_FILES", 7)
-	config.LogMaxSize = getIntEnv("LOG_MAX_SIZE", 10)
+	config.LogFormat = getStringEnv("LOG_FORMAT", "text")
+	config.LogEnableColor = getBoolEnv("LOG_ENABLE_COLOR", true)
+	config.RequestIDHeader = getStringEnv("REQUEST_ID_HEADER", "X-Request-ID")
+	config.EnableHealthEndpoint = getBoolEnv("ENABLE_HEALTH_ENDPOINT", true)
+	config.EnableMetrics = getBoolEnv("ENABLE_METRICS", true)
+	config.MetricsPath = getStringEnv("METRICS_PATH", "/metrics")
 
 	// 存储配置
 	config.DataDir = getStringEnv("DATA_DIR", "./data")
 	config.LogDir = getStringEnv("LOG_DIR", "./logs")
-	config.BackupDir = getStringEnv("BACKUP_DIR", "./backup")
 
 	// 功能开关
-	config.EnableDebugMode = getBoolEnv("ENABLE_DEBUG_MODE", false)
-	config.EnableHealthCheck = getBoolEnv("ENABLE_HEALTH_CHECK", true)
-	config.EnableMetrics = getBoolEnv("ENABLE_METRICS", false)
-	config.EnableAutoBackup = getBoolEnv("ENABLE_AUTO_BACKUP", true)
 	config.EnableOnlyLongChat = getBoolEnv("ENABLE_ONLY_LONG_CHAT", false)
 
 	cm, err := character.NewCharacterManager("./config/character", config.Character)

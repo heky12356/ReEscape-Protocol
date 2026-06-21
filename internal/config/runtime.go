@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"project-yume/internal/character"
+	"project-yume/internal/utils"
 )
 
 func GetEnvFilePath() string {
@@ -23,11 +24,6 @@ func ReloadRuntimeConfig() error {
 	config.AiProfile = getStringEnv("AI_PROFILE", config.AiProfile)
 	config.AiConfigFile = GetAIConfigFilePath()
 
-	if v := os.Getenv("GROUPID"); v != "" {
-		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
-			config.GroupID = parsed
-		}
-	}
 	if v := os.Getenv("TARGETID"); v != "" {
 		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
 			config.TargetId = parsed
@@ -38,6 +34,24 @@ func ReloadRuntimeConfig() error {
 		return fmt.Errorf("load ai profile config failed: %w", err)
 	}
 
+	config.EnableNaturalScheduler = getBoolEnv("ENABLE_NATURAL_SCHEDULER", config.EnableNaturalScheduler)
+	config.EnableEmotionalMemory = getBoolEnv("ENABLE_EMOTIONAL_MEMORY", config.EnableEmotionalMemory)
+	config.ActiveHours = getIntArrayEnv("ACTIVE_HOURS", config.ActiveHours)
+	config.SleepHours = getIntArrayEnv("SLEEP_HOURS", config.SleepHours)
+	config.BaseInterval = getIntEnv("BASE_INTERVAL", config.BaseInterval)
+	config.RandomFactor = getFloatEnv("RANDOM_FACTOR", config.RandomFactor)
+	config.LogLevel = getStringEnv("LOG_LEVEL", config.LogLevel)
+	config.LogToFile = getBoolEnv("LOG_TO_FILE", config.LogToFile)
+	config.LogFormat = getStringEnv("LOG_FORMAT", config.LogFormat)
+	config.LogEnableColor = getBoolEnv("LOG_ENABLE_COLOR", config.LogEnableColor)
+	config.RequestIDHeader = getStringEnv("REQUEST_ID_HEADER", config.RequestIDHeader)
+	config.EnableHealthEndpoint = getBoolEnv("ENABLE_HEALTH_ENDPOINT", config.EnableHealthEndpoint)
+	config.EnableMetrics = getBoolEnv("ENABLE_METRICS", config.EnableMetrics)
+	config.MetricsPath = getStringEnv("METRICS_PATH", config.MetricsPath)
+	config.DataDir = getStringEnv("DATA_DIR", config.DataDir)
+	config.LogDir = getStringEnv("LOG_DIR", config.LogDir)
+	config.EnableOnlyLongChat = getBoolEnv("ENABLE_ONLY_LONG_CHAT", config.EnableOnlyLongChat)
+
 	config.Character = getStringEnv("CHARACTER", "default")
 	config.Token = os.Getenv("Token")
 
@@ -47,6 +61,16 @@ func ReloadRuntimeConfig() error {
 	}
 	cm = characterManager
 	config.AiPrompt = systemBasePrompt + os.Getenv("AI_PROMPT") + cm.GetPrompt()
+
+	if err := utils.ConfigureDefaultLogger(
+		utils.ParseLogLevel(config.LogLevel),
+		config.LogToFile,
+		config.LogEnableColor,
+		config.LogDir,
+		config.LogFormat,
+	); err != nil {
+		return fmt.Errorf("configure logger failed: %w", err)
+	}
 
 	return nil
 }

@@ -1,77 +1,213 @@
 package service
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
+	"time"
 
 	"project-yume/internal/aifunction"
 	"project-yume/internal/memory"
+	"project-yume/internal/metrics"
 	"project-yume/internal/utils"
 
 	"github.com/sashabaranov/go-openai"
 )
 
-// AnalyzeEmotion 分析情感
-func AnalyzeEmotion(message string) (string, error) {
-	prompt := "请帮我分析下这段话的情感，并在下面六个选项中选择：开心，生气，中性，哲学，敷衍，难过， 并只回复选项，例如：\"user: 哈哈哈\" resp: \"开心\", 不需要回答多余的内容，也不需要添加分号"
-	result, err := aifunction.Queryai(prompt, message)
-	if err != nil {
-		utils.Warn("AnalyzeEmotion fallback to 中性 due to AI error: %v", err)
-		return "中性", nil
+type AnalysisMode string
+
+const (
+	AnalysisModeDefault  AnalysisMode = "default"
+	AnalysisModeLongChat AnalysisMode = "long_chat"
+)
+
+type MessageAnalysis struct {
+	Emotion   string `json:"emotion"`
+	Intention string `json:"intention"`
+	WannaBye  string `json:"wanna_bye"`
+}
+
+var (
+	validEmotions = map[string]struct{}{
+		"开心": {},
+		"生气": {},
+		"中性": {},
+		"哲学": {},
+		"敷衍": {},
+		"难过": {},
 	}
+	validIntentions = map[string]struct{}{
+		"想和对方聊天": {},
+		"想被对方鼓励": {},
+		"想和对方倾诉": {},
+		"安慰对方":   {},
+		"鼓励对方":   {},
+		"和对方道歉":  {},
+	}
+	validWannaBye = map[string]struct{}{
+		"想继续":   {},
+		"想结束对话": {},
+	}
+)
+
+// AnalyzeMessage 单次调用模型，返回结构化分类结果。
+func AnalyzeMessage(message string, mode AnalysisMode) (MessageAnalysis, error) {
+	startedAt := time.Now()
+	defer func() {
+		metrics.ObserveDuration(
+			"bot_ai_request_duration",
+			"AI request duration.",
+			time.Since(startedAt),
+			map[string]string{"kind": "classify", "mode": string(mode)},
+		)
+	}()
+
+	prompt := buildAnalysisPrompt(mode)
+	raw, err := aifunction.Queryai(prompt, message)
+	if err != nil {
+		metrics.IncCounter(
+			"bot_ai_requests_total",
+			"Total AI requests by kind and result.",
+			map[string]string{"kind": "classify", "mode": string(mode), "result": "fallback_ai"},
+		)
+		utils.Warn("AnalyzeMessage fallback due to AI error: %v", err)
+		return fallbackAnalysis(mode), nil
+	}
+
+	result, err := parseMessageAnalysis(raw, mode)
+	if err != nil {
+		metrics.IncCounter(
+			"bot_ai_requests_total",
+			"Total AI requests by kind and result.",
+			map[string]string{"kind": "classify", "mode": string(mode), "result": "fallback_parse"},
+		)
+		utils.Warn("AnalyzeMessage fallback due to parse error: %v, raw=%q", err, raw)
+		return fallbackAnalysis(mode), nil
+	}
+
+	metrics.IncCounter(
+		"bot_ai_requests_total",
+		"Total AI requests by kind and result.",
+		map[string]string{"kind": "classify", "mode": string(mode), "result": "ok"},
+	)
 	return result, nil
 }
 
-// AnalyzeIntention 分析意图
-func AnalyzeIntention(message string) (string, error) {
-	prompt := "请帮我分析下这段话的意图，并在下面六个选项中选择：想和对方聊天，想被对方鼓励，想和对方倾诉，安慰对方，鼓励对方，和对方道歉 并只回复选项，例如：\"user: 能陪我会儿吗\" resp: \"想和对方倾诉\", 不需要回答多余的内容，也不需要添加分号"
-	result, err := aifunction.Queryai(prompt, message)
-	if err != nil {
-		utils.Warn("AnalyzeIntention fallback to 想和对方聊天 due to AI error: %v", err)
-		return "想和对方聊天", nil
+func buildAnalysisPrompt(mode AnalysisMode) string {
+	baseRules := `
+你是一个消息分类器。请严格返回 JSON，不要输出解释，不要使用 markdown 代码块。
+
+字段要求：
+- emotion: 只能是 [开心, 生气, 中性, 哲学, 敷衍, 难过]
+- intention: 只能是 [想和对方聊天, 想被对方鼓励, 想和对方倾诉, 安慰对方, 鼓励对方, 和对方道歉]
+- wanna_bye: 只能是 [想继续, 想结束对话]
+
+额外要求：
+- 所有字段都必须出现。
+- 如果意图不明确，intention 选择 "想和对方聊天"。
+- 如果情感不明确，emotion 选择 "中性"。
+- 只返回单个 JSON 对象。
+`
+
+	if mode == AnalysisModeLongChat {
+		return baseRules + `
+当前场景：用户正在和 AI 进行长对话。
+
+wanna_bye 判断标准：
+- "想结束对话"：再见、拜拜、晚安、我走了、先这样吧、不聊了、谢谢你今天陪我聊天、困了要睡觉了 等
+- "想继续"：提出新话题、继续追问、简单回应、等等、稍等、语气词、表情等
+- 当意图不明确时，必须选择 "想继续"，避免误结束对话。
+
+输出示例：
+{"emotion":"开心","intention":"想和对方聊天","wanna_bye":"想继续"}
+`
 	}
+
+	return baseRules + `
+当前场景：普通消息分类，不在结束对话判断场景。
+
+wanna_bye 一律返回 "想继续"。
+
+输出示例：
+{"emotion":"中性","intention":"想和对方聊天","wanna_bye":"想继续"}
+`
+}
+
+func parseMessageAnalysis(raw string, mode AnalysisMode) (MessageAnalysis, error) {
+	jsonText, err := extractFirstJSONObject(raw)
+	if err != nil {
+		return MessageAnalysis{}, err
+	}
+
+	var result MessageAnalysis
+	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
+		return MessageAnalysis{}, fmt.Errorf("unmarshal analysis json failed: %w", err)
+	}
+
+	result.Emotion = strings.TrimSpace(result.Emotion)
+	result.Intention = strings.TrimSpace(result.Intention)
+	result.WannaBye = strings.TrimSpace(result.WannaBye)
+
+	if mode != AnalysisModeLongChat && result.WannaBye == "" {
+		result.WannaBye = "想继续"
+	}
+
+	if err := validateMessageAnalysis(result, mode); err != nil {
+		return MessageAnalysis{}, err
+	}
+
 	return result, nil
 }
 
-// AnalyzeWannaBye 分析是否想结束对话
-func AnalyzeWannaBye(message string) (string, error) {
-	prompt := `
-	你是一个聊天意图分析助手。当前用户正在与AI进行长对话，请分析用户的这句话是否想要结束当前对话。
-
-	判断标准：
-	【想结束对话】的信号：
-	- 明确的告别词：再见、拜拜、88、bye、晚安、睡了等
-	- 表达要离开：我走了、我去忙了、先这样吧、不聊了等  
-	- 礼貌性结束：谢谢你、辛苦了、今天就到这里等
-
-	【想继续】的信号：
-	- 提出新话题：对了、话说、还有等
-	- 表达疑惑但想了解：什么意思、为什么、怎么回事等
-	- 简单回应：哈哈、嗯、好的、是的等
-	- 暂停性词语：等等、稍等、让我想想等
-	- 单个字符、表情符号、语气词等
-
-	注意：当意图不明确时，倾向于判断为"想继续"，避免误结束有价值的对话。
-
-	请在以下两个选项中选择：想继续，想结束对话
-
-	示例：
-	"哈哈哈" → "想继续"
-	"拜拜啦" → "想结束对话"  
-	"等等" → "想继续"
-	"我去吃饭了" → "想结束对话"
-	"啊？" → "想继续"
-	"谢谢你今天陪我聊天" → "想结束对话"
-	"对了还有个问题" → "想继续"
-	"困了要睡觉了" → "想结束对话"
-
-	只回复选项，不需要其他内容。
-	`
-	result, err := aifunction.Queryai(prompt, message)
-	if err != nil {
-		utils.Warn("AnalyzeWannaBye fallback to 想继续 due to AI error: %v", err)
-		return "想继续", nil
+func extractFirstJSONObject(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	start := strings.Index(trimmed, "{")
+	if start < 0 {
+		return "", fmt.Errorf("no json object start found")
 	}
-	return result, nil
+
+	depth := 0
+	for i := start; i < len(trimmed); i++ {
+		switch trimmed[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return trimmed[start : i+1], nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no complete json object found")
+}
+
+func validateMessageAnalysis(result MessageAnalysis, mode AnalysisMode) error {
+	if _, ok := validEmotions[result.Emotion]; !ok {
+		return fmt.Errorf("invalid emotion: %q", result.Emotion)
+	}
+	if _, ok := validIntentions[result.Intention]; !ok {
+		return fmt.Errorf("invalid intention: %q", result.Intention)
+	}
+	if _, ok := validWannaBye[result.WannaBye]; !ok {
+		return fmt.Errorf("invalid wanna_bye: %q", result.WannaBye)
+	}
+	if mode != AnalysisModeLongChat && result.WannaBye != "想继续" {
+		return fmt.Errorf("unexpected wanna_bye for default mode: %q", result.WannaBye)
+	}
+	return nil
+}
+
+func fallbackAnalysis(mode AnalysisMode) MessageAnalysis {
+	result := MessageAnalysis{
+		Emotion:   "中性",
+		Intention: "想和对方聊天",
+		WannaBye:  "想继续",
+	}
+	if mode == AnalysisModeLongChat {
+		return result
+	}
+	return result
 }
 
 // EnhancePromptWithMemory 基于情感记忆增强AI提示词

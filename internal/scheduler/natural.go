@@ -39,14 +39,12 @@ type MessagePool struct {
 }
 
 func NewNaturalScheduler() *NaturalScheduler {
-	return &NaturalScheduler{
-		baseInterval:    45 * time.Minute,                         // 基础间隔45分钟
-		randomFactor:    0.5,                                      // 随机因子50%
-		activeHours:     []int{9, 10, 11, 14, 15, 16, 19, 20, 21}, // 活跃时间
-		sleepHours:      []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 22, 23}, // 休息时间
+	ns := &NaturalScheduler{
 		messagePool:     newMessagePool(),
 		lastMessageTime: time.Now(),
 	}
+	ns.reloadConfig()
+	return ns
 }
 
 func newMessagePool() *MessagePool {
@@ -80,20 +78,25 @@ func newMessagePool() *MessagePool {
 
 // GetNextInterval 计算下一次发送间隔
 func (ns *NaturalScheduler) GetNextInterval() time.Duration {
+	ns.reloadConfig()
+
 	now := time.Now()
 	hour := now.Hour()
+	baseMinutes := int(ns.baseInterval / time.Minute)
+	if baseMinutes <= 0 {
+		baseMinutes = 45
+	}
 
 	// 基础间隔调整
 	var interval time.Duration
 	if ns.isActiveHour(hour) {
-		// 活跃时间：30-60分钟
-		interval = time.Duration(30+rand.Intn(30)) * time.Minute
+		// 默认 45 分钟时约为 30-60 分钟。
+		interval = randomDurationInMinutes(maxInt(5, (baseMinutes*2)/3), maxInt(5, (baseMinutes*4)/3))
 	} else if ns.isSleepHour(hour) {
-		// 休息时间：2-4小时
-		interval = time.Duration(2+rand.Intn(2)) * time.Hour
+		// 默认 45 分钟时约为 2-4.5 小时。
+		interval = randomDurationInMinutes(maxInt(120, baseMinutes*3), maxInt(120, baseMinutes*6))
 	} else {
-		// 普通时间：45-90分钟
-		interval = time.Duration(45+rand.Intn(45)) * time.Minute
+		interval = randomDurationInMinutes(maxInt(5, baseMinutes), maxInt(5, baseMinutes*2))
 	}
 
 	// 添加随机因子
@@ -101,6 +104,54 @@ func (ns *NaturalScheduler) GetNextInterval() time.Duration {
 	interval += randomOffset
 
 	return interval
+}
+
+func (ns *NaturalScheduler) reloadConfig() {
+	cfg := config.GetConfig()
+
+	baseMinutes := cfg.BaseInterval
+	if baseMinutes <= 0 {
+		baseMinutes = 45
+	}
+	ns.baseInterval = time.Duration(baseMinutes) * time.Minute
+
+	randomFactor := cfg.RandomFactor
+	if randomFactor < 0 {
+		randomFactor = 0
+	}
+	ns.randomFactor = randomFactor
+
+	if len(cfg.ActiveHours) == 0 {
+		ns.activeHours = []int{9, 10, 11, 14, 15, 16, 19, 20, 21}
+	} else {
+		ns.activeHours = append([]int(nil), cfg.ActiveHours...)
+	}
+
+	if len(cfg.SleepHours) == 0 {
+		ns.sleepHours = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 22, 23}
+	} else {
+		ns.sleepHours = append([]int(nil), cfg.SleepHours...)
+	}
+}
+
+func randomDurationInMinutes(minMinutes, maxMinutes int) time.Duration {
+	if minMinutes <= 0 {
+		minMinutes = 1
+	}
+	if maxMinutes < minMinutes {
+		maxMinutes = minMinutes
+	}
+	if maxMinutes == minMinutes {
+		return time.Duration(minMinutes) * time.Minute
+	}
+	return time.Duration(minMinutes+rand.Intn(maxMinutes-minMinutes+1)) * time.Minute
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // SelectMessage 智能选择消息
@@ -196,16 +247,16 @@ func (ns *NaturalScheduler) isSleepHour(hour int) bool {
 }
 
 // ShouldSend 判断是否应该发送消息
-func (ns *NaturalScheduler) ShouldSend() nowState {
+func (ns *NaturalScheduler) ShouldSend(sessionID string) nowState {
 	sm := state.GetManager()
 
 	// 如果正在长对话，不发送
-	if sm.GetState() == state.StateLongChat {
+	if sm.GetState(sessionID) == state.StateLongChat {
 		return isLongChat
 	}
 
 	// 如果最近刚回复过，延长间隔
-	if sm.GetState() == state.StateBusy && sm.GetTimeSinceLastReply() < 1*time.Hour {
+	if sm.GetState(sessionID) == state.StateBusy && sm.GetTimeSinceLastReply(sessionID) < 1*time.Hour {
 		return isBusy
 	}
 
@@ -213,9 +264,11 @@ func (ns *NaturalScheduler) ShouldSend() nowState {
 }
 
 // SendScheduledMessage 发送定时消息
-func (ns *NaturalScheduler) SendScheduledMessage(c *websocket.Conn) error {
+func (ns *NaturalScheduler) SendScheduledMessage(c *websocket.Conn, sessionID string, targetUserID int64) error {
+	state.GetManager().EnsureSession(sessionID, targetUserID, 0, 1)
+
 	// 看下是在长对话还是最近刚发过消息
-	nowstate := ns.ShouldSend()
+	nowstate := ns.ShouldSend(sessionID)
 	if nowstate != suitTime {
 		utils.Info("当前状态不适合发送消息, state: %v", nowstate)
 		return nil
@@ -226,8 +279,8 @@ func (ns *NaturalScheduler) SendScheduledMessage(c *websocket.Conn) error {
 
 	// 根据消息类型设置状态
 	if message == "想你了" || message == "有点想聊天" {
-		state.GetManager().SetState(state.StateNeedComfort)
+		state.GetManager().SetState(sessionID, state.StateNeedComfort)
 	}
 
-	return service.SendMsg(c, config.GetConfig().TargetId, message)
+	return service.SendMsg(c, targetUserID, message)
 }

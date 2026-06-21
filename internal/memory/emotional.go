@@ -2,10 +2,11 @@ package memory
 
 import (
 	"encoding/json"
-	"os"
+	"fmt"
 	"sync"
 	"time"
 
+	"project-yume/internal/storage"
 	"project-yume/internal/utils"
 )
 
@@ -38,17 +39,19 @@ type Interaction struct {
 type MemoryManager struct {
 	memories map[int64]*EmotionalMemory
 	mu       sync.RWMutex
-	filePath string
+	store    storage.SnapshotStore
+	dirty    storage.DirtyMarker
 }
 
 var manager *MemoryManager
 
+const SnapshotName = "memory/emotional_memory.json"
+const FlushTaskName = "emotional_memory"
+
 func init() {
 	manager = &MemoryManager{
 		memories: make(map[int64]*EmotionalMemory),
-		filePath: "./public/memory/emotional_memory.json",
 	}
-	manager.loadFromFile()
 }
 
 func GetManager() *MemoryManager {
@@ -63,8 +66,6 @@ func (mm *MemoryManager) RecordInteraction(userID int64, userMsg, botReply, emot
 	}
 
 	mm.mu.Lock()
-	defer mm.mu.Unlock()
-
 	if mm.memories[userID] == nil {
 		mm.memories[userID] = &EmotionalMemory{
 			UserID:       userID,
@@ -79,10 +80,9 @@ func (mm *MemoryManager) RecordInteraction(userID int64, userMsg, botReply, emot
 
 	memory := mm.memories[userID]
 	memory.mu.Lock()
-	defer memory.mu.Unlock()
-
+	now := time.Now()
 	interaction := Interaction{
-		Timestamp: time.Now(),
+		Timestamp: now,
 		UserMsg:   userMsg,
 		BotReply:  botReply,
 		Emotion:   emotion,
@@ -91,7 +91,7 @@ func (mm *MemoryManager) RecordInteraction(userID int64, userMsg, botReply, emot
 	}
 
 	memory.Interactions = append(memory.Interactions, interaction)
-	memory.LastSeen = time.Now()
+	memory.LastSeen = now
 
 	// 保持最近100条记录
 	if len(memory.Interactions) > 100 {
@@ -100,9 +100,10 @@ func (mm *MemoryManager) RecordInteraction(userID int64, userMsg, botReply, emot
 
 	// 更新偏好
 	mm.updatePreferences(memory, emotion, intention)
+	memory.mu.Unlock()
+	mm.mu.Unlock()
 
-	// 异步保存到文件
-	go mm.saveToFile()
+	mm.markDirty()
 }
 
 // GetRecentEmotions 获取最近的情感状态
@@ -237,34 +238,122 @@ func (mm *MemoryManager) updatePreferences(memory *EmotionalMemory, emotion, int
 	memory.Preferences.IntentionCount[intention]++
 }
 
-func (mm *MemoryManager) saveToFile() {
+func (mm *MemoryManager) ConfigurePersistence(store storage.SnapshotStore, dirty storage.DirtyMarker) error {
+	mm.mu.Lock()
+	mm.store = store
+	mm.dirty = dirty
+	mm.mu.Unlock()
+
+	if store == nil {
+		return nil
+	}
+
+	data, err := store.Load(SnapshotName)
+	if err != nil {
+		return fmt.Errorf("load emotional memories failed: %w", err)
+	}
+	if len(data) == 0 {
+		return nil
+	}
+
+	loaded := make(map[int64]*EmotionalMemory)
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		return fmt.Errorf("unmarshal emotional memories failed: %w", err)
+	}
+
+	mm.mu.Lock()
+	mm.memories = loaded
+	mm.normalizeMemoriesLocked()
+	mm.mu.Unlock()
+
+	return nil
+}
+
+func (mm *MemoryManager) Flush() error {
 	mm.mu.RLock()
-	defer mm.mu.RUnlock()
+	store := mm.store
+	snapshot := mm.snapshotLocked()
+	mm.mu.RUnlock()
 
-	// 确保目录存在
-	err := os.MkdirAll("./public/memory", 0o755)
-	if err != nil {
-		utils.Error("创建目录失败: %v", err)
-		return
+	if store == nil {
+		return nil
 	}
 
-	data, err := json.MarshalIndent(mm.memories, "", "  ")
+	data, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
-		utils.Error("序列化失败: %v", err)
-		return
+		return fmt.Errorf("marshal emotional memories failed: %w", err)
 	}
 
-	err = os.WriteFile(mm.filePath, data, 0o644)
-	if err != nil {
-		utils.Error("写入文件失败: %v", err)
+	if err := store.Save(SnapshotName, data); err != nil {
+		return fmt.Errorf("save emotional memories failed: %w", err)
+	}
+
+	return nil
+}
+
+func (mm *MemoryManager) markDirty() {
+	mm.mu.RLock()
+	dirty := mm.dirty
+	mm.mu.RUnlock()
+
+	if dirty != nil {
+		dirty.MarkDirty(FlushTaskName)
 	}
 }
 
-func (mm *MemoryManager) loadFromFile() {
-	data, err := os.ReadFile(mm.filePath)
-	if err != nil {
+func (mm *MemoryManager) snapshotLocked() map[int64]*EmotionalMemory {
+	result := make(map[int64]*EmotionalMemory, len(mm.memories))
+
+	for userID, memory := range mm.memories {
+		if memory == nil {
+			continue
+		}
+
+		memory.mu.RLock()
+		copyMemory := &EmotionalMemory{
+			UserID:       memory.UserID,
+			Interactions: append([]Interaction(nil), memory.Interactions...),
+			Preferences: Preferences{
+				EmotionCount:   cloneStringIntMap(memory.Preferences.EmotionCount),
+				IntentionCount: cloneStringIntMap(memory.Preferences.IntentionCount),
+			},
+			LastSeen: memory.LastSeen,
+		}
+		memory.mu.RUnlock()
+
+		result[userID] = copyMemory
+	}
+
+	return result
+}
+
+func (mm *MemoryManager) normalizeMemoriesLocked() {
+	if mm.memories == nil {
+		mm.memories = make(map[int64]*EmotionalMemory)
 		return
 	}
 
-	_ = json.Unmarshal(data, &mm.memories)
+	for userID, memory := range mm.memories {
+		if memory == nil {
+			delete(mm.memories, userID)
+			continue
+		}
+		if memory.Preferences.EmotionCount == nil {
+			memory.Preferences.EmotionCount = make(map[string]int)
+		}
+		if memory.Preferences.IntentionCount == nil {
+			memory.Preferences.IntentionCount = make(map[string]int)
+		}
+		if memory.Interactions == nil {
+			memory.Interactions = []Interaction{}
+		}
+	}
+}
+
+func cloneStringIntMap(source map[string]int) map[string]int {
+	result := make(map[string]int, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
 }

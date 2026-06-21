@@ -1,0 +1,16 @@
+{
+  "active": "default",
+  "profiles": {
+    "default": {
+      "aiBaseUrl": "",
+      "aiModel": "",
+      "aiKey": "",
+      "aiTemperature": 1,
+      "aiMaxTokens": 2000,
+      "aiTimeout": 30,
+      "aiRetryCount": 3,
+      "aiRateLimit": 20,
+      "aiTopP": 0.9
+    }
+  }
+}

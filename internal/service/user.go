@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"math/rand"
 	"strings"
 	"time"
@@ -13,34 +14,64 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func SendMsg(c *websocket.Conn, User_id int64, msg string) (err error) {
-	// fmt.Println("GroupId:", GroupId, "msg:", msg)
-	var msgs []string = strings.Split(msg, "$")
-
-	for _, m := range msgs {
-		ws_msg := model.Message{
-			Action: "send_private_msg",
-			Params: model.UserMessageParams{
-				User_id: User_id,
-				Message: m,
-			},
-			Echo: "send_msg",
-		}
-		jsonData, err := json.Marshal(ws_msg)
-		if err != nil {
-			utils.Error("Error marshaling JSON: %v", err)
-			return err
+func SendMsg(c *websocket.Conn, userID int64, msg string) error {
+	chunks := ParseReplyChunks(msg)
+	for _, chunk := range chunks {
+		if text := strings.TrimSpace(chunk.Text); text != "" {
+			for _, segment := range strings.Split(text, "$") {
+				trimmed := strings.TrimSpace(segment)
+				if trimmed == "" {
+					continue
+				}
+				if err := sendPrivateRawMessage(c, userID, trimmed); err != nil {
+					return err
+				}
+			}
 		}
 
-		// 随机延迟 1-3 秒
-		time.Sleep(time.Duration(rand.Intn(2000)+1000) * time.Millisecond)
-
-		// 通过 WebSocket 发送消息到 OneBot
-		err = connect.WriteMessage(c, websocket.TextMessage, jsonData)
-		if err != nil {
-			utils.Error("Write Error: %v", err)
-			return err
+		if chunk.ImageAssetID != "" {
+			if err := sendPrivateImageAsset(c, userID, chunk.ImageAssetID); err != nil {
+				utils.Warn("send image asset failed: %v", err)
+			}
 		}
+	}
+	return nil
+}
+
+func sendPrivateImageAsset(c *websocket.Conn, userID int64, assetID string) error {
+	asset, err := LookupImageAsset(assetID)
+	if err != nil {
+		return err
+	}
+
+	fileValue, err := ResolveImageAssetCQFile(asset)
+	if err != nil {
+		return err
+	}
+
+	return sendPrivateRawMessage(c, userID, fmt.Sprintf("[CQ:image,file=%s]", fileValue))
+}
+
+func sendPrivateRawMessage(c *websocket.Conn, userID int64, msg string) error {
+	wsMsg := model.Message{
+		Action: "send_private_msg",
+		Params: model.UserMessageParams{
+			User_id: userID,
+			Message: msg,
+		},
+		Echo: "send_msg",
+	}
+	jsonData, err := json.Marshal(wsMsg)
+	if err != nil {
+		utils.Error("Error marshaling JSON: %v", err)
+		return err
+	}
+
+	time.Sleep(time.Duration(rand.Intn(2000)+1000) * time.Millisecond)
+	err = connect.WriteMessage(c, websocket.TextMessage, jsonData)
+	if err != nil {
+		utils.Error("Write Error: %v", err)
+		return err
 	}
 	return nil
 }

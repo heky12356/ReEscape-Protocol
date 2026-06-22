@@ -3,6 +3,7 @@ import { Panel } from "../components/common/Panel";
 import { InputField, SelectField } from "../components/common/FormField";
 
 const BOOLEAN_OPTIONS = ["true", "false"];
+const VISION_DETAIL_OPTIONS = ["auto", "low", "high"];
 
 export function AIConfigPage({ panel }) {
   const cfg = panel.config;
@@ -143,6 +144,70 @@ export function AIConfigPage({ panel }) {
             </p>
             <div className="insight-meta mono">
               {cfg.enableTimeContext ? `${cfg.timeContextTimezone || "default"} / ${cfg.timeContextFormat || "default"}` : "time context disabled"}
+            </div>
+          </div>
+        </div>
+      </Panel>
+
+      <Panel
+        eyebrow="Vision bridge"
+        title="图片理解与素材图回复"
+        subtitle="这层决定模型能不能看图、文本模型是否做 OCR 补充，以及机器人能不能从受控素材库发图。"
+      >
+        <div className="split-layout">
+          <div className="form-grid">
+            <SelectField
+              label="Enable vision input"
+              value={String(cfg.enableVisionInput)}
+              options={BOOLEAN_OPTIONS}
+              hint="仅对支持 OpenAI-compatible image_url 输入的模型开启。"
+              onChange={(v) => updateField(panel, "enableVisionInput", v === "true")}
+            />
+            <SelectField
+              label="Vision image detail"
+              value={cfg.visionImageDetail}
+              options={VISION_DETAIL_OPTIONS}
+              hint="控制传给模型的图片细节等级。"
+              onChange={(v) => updateField(panel, "visionImageDetail", v)}
+            />
+            <SelectField
+              label="Enable OCR fallback"
+              value={String(cfg.enableImageOCRFallback)}
+              options={BOOLEAN_OPTIONS}
+              hint="文本模型场景下，尝试通过 OneBot OCR 补充图片文字。"
+              onChange={(v) => updateField(panel, "enableImageOCRFallback", v === "true")}
+            />
+            <SelectField
+              label="Enable asset image reply"
+              value={String(cfg.enableImageAssetReply)}
+              options={BOOLEAN_OPTIONS}
+              hint="允许模型通过素材图指令触发受控图片发送。"
+              onChange={(v) => updateField(panel, "enableImageAssetReply", v === "true")}
+            />
+            <InputField
+              label="Image asset dir"
+              value={cfg.imageAssetDir}
+              hint="素材图片目录。"
+              onChange={(v) => updateField(panel, "imageAssetDir", v)}
+            />
+            <InputField
+              label="Image asset index file"
+              value={cfg.imageAssetIndexFile}
+              hint="素材索引 JSON 文件。"
+              onChange={(v) => updateField(panel, "imageAssetIndexFile", v)}
+            />
+          </div>
+
+          <div className="insight-card alternate">
+            <div className="insight-kicker">Multimodal note</div>
+            <div className="insight-title">
+              视觉输入和素材图回复是两条独立链路，不要把“能看图”和“能发图”混为一谈。
+            </div>
+            <p className="insight-copy">
+              前者依赖 provider 是否支持 image_url 输入；后者只依赖 OneBot 发图能力和你的素材索引。
+            </p>
+            <div className="insight-meta mono">
+              {panel.digest.imageAssetCount || 0} assets · {cfg.enableVisionInput ? "vision on" : "vision off"}
             </div>
           </div>
         </div>

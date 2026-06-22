@@ -22,11 +22,16 @@ export function OverviewPage({ panel }) {
           hint={panel.config.aiProfile || "default"}
           tone="copper"
         />
-        <MetricCard label="Log archive" value={String(logCount)} hint={latestLogFile} tone="sky" />
+        <MetricCard
+          label="Image assets"
+          value={String(panel.digest.imageAssetCount || 0)}
+          hint={panel.config.imageAssetIndexFile || panel.config.imageAssetDir || "-"}
+          tone="sky"
+        />
         <MetricCard
           label="Retry window"
           value={`${panel.config.aiTimeout || 0}s`}
-          hint={`${panel.config.aiRetryCount || 0} retries / ${panel.config.aiRateLimit || 0} rpm`}
+          hint={`${panel.config.aiRetryCount || 0} retries / ${panel.config.aiRateLimit || 0} rpm · logs ${logCount} (${latestLogFile})`}
         />
       </div>
 
@@ -53,6 +58,14 @@ export function OverviewPage({ panel }) {
                 panel.config.enableTimeContext
                   ? `${panel.config.timeContextTimezone || "default"} / ${panel.config.timeContextFormat || "default"}`
                   : "disabled"
+              }
+            />
+            <KV
+              label="Vision path"
+              value={
+                panel.config.enableVisionInput
+                  ? `${panel.config.visionImageDetail || "auto"} / OCR ${panel.config.enableImageOCRFallback ? "on" : "off"}`
+                  : `disabled / OCR ${panel.config.enableImageOCRFallback ? "on" : "off"}`
               }
             />
             <KV label="Max tokens" value={String(panel.config.aiMaxTokens || 0)} />

@@ -17,6 +17,12 @@ const defaultConfig = {
   enableTimeContext: true,
   timeContextTimezone: "Asia/Shanghai",
   timeContextFormat: "2006-01-02 15:04:05",
+  enableVisionInput: false,
+  visionImageDetail: "auto",
+  enableImageOCRFallback: false,
+  enableImageAssetReply: true,
+  imageAssetDir: "./assets/images",
+  imageAssetIndexFile: "./assets/images/index.json",
   character: "",
   aiKey: "",
   aiKeyMasked: "",
@@ -54,6 +60,7 @@ export function useAdminPanel() {
   const [ready, setReady] = useState(defaultProbe);
 
   const [logFiles, setLogFiles] = useState([]);
+  const [imageAssets, setImageAssets] = useState([]);
   const [selectedLogFile, setSelectedLogFile] = useState("");
   const [logLines, setLogLines] = useState(200);
   const [logContent, setLogContent] = useState("");
@@ -217,6 +224,16 @@ export function useAdminPanel() {
     }
   }, [loadLogContent, logLines, selectedLogFile]);
 
+  const loadImageAssets = useCallback(async () => {
+    setError("");
+    try {
+      const data = await adminApi.getImageAssets();
+      setImageAssets(data.assets || []);
+    } catch (err) {
+      setError(getErrMsg(err));
+    }
+  }, []);
+
   const loadCharacterConfig = useCallback(async (name) => {
     const target = String(name || "").trim();
     if (!target) {
@@ -302,8 +319,9 @@ export function useAdminPanel() {
   useEffect(() => {
     void loadConfig();
     void loadLogFiles();
+    void loadImageAssets();
     void loadSystemStatus();
-  }, [loadConfig, loadLogFiles, loadSystemStatus]);
+  }, [loadConfig, loadImageAssets, loadLogFiles, loadSystemStatus]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -324,11 +342,12 @@ export function useAdminPanel() {
     () => ({
       profileCount: config.aiProfiles.length,
       characterCount: config.characterOptions.length,
+      imageAssetCount: imageAssets.length,
       logCount: logFiles.length,
       healthState: health.status,
       readyState: ready.status
     }),
-    [config.aiProfiles.length, config.characterOptions.length, health.status, logFiles.length, ready.status]
+    [config.aiProfiles.length, config.characterOptions.length, health.status, imageAssets.length, logFiles.length, ready.status]
   );
 
   return {
@@ -358,6 +377,8 @@ export function useAdminPanel() {
     loadingLogs,
     loadLogFiles,
     loadLogContent,
+    imageAssets,
+    loadImageAssets,
     characterFile,
     characterConfig,
     setCharacterConfig,
@@ -397,6 +418,12 @@ function buildConfigPayload(config) {
     enableTimeContext: Boolean(config.enableTimeContext),
     timeContextTimezone: String(config.timeContextTimezone || "").trim(),
     timeContextFormat: String(config.timeContextFormat || "").trim(),
+    enableVisionInput: Boolean(config.enableVisionInput),
+    visionImageDetail: String(config.visionImageDetail || "").trim(),
+    enableImageOCRFallback: Boolean(config.enableImageOCRFallback),
+    enableImageAssetReply: Boolean(config.enableImageAssetReply),
+    imageAssetDir: String(config.imageAssetDir || "").trim(),
+    imageAssetIndexFile: String(config.imageAssetIndexFile || "").trim(),
     character: config.character,
     aiKey: config.aiKey
   };

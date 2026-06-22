@@ -216,6 +216,9 @@ func EnhancePromptWithMemory(userID int64, sessionID, originalPrompt, currentMes
 	if timeContext := BuildTimeContext(referenceTime); timeContext != "" {
 		contexts = append(contexts, timeContext)
 	}
+	if imageAssetContext := BuildImageAssetPromptContext(currentMessage); imageAssetContext != "" {
+		contexts = append(contexts, imageAssetContext)
+	}
 
 	memoryContext := FormatPromptMemory(BuildPromptMemory(userID, sessionID, currentMessage))
 	if memoryContext != "" {
@@ -273,6 +276,9 @@ func UpdateSystemPromptWithMemory(userID int64, sessionID, currentMessage string
 
 	if timeContext := BuildTimeContext(referenceTime); timeContext != "" {
 		contextSections = append(contextSections, timeContext)
+	}
+	if imageAssetContext := BuildImageAssetPromptContext(currentMessage); imageAssetContext != "" {
+		contextSections = append(contextSections, imageAssetContext)
 	}
 
 	memoryContext := FormatPromptMemory(BuildPromptMemory(userID, sessionID, currentMessage))

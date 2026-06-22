@@ -19,6 +19,7 @@ import (
 	"project-yume/internal/character"
 	"project-yume/internal/config"
 	"project-yume/internal/metrics"
+	"project-yume/internal/service"
 	"project-yume/internal/utils"
 
 	"github.com/gin-gonic/gin"
@@ -31,27 +32,33 @@ const (
 )
 
 type configResponse struct {
-	AIBaseURL           string   `json:"aiBaseUrl"`
-	AIModel             string   `json:"aiModel"`
-	AIKeyMasked         string   `json:"aiKeyMasked"`
-	AIKeySet            bool     `json:"aiKeySet"`
-	AIProfile           string   `json:"aiProfile"`
-	AIProfiles          []string `json:"aiProfiles"`
-	AIConfigFile        string   `json:"aiConfigFile"`
-	AITemperature       float32  `json:"aiTemperature"`
-	AIMaxTokens         int      `json:"aiMaxTokens"`
-	AITimeout           int      `json:"aiTimeout"`
-	AIRetryCount        int      `json:"aiRetryCount"`
-	AIRateLimit         int      `json:"aiRateLimit"`
-	AITopP              float32  `json:"aiTopP"`
-	AIPromptRaw         string   `json:"aiPromptRaw"`
-	EnableTimeContext   bool     `json:"enableTimeContext"`
-	TimeContextTimezone string   `json:"timeContextTimezone"`
-	TimeContextFormat   string   `json:"timeContextFormat"`
-	Character           string   `json:"character"`
-	CharacterOptions    []string `json:"characterOptions"`
-	EffectivePrompt     string   `json:"effectivePrompt"`
-	EnvironmentConfig   string   `json:"environmentConfig"`
+	AIBaseURL              string   `json:"aiBaseUrl"`
+	AIModel                string   `json:"aiModel"`
+	AIKeyMasked            string   `json:"aiKeyMasked"`
+	AIKeySet               bool     `json:"aiKeySet"`
+	AIProfile              string   `json:"aiProfile"`
+	AIProfiles             []string `json:"aiProfiles"`
+	AIConfigFile           string   `json:"aiConfigFile"`
+	AITemperature          float32  `json:"aiTemperature"`
+	AIMaxTokens            int      `json:"aiMaxTokens"`
+	AITimeout              int      `json:"aiTimeout"`
+	AIRetryCount           int      `json:"aiRetryCount"`
+	AIRateLimit            int      `json:"aiRateLimit"`
+	AITopP                 float32  `json:"aiTopP"`
+	AIPromptRaw            string   `json:"aiPromptRaw"`
+	EnableTimeContext      bool     `json:"enableTimeContext"`
+	TimeContextTimezone    string   `json:"timeContextTimezone"`
+	TimeContextFormat      string   `json:"timeContextFormat"`
+	EnableVisionInput      bool     `json:"enableVisionInput"`
+	VisionImageDetail      string   `json:"visionImageDetail"`
+	EnableImageOCRFallback bool     `json:"enableImageOCRFallback"`
+	EnableImageAssetReply  bool     `json:"enableImageAssetReply"`
+	ImageAssetDir          string   `json:"imageAssetDir"`
+	ImageAssetIndexFile    string   `json:"imageAssetIndexFile"`
+	Character              string   `json:"character"`
+	CharacterOptions       []string `json:"characterOptions"`
+	EffectivePrompt        string   `json:"effectivePrompt"`
+	EnvironmentConfig      string   `json:"environmentConfig"`
 }
 
 type aiProfileResponse struct {
@@ -69,21 +76,31 @@ type aiProfileResponse struct {
 }
 
 type updateConfigRequest struct {
-	AIBaseURL           string  `json:"aiBaseUrl"`
-	AIModel             string  `json:"aiModel"`
-	AIProfile           string  `json:"aiProfile"`
-	AITemperature       float32 `json:"aiTemperature"`
-	AIMaxTokens         int     `json:"aiMaxTokens"`
-	AITimeout           int     `json:"aiTimeout"`
-	AIRetryCount        int     `json:"aiRetryCount"`
-	AIRateLimit         int     `json:"aiRateLimit"`
-	AITopP              float32 `json:"aiTopP"`
-	AIPromptRaw         string  `json:"aiPromptRaw"`
-	EnableTimeContext   bool    `json:"enableTimeContext"`
-	TimeContextTimezone string  `json:"timeContextTimezone"`
-	TimeContextFormat   string  `json:"timeContextFormat"`
-	Character           string  `json:"character"`
-	AIKey               string  `json:"aiKey"`
+	AIBaseURL              string  `json:"aiBaseUrl"`
+	AIModel                string  `json:"aiModel"`
+	AIProfile              string  `json:"aiProfile"`
+	AITemperature          float32 `json:"aiTemperature"`
+	AIMaxTokens            int     `json:"aiMaxTokens"`
+	AITimeout              int     `json:"aiTimeout"`
+	AIRetryCount           int     `json:"aiRetryCount"`
+	AIRateLimit            int     `json:"aiRateLimit"`
+	AITopP                 float32 `json:"aiTopP"`
+	AIPromptRaw            string  `json:"aiPromptRaw"`
+	EnableTimeContext      bool    `json:"enableTimeContext"`
+	TimeContextTimezone    string  `json:"timeContextTimezone"`
+	TimeContextFormat      string  `json:"timeContextFormat"`
+	EnableVisionInput      bool    `json:"enableVisionInput"`
+	VisionImageDetail      string  `json:"visionImageDetail"`
+	EnableImageOCRFallback bool    `json:"enableImageOCRFallback"`
+	EnableImageAssetReply  bool    `json:"enableImageAssetReply"`
+	ImageAssetDir          string  `json:"imageAssetDir"`
+	ImageAssetIndexFile    string  `json:"imageAssetIndexFile"`
+	Character              string  `json:"character"`
+	AIKey                  string  `json:"aiKey"`
+}
+
+type imageAssetsResponse struct {
+	Assets []service.ImageAsset `json:"assets"`
 }
 
 type logFileInfo struct {
@@ -174,6 +191,7 @@ func (s *server) routes() *gin.Engine {
 		adminGroup.GET("/config", s.handleGetConfig)
 		adminGroup.PUT("/config", s.handlePutConfig)
 		adminGroup.GET("/ai-profiles/:name", s.handleGetAIProfile)
+		adminGroup.GET("/image-assets", s.handleImageAssets)
 		adminGroup.GET("/logs/files", s.handleLogFiles)
 		adminGroup.GET("/logs/content", s.handleLogContent)
 		adminGroup.GET("/logs/stream", s.handleLogStream)
@@ -314,13 +332,19 @@ func (s *server) handlePutConfig(c *gin.Context) {
 	}
 
 	updates := map[string]string{
-		"AI_PROFILE":            savedProfileName,
-		"AI_CONFIG_FILE":        aiConfigFile,
-		"AI_PROMPT":             req.AIPromptRaw,
-		"ENABLE_TIME_CONTEXT":   strconv.FormatBool(req.EnableTimeContext),
-		"TIME_CONTEXT_TIMEZONE": strings.TrimSpace(req.TimeContextTimezone),
-		"TIME_CONTEXT_FORMAT":   strings.TrimSpace(req.TimeContextFormat),
-		"CHARACTER":             req.Character,
+		"AI_PROFILE":                savedProfileName,
+		"AI_CONFIG_FILE":            aiConfigFile,
+		"AI_PROMPT":                 req.AIPromptRaw,
+		"ENABLE_TIME_CONTEXT":       strconv.FormatBool(req.EnableTimeContext),
+		"TIME_CONTEXT_TIMEZONE":     strings.TrimSpace(req.TimeContextTimezone),
+		"TIME_CONTEXT_FORMAT":       strings.TrimSpace(req.TimeContextFormat),
+		"ENABLE_VISION_INPUT":       strconv.FormatBool(req.EnableVisionInput),
+		"VISION_IMAGE_DETAIL":       strings.TrimSpace(req.VisionImageDetail),
+		"ENABLE_IMAGE_OCR_FALLBACK": strconv.FormatBool(req.EnableImageOCRFallback),
+		"ENABLE_IMAGE_ASSET_REPLY":  strconv.FormatBool(req.EnableImageAssetReply),
+		"IMAGE_ASSET_DIR":           strings.TrimSpace(req.ImageAssetDir),
+		"IMAGE_ASSET_INDEX_FILE":    strings.TrimSpace(req.ImageAssetIndexFile),
+		"CHARACTER":                 req.Character,
 	}
 
 	envFile := resolveEnvFilePath(config.GetEnvFilePath())
@@ -395,6 +419,15 @@ func (s *server) handleGetAIProfile(c *gin.Context) {
 		AIRateLimit:   profile.AIRateLimit,
 		AITopP:        profile.AITopP,
 	})
+}
+
+func (s *server) handleImageAssets(c *gin.Context) {
+	assets, err := service.ListImageAssets()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, imageAssetsResponse{Assets: assets})
 }
 
 func (s *server) handleLogFiles(c *gin.Context) {
@@ -852,27 +885,33 @@ func (s *server) buildConfigResponse() (configResponse, error) {
 	aiPromptRaw := firstNonEmpty(os.Getenv("AI_PROMPT"), readEnvValue(envMap, "AI_PROMPT", "AiPrompt"))
 
 	return configResponse{
-		AIBaseURL:           cfg.AiBaseUrl,
-		AIModel:             cfg.AiModel,
-		AIKeyMasked:         maskSecret(cfg.AiKEY),
-		AIKeySet:            strings.TrimSpace(cfg.AiKEY) != "",
-		AIProfile:           cfg.AiProfile,
-		AIProfiles:          aiProfileNames,
-		AIConfigFile:        cfg.AiConfigFile,
-		AITemperature:       cfg.AiTemperature,
-		AIMaxTokens:         cfg.AiMaxTokens,
-		AITimeout:           cfg.AiTimeout,
-		AIRetryCount:        cfg.AiRetryCount,
-		AIRateLimit:         cfg.AiRateLimit,
-		AITopP:              cfg.AiTopP,
-		AIPromptRaw:         aiPromptRaw,
-		EnableTimeContext:   cfg.EnableTimeContext,
-		TimeContextTimezone: cfg.TimeContextTimezone,
-		TimeContextFormat:   cfg.TimeContextFormat,
-		Character:           character,
-		CharacterOptions:    characterOptions,
-		EffectivePrompt:     cfg.AiPrompt,
-		EnvironmentConfig:   envFile,
+		AIBaseURL:              cfg.AiBaseUrl,
+		AIModel:                cfg.AiModel,
+		AIKeyMasked:            maskSecret(cfg.AiKEY),
+		AIKeySet:               strings.TrimSpace(cfg.AiKEY) != "",
+		AIProfile:              cfg.AiProfile,
+		AIProfiles:             aiProfileNames,
+		AIConfigFile:           cfg.AiConfigFile,
+		AITemperature:          cfg.AiTemperature,
+		AIMaxTokens:            cfg.AiMaxTokens,
+		AITimeout:              cfg.AiTimeout,
+		AIRetryCount:           cfg.AiRetryCount,
+		AIRateLimit:            cfg.AiRateLimit,
+		AITopP:                 cfg.AiTopP,
+		AIPromptRaw:            aiPromptRaw,
+		EnableTimeContext:      cfg.EnableTimeContext,
+		TimeContextTimezone:    cfg.TimeContextTimezone,
+		TimeContextFormat:      cfg.TimeContextFormat,
+		EnableVisionInput:      cfg.EnableVisionInput,
+		VisionImageDetail:      cfg.VisionImageDetail,
+		EnableImageOCRFallback: cfg.EnableImageOCRFallback,
+		EnableImageAssetReply:  cfg.EnableImageAssetReply,
+		ImageAssetDir:          cfg.ImageAssetDir,
+		ImageAssetIndexFile:    cfg.ImageAssetIndexFile,
+		Character:              character,
+		CharacterOptions:       characterOptions,
+		EffectivePrompt:        cfg.AiPrompt,
+		EnvironmentConfig:      envFile,
 	}, nil
 }
 
@@ -1014,6 +1053,17 @@ func validateUpdateRequest(req updateConfigRequest) error {
 	}
 	if req.AITopP < 0 || req.AITopP > 1 {
 		return fmt.Errorf("aiTopP must be in [0,1]")
+	}
+	switch strings.ToLower(strings.TrimSpace(req.VisionImageDetail)) {
+	case "", "auto", "low", "high":
+	default:
+		return fmt.Errorf("visionImageDetail must be one of auto/low/high")
+	}
+	if strings.TrimSpace(req.ImageAssetDir) == "" {
+		return fmt.Errorf("imageAssetDir is required")
+	}
+	if strings.TrimSpace(req.ImageAssetIndexFile) == "" {
+		return fmt.Errorf("imageAssetIndexFile is required")
 	}
 	return nil
 }

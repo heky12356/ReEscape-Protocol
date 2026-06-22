@@ -66,6 +66,12 @@ type Config struct {
 	EnableTimeContext            bool // 启用动态时间上下文
 	TimeContextTimezone          string
 	TimeContextFormat            string
+	EnableVisionInput            bool   // 启用 OpenAI-compatible 视觉输入
+	VisionImageDetail            string // high/low/auto
+	EnableImageOCRFallback       bool   // 文本模型场景下启用图片 OCR 补充
+	EnableImageAssetReply        bool   // 启用图片素材回复
+	ImageAssetDir                string // 图片素材目录
+	ImageAssetIndexFile          string // 图片素材索引文件
 }
 
 var config = &Config{}
@@ -157,6 +163,12 @@ func init() {
 	config.EnableTimeContext = getBoolEnv("ENABLE_TIME_CONTEXT", true)
 	config.TimeContextTimezone = getStringEnv("TIME_CONTEXT_TIMEZONE", "Asia/Shanghai")
 	config.TimeContextFormat = getStringEnv("TIME_CONTEXT_FORMAT", "2006-01-02 15:04:05")
+	config.EnableVisionInput = getBoolEnv("ENABLE_VISION_INPUT", false)
+	config.VisionImageDetail = getStringEnv("VISION_IMAGE_DETAIL", "auto")
+	config.EnableImageOCRFallback = getBoolEnv("ENABLE_IMAGE_OCR_FALLBACK", false)
+	config.EnableImageAssetReply = getBoolEnv("ENABLE_IMAGE_ASSET_REPLY", true)
+	config.ImageAssetDir = getStringEnv("IMAGE_ASSET_DIR", "./assets/images")
+	config.ImageAssetIndexFile = getStringEnv("IMAGE_ASSET_INDEX_FILE", "./assets/images/index.json")
 
 	cm, err := character.NewCharacterManager("./config/character", config.Character)
 	if err != nil {

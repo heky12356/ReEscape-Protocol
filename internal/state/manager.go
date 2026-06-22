@@ -596,7 +596,7 @@ func summarizeConversation(conversation []openai.ChatCompletionMessage) string {
 			continue
 		}
 
-		content := strings.TrimSpace(msg.Content)
+		content := strings.TrimSpace(chatMessagePlainText(msg))
 		if content == "" {
 			continue
 		}
@@ -617,7 +617,7 @@ func extractActiveTopics(conversation []openai.ChatCompletionMessage) []string {
 			continue
 		}
 
-		content := strings.TrimSpace(msg.Content)
+		content := strings.TrimSpace(chatMessagePlainText(msg))
 		if content == "" {
 			continue
 		}
@@ -631,6 +631,29 @@ func extractActiveTopics(conversation []openai.ChatCompletionMessage) []string {
 	}
 
 	return topics
+}
+
+func chatMessagePlainText(msg openai.ChatCompletionMessage) string {
+	if strings.TrimSpace(msg.Content) != "" {
+		return msg.Content
+	}
+	if len(msg.MultiContent) == 0 {
+		return ""
+	}
+
+	parts := make([]string, 0, len(msg.MultiContent))
+	for _, part := range msg.MultiContent {
+		switch part.Type {
+		case openai.ChatMessagePartTypeText:
+			text := strings.TrimSpace(part.Text)
+			if text != "" {
+				parts = append(parts, text)
+			}
+		case openai.ChatMessagePartTypeImageURL:
+			parts = append(parts, "[图片]")
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 func summarizeRole(role string) string {

@@ -33,6 +33,9 @@ export const adminApi = {
   getAIProfile(name) {
     return fetchJSON(`/api/admin/ai-profiles/${encodeURIComponent(name)}`);
   },
+  getImageAssets() {
+    return fetchJSON("/api/admin/image-assets");
+  },
   getCharacters() {
     return fetchJSON("/api/admin/characters");
   },

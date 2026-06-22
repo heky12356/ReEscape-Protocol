@@ -2,12 +2,14 @@ package handler
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"project-yume/internal/aifunction"
 	"project-yume/internal/config"
 	"project-yume/internal/memory"
 	"project-yume/internal/metrics"
+	"project-yume/internal/model"
 	"project-yume/internal/service"
 	"project-yume/internal/state"
 	"project-yume/internal/utils"
@@ -27,6 +29,7 @@ type MessageContext struct {
 	MessageID    int64
 	MessageIDs   []int64
 	RawSegments  []string
+	Parts        []model.MessagePart
 	Aggregated   bool
 	SegmentCount int
 	RawMessage   string
@@ -196,10 +199,14 @@ func (h *EmotionHandler) startAIChat(c *websocket.Conn, ctx MessageContext, sm *
 		})
 	}
 
-	conversation = append(conversation, openai.ChatCompletionMessage{
-		Role:    "user",
-		Content: ctx.Message,
-	})
+	if userMessage, ok := buildUserChatMessage(ctx); ok {
+		conversation = append(conversation, userMessage)
+	} else {
+		conversation = append(conversation, openai.ChatCompletionMessage{
+			Role:    "user",
+			Content: ctx.Message,
+		})
+	}
 
 	startedAt := time.Now()
 	newConversation, responses, err := aifunction.QueryaiWithChain(conversation)
@@ -250,7 +257,7 @@ func (h *EmotionHandler) startAIChat(c *websocket.Conn, ctx MessageContext, sm *
 		Handled:   true,
 		Emotion:   emotion,
 		Intention: intention,
-		Reply:     responses[len(responses)-1],
+		Reply:     service.StripReplyDirectives(responses[len(responses)-1]),
 	}, nil
 }
 
@@ -320,10 +327,14 @@ func (h *LongChatHandler) continueAIChat(c *websocket.Conn, ctx MessageContext, 
 		})
 	}
 
-	conversation = append(conversation, openai.ChatCompletionMessage{
-		Role:    "user",
-		Content: ctx.Message,
-	})
+	if userMessage, ok := buildUserChatMessage(ctx); ok {
+		conversation = append(conversation, userMessage)
+	} else {
+		conversation = append(conversation, openai.ChatCompletionMessage{
+			Role:    "user",
+			Content: ctx.Message,
+		})
+	}
 
 	if (cfg.EnableEmotionalMemory || cfg.EnableTimeContext) && len(conversation) > 1 {
 		conversation = service.UpdateSystemPromptWithMemory(userID, ctx.SessionID, ctx.Message, ctx.ReceivedAt, conversation)
@@ -378,7 +389,7 @@ func (h *LongChatHandler) continueAIChat(c *websocket.Conn, ctx MessageContext, 
 		Handled:   true,
 		Emotion:   emotion,
 		Intention: intention,
-		Reply:     responses[len(responses)-1],
+		Reply:     service.StripReplyDirectives(responses[len(responses)-1]),
 	}, nil
 }
 
@@ -452,4 +463,62 @@ func (mp *MessageProcessor) Process(c *websocket.Conn, ctx MessageContext) (*Pro
 		Handled: true,
 		Reply:   "?",
 	}, err
+}
+
+func buildUserChatMessage(ctx MessageContext) (openai.ChatCompletionMessage, bool) {
+	cfg := config.GetConfig()
+	if !cfg.EnableVisionInput {
+		return openai.ChatCompletionMessage{
+			Role:    "user",
+			Content: ctx.Message,
+		}, true
+	}
+
+	parts := make([]openai.ChatMessagePart, 0, len(ctx.Parts)+1)
+	if strings.TrimSpace(ctx.Message) != "" {
+		parts = append(parts, openai.ChatMessagePart{
+			Type: openai.ChatMessagePartTypeText,
+			Text: ctx.Message,
+		})
+	}
+
+	detail := normalizeVisionImageDetail(cfg.VisionImageDetail)
+	for _, part := range ctx.Parts {
+		if part.Type != "image" || strings.TrimSpace(part.URL) == "" {
+			continue
+		}
+		parts = append(parts, openai.ChatMessagePart{
+			Type: openai.ChatMessagePartTypeImageURL,
+			ImageURL: &openai.ChatMessageImageURL{
+				URL:    strings.TrimSpace(part.URL),
+				Detail: detail,
+			},
+		})
+	}
+
+	if len(parts) == 0 {
+		return openai.ChatCompletionMessage{}, false
+	}
+	if len(parts) == 1 && parts[0].Type == openai.ChatMessagePartTypeText {
+		return openai.ChatCompletionMessage{
+			Role:    "user",
+			Content: parts[0].Text,
+		}, true
+	}
+
+	return openai.ChatCompletionMessage{
+		Role:         "user",
+		MultiContent: parts,
+	}, true
+}
+
+func normalizeVisionImageDetail(raw string) openai.ImageURLDetail {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case string(openai.ImageURLDetailHigh):
+		return openai.ImageURLDetailHigh
+	case string(openai.ImageURLDetailLow):
+		return openai.ImageURLDetailLow
+	default:
+		return openai.ImageURLDetailAuto
+	}
 }

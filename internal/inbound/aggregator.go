@@ -191,13 +191,16 @@ func (b *aggregationBucket) build() model.Msg {
 
 	segments := make([]string, 0, len(b.messages))
 	messageIDs := make([]int64, 0, len(b.messages))
+	parts := make([]model.MessagePart, 0, len(b.messages))
 	for _, msg := range b.messages {
 		segments = append(segments, msg.Message)
 		messageIDs = append(messageIDs, msg.MessageID)
+		parts = append(parts, msg.Parts...)
 	}
 
 	return model.Msg{
 		Message:     strings.Join(segments, "\n"),
+		Parts:       parts,
 		User_id:     first.User_id,
 		Group_id:    first.Group_id,
 		MessageID:   last.MessageID,

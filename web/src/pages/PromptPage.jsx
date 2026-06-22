@@ -181,6 +181,36 @@ export function PromptPage({ panel }) {
       >
         <pre className="prompt-preview">{cfg.effectivePrompt || "暂无内容"}</pre>
       </Panel>
+
+      <Panel
+        eyebrow="Image shelf"
+        title="图片素材索引"
+        subtitle="这里先做只读可视化，素材图片和 index.json 仍然在仓库目录里维护。"
+      >
+        <div className="artifact-grid">
+          <div className="artifact-card emphasis">
+            <div className="artifact-title">Asset index</div>
+            <p className="artifact-note">
+              {cfg.imageAssetIndexFile || "-"}
+              <br />
+              目录：{cfg.imageAssetDir || "-"}
+            </p>
+          </div>
+
+          <div className="artifact-card">
+            <div className="artifact-title">Registered assets</div>
+            <ul className="artifact-list mono">
+              {panel.imageAssets.map((asset) => (
+                <li key={asset.id}>
+                  <span>{asset.id}</span>
+                  <span>{asset.enabled ? "enabled" : "disabled"}</span>
+                </li>
+              ))}
+              {panel.imageAssets.length === 0 ? <li>暂无素材索引</li> : null}
+            </ul>
+          </div>
+        </div>
+      </Panel>
     </div>
   );
 }

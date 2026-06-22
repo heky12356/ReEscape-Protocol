@@ -57,6 +57,12 @@ func ReloadRuntimeConfig() error {
 	config.EnableTimeContext = getBoolEnv("ENABLE_TIME_CONTEXT", config.EnableTimeContext)
 	config.TimeContextTimezone = getStringEnv("TIME_CONTEXT_TIMEZONE", config.TimeContextTimezone)
 	config.TimeContextFormat = getStringEnv("TIME_CONTEXT_FORMAT", config.TimeContextFormat)
+	config.EnableVisionInput = getBoolEnv("ENABLE_VISION_INPUT", config.EnableVisionInput)
+	config.VisionImageDetail = getStringEnv("VISION_IMAGE_DETAIL", config.VisionImageDetail)
+	config.EnableImageOCRFallback = getBoolEnv("ENABLE_IMAGE_OCR_FALLBACK", config.EnableImageOCRFallback)
+	config.EnableImageAssetReply = getBoolEnv("ENABLE_IMAGE_ASSET_REPLY", config.EnableImageAssetReply)
+	config.ImageAssetDir = getStringEnv("IMAGE_ASSET_DIR", config.ImageAssetDir)
+	config.ImageAssetIndexFile = getStringEnv("IMAGE_ASSET_INDEX_FILE", config.ImageAssetIndexFile)
 
 	config.Character = getStringEnv("CHARACTER", "default")
 	config.Token = os.Getenv("Token")

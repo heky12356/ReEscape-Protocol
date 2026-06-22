@@ -1,18 +1,29 @@
 package model
 
+import "encoding/json"
+
 // goroutine之间消息
 type Msg struct {
-	Message     string   `json:"message"`
-	User_id     int64    `json:"user_id"`
-	Group_id    int64    `json:"group_id"`
-	MessageID   int64    `json:"message_id"`
-	MessageIDs  []int64  `json:"message_ids,omitempty"`
-	RawSegments []string `json:"raw_segments,omitempty"`
-	Aggregated  bool     `json:"aggregated,omitempty"`
-	StartTime   int64    `json:"start_time,omitempty"`
-	EndTime     int64    `json:"end_time,omitempty"`
+	Message     string        `json:"message"`
+	Parts       []MessagePart `json:"parts,omitempty"`
+	User_id     int64         `json:"user_id"`
+	Group_id    int64         `json:"group_id"`
+	MessageID   int64         `json:"message_id"`
+	MessageIDs  []int64       `json:"message_ids,omitempty"`
+	RawSegments []string      `json:"raw_segments,omitempty"`
+	Aggregated  bool          `json:"aggregated,omitempty"`
+	StartTime   int64         `json:"start_time,omitempty"`
+	EndTime     int64         `json:"end_time,omitempty"`
 	Time        int64
 	Type        int // 0:群消息 1:私聊消息
+}
+
+type MessagePart struct {
+	Type    string `json:"type"`
+	Text    string `json:"text,omitempty"`
+	URL     string `json:"url,omitempty"`
+	File    string `json:"file,omitempty"`
+	OCRText string `json:"ocr_text,omitempty"`
 }
 
 type Message struct {
@@ -67,10 +78,8 @@ type Sender struct {
 }
 
 type ReMessage struct {
-	Type string `json:"type"`
-	Data struct {
-		Text string `json:"text"`
-	} `json:"data"`
+	Type string            `json:"type"`
+	Data map[string]string `json:"data"`
 }
 
 type Response struct {
@@ -90,4 +99,25 @@ type Response struct {
 	Message_format string      `json:"message_format"`
 	Post_type      string      `json:"post_type"`
 	Group_id       int64       `json:"group_id"`
+}
+
+type APIResponse struct {
+	Status  string          `json:"status"`
+	RetCode int             `json:"retcode"`
+	Data    json.RawMessage `json:"data"`
+	Echo    string          `json:"echo"`
+}
+
+type GetImageData struct {
+	File string `json:"file"`
+	URL  string `json:"url"`
+}
+
+type OCRImageData struct {
+	Texts []OCRTextItem `json:"texts"`
+	Text  string        `json:"text"`
+}
+
+type OCRTextItem struct {
+	Text string `json:"text"`
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"project-yume/internal/admin"
@@ -187,6 +188,16 @@ func startMessageReceiver(c *websocket.Conn, msgChan chan model.Msg, ctx context
 			}
 
 			utils.Info("接收到消息: %s", message)
+
+			var envelope map[string]json.RawMessage
+			if err := json.Unmarshal(message, &envelope); err == nil {
+				if _, hasPostType := envelope["post_type"]; !hasPostType {
+					if connect.DispatchAPIResponse(message) {
+						continue
+					}
+				}
+			}
+
 			metrics.IncCounter(
 				"bot_ws_messages_total",
 				"Total WebSocket messages by lifecycle result.",
@@ -208,6 +219,7 @@ func startMessageReceiver(c *websocket.Conn, msgChan chan model.Msg, ctx context
 			// 转换为内部消息格式
 			internalMsg := model.Msg{
 				Message:   msg.Raw_message,
+				Parts:     buildIncomingMessageParts(msg),
 				User_id:   msg.User_id,
 				Group_id:  msg.Group_id,
 				MessageID: msg.Message_id,
@@ -253,6 +265,10 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 			}
 
 			sessionID := state.BuildSessionID(msg.User_id, msg.Group_id, msg.Type)
+			enrichedParts := service.EnrichMessageParts(c, msg.Parts)
+			if len(enrichedParts) == 0 {
+				enrichedParts = append([]model.MessagePart(nil), msg.Parts...)
+			}
 			startedAt := time.Unix(msg.Time, 0)
 			if msg.StartTime != 0 {
 				startedAt = time.Unix(msg.StartTime, 0)
@@ -278,6 +294,7 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 				MessageID:    msg.MessageID,
 				MessageIDs:   messageIDs,
 				RawSegments:  rawSegments,
+				Parts:        enrichedParts,
 				Aggregated:   msg.Aggregated,
 				SegmentCount: len(rawSegments),
 				RawMessage:   msg.Message,
@@ -460,4 +477,48 @@ func buildMessageRequestID(messageID int64) string {
 		return fmt.Sprintf("msg-%d", messageID)
 	}
 	return utils.NewRequestID("msg")
+}
+
+func buildIncomingMessageParts(resp model.Response) []model.MessagePart {
+	parts := make([]model.MessagePart, 0, len(resp.Message))
+
+	for _, segment := range resp.Message {
+		switch segment.Type {
+		case "text":
+			text := strings.TrimSpace(segment.Data["text"])
+			if text == "" {
+				continue
+			}
+			parts = append(parts, model.MessagePart{
+				Type: "text",
+				Text: text,
+			})
+		case "image":
+			parts = append(parts, model.MessagePart{
+				Type: "image",
+				URL:  strings.TrimSpace(segment.Data["url"]),
+				File: strings.TrimSpace(segment.Data["file"]),
+			})
+		}
+	}
+
+	if len(parts) > 0 {
+		return parts
+	}
+
+	raw := strings.TrimSpace(resp.Raw_message)
+	if raw == "" {
+		return nil
+	}
+	if utils.IsCQImage(raw) {
+		return []model.MessagePart{{
+			Type: "image",
+			URL:  strings.TrimSpace(utils.ExtractImageURL(raw)),
+			File: strings.TrimSpace(utils.ExtractImageFile(raw)),
+		}}
+	}
+	return []model.MessagePart{{
+		Type: "text",
+		Text: raw,
+	}}
 }

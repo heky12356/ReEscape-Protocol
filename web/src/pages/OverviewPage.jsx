@@ -47,6 +47,14 @@ export function OverviewPage({ panel }) {
               label="Sampling"
               value={`Top P ${panel.config.aiTopP} / Temp ${panel.config.aiTemperature}`}
             />
+            <KV
+              label="Time context"
+              value={
+                panel.config.enableTimeContext
+                  ? `${panel.config.timeContextTimezone || "default"} / ${panel.config.timeContextFormat || "default"}`
+                  : "disabled"
+              }
+            />
             <KV label="Max tokens" value={String(panel.config.aiMaxTokens || 0)} />
             <KV label="Profile file" value={panel.config.aiConfigFile || "-"} mono />
           </div>

@@ -210,13 +210,23 @@ func fallbackAnalysis(mode AnalysisMode) MessageAnalysis {
 }
 
 // EnhancePromptWithMemory 基于分层记忆增强AI提示词
-func EnhancePromptWithMemory(userID int64, sessionID, originalPrompt, currentMessage string) string {
+func EnhancePromptWithMemory(userID int64, sessionID, originalPrompt, currentMessage string, referenceTime time.Time) string {
+	contexts := make([]string, 0, 2)
+
+	if timeContext := BuildTimeContext(referenceTime); timeContext != "" {
+		contexts = append(contexts, timeContext)
+	}
+
 	memoryContext := FormatPromptMemory(BuildPromptMemory(userID, sessionID, currentMessage))
-	if memoryContext == "" {
+	if memoryContext != "" {
+		contexts = append(contexts, memoryContext)
+	}
+
+	if len(contexts) == 0 {
 		return originalPrompt
 	}
 
-	return originalPrompt + "\n\n" + memoryContext
+	return originalPrompt + "\n\n" + strings.Join(contexts, "\n\n")
 }
 
 // BuildEmotionalContext 构建情感上下文
@@ -258,19 +268,29 @@ func BuildEmotionalContext(pattern string, recentEmotions []string) string {
 }
 
 // UpdateSystemPromptWithMemory 基于分层记忆更新系统提示词
-func UpdateSystemPromptWithMemory(userID int64, sessionID, currentMessage string, conversation []openai.ChatCompletionMessage) []openai.ChatCompletionMessage {
+func UpdateSystemPromptWithMemory(userID int64, sessionID, currentMessage string, referenceTime time.Time, conversation []openai.ChatCompletionMessage) []openai.ChatCompletionMessage {
+	contextSections := make([]string, 0, 2)
+
+	if timeContext := BuildTimeContext(referenceTime); timeContext != "" {
+		contextSections = append(contextSections, timeContext)
+	}
+
 	memoryContext := FormatPromptMemory(BuildPromptMemory(userID, sessionID, currentMessage))
-	if memoryContext == "" {
+	if memoryContext != "" {
+		contextSections = append(contextSections, "【记忆增强】\n"+memoryContext)
+	}
+
+	if len(contextSections) == 0 {
 		return conversation
 	}
 
 	memoryMessage := openai.ChatCompletionMessage{
 		Role:    "system",
-		Content: "【记忆增强】\n" + memoryContext,
+		Content: strings.Join(contextSections, "\n\n"),
 	}
 
 	for i, msg := range conversation {
-		if msg.Role == "system" && strings.Contains(msg.Content, "【记忆增强】") {
+		if msg.Role == "system" && (strings.Contains(msg.Content, "【记忆增强】") || strings.Contains(msg.Content, "【时间上下文】")) {
 			conversation[i] = memoryMessage
 			return conversation
 		}

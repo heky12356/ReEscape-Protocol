@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Panel } from "../components/common/Panel";
 import { InputField, SelectField } from "../components/common/FormField";
 
+const BOOLEAN_OPTIONS = ["true", "false"];
+
 export function AIConfigPage({ panel }) {
   const cfg = panel.config;
   const [newProfileName, setNewProfileName] = useState("");
@@ -100,6 +102,49 @@ export function AIConfigPage({ panel }) {
             value={cfg.aiTopP}
             onChange={(v) => updateField(panel, "aiTopP", v)}
           />
+        </div>
+      </Panel>
+
+      <Panel
+        eyebrow="Temporal anchor"
+        title="真实时间锚点"
+        subtitle="这层决定模型如何理解今天、明天、昨晚和现在，不改语气，只校正时间感。"
+      >
+        <div className="split-layout">
+          <div className="form-grid">
+            <SelectField
+              label="Enable time context"
+              value={String(cfg.enableTimeContext)}
+              options={BOOLEAN_OPTIONS}
+              hint="关闭后，模型将不再收到动态时间上下文。"
+              onChange={(v) => updateField(panel, "enableTimeContext", v === "true")}
+            />
+            <InputField
+              label="Timezone"
+              value={cfg.timeContextTimezone}
+              placeholder="Asia/Shanghai"
+              hint="IANA 时区名，例如 Asia/Shanghai 或 America/Los_Angeles。"
+              onChange={(v) => updateField(panel, "timeContextTimezone", v)}
+            />
+            <InputField
+              label="Time format"
+              value={cfg.timeContextFormat}
+              placeholder="2006-01-02 15:04:05"
+              hint="Go 时间格式，决定注入给模型的显示样式。"
+              onChange={(v) => updateField(panel, "timeContextFormat", v)}
+            />
+          </div>
+
+          <div className="insight-card">
+            <div className="insight-kicker">Clock note</div>
+            <div className="insight-title">模型现在会拿到一份动态时间标签，而不是自己猜今天是几号。</div>
+            <p className="insight-copy">
+              推荐保持开启，并用业务真实时区对齐。这样“今天”“明天”“周末”“昨晚”这些相对时间会稳定很多。
+            </p>
+            <div className="insight-meta mono">
+              {cfg.enableTimeContext ? `${cfg.timeContextTimezone || "default"} / ${cfg.timeContextFormat || "default"}` : "time context disabled"}
+            </div>
+          </div>
         </div>
       </Panel>
 

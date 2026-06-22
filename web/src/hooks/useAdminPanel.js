@@ -14,6 +14,9 @@ const defaultConfig = {
   aiRateLimit: 20,
   aiTopP: 0.9,
   aiPromptRaw: "",
+  enableTimeContext: true,
+  timeContextTimezone: "Asia/Shanghai",
+  timeContextFormat: "2006-01-02 15:04:05",
   character: "",
   aiKey: "",
   aiKeyMasked: "",
@@ -391,6 +394,9 @@ function buildConfigPayload(config) {
     aiRateLimit: Number(config.aiRateLimit),
     aiTopP: Number(config.aiTopP),
     aiPromptRaw: config.aiPromptRaw,
+    enableTimeContext: Boolean(config.enableTimeContext),
+    timeContextTimezone: String(config.timeContextTimezone || "").trim(),
+    timeContextFormat: String(config.timeContextFormat || "").trim(),
     character: config.character,
     aiKey: config.aiKey
   };

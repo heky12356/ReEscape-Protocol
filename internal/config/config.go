@@ -63,6 +63,9 @@ type Config struct {
 	MessageAggregateIdleWindowMs int  // 消息聚合空闲窗口(毫秒)
 	MessageAggregateMaxWindowMs  int  // 消息聚合最大窗口(毫秒)
 	MessageAggregateMaxMessages  int  // 单次消息聚合最大条数
+	EnableTimeContext            bool // 启用动态时间上下文
+	TimeContextTimezone          string
+	TimeContextFormat            string
 }
 
 var config = &Config{}
@@ -151,6 +154,9 @@ func init() {
 	config.MessageAggregateIdleWindowMs = getIntEnv("MESSAGE_AGGREGATE_IDLE_WINDOW_MS", 2000)
 	config.MessageAggregateMaxWindowMs = getIntEnv("MESSAGE_AGGREGATE_MAX_WINDOW_MS", 10000)
 	config.MessageAggregateMaxMessages = getIntEnv("MESSAGE_AGGREGATE_MAX_MESSAGES", 5)
+	config.EnableTimeContext = getBoolEnv("ENABLE_TIME_CONTEXT", true)
+	config.TimeContextTimezone = getStringEnv("TIME_CONTEXT_TIMEZONE", "Asia/Shanghai")
+	config.TimeContextFormat = getStringEnv("TIME_CONTEXT_FORMAT", "2006-01-02 15:04:05")
 
 	cm, err := character.NewCharacterManager("./config/character", config.Character)
 	if err != nil {

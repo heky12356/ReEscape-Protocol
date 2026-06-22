@@ -54,6 +54,9 @@ func ReloadRuntimeConfig() error {
 	config.MessageAggregateIdleWindowMs = getIntEnv("MESSAGE_AGGREGATE_IDLE_WINDOW_MS", config.MessageAggregateIdleWindowMs)
 	config.MessageAggregateMaxWindowMs = getIntEnv("MESSAGE_AGGREGATE_MAX_WINDOW_MS", config.MessageAggregateMaxWindowMs)
 	config.MessageAggregateMaxMessages = getIntEnv("MESSAGE_AGGREGATE_MAX_MESSAGES", config.MessageAggregateMaxMessages)
+	config.EnableTimeContext = getBoolEnv("ENABLE_TIME_CONTEXT", config.EnableTimeContext)
+	config.TimeContextTimezone = getStringEnv("TIME_CONTEXT_TIMEZONE", config.TimeContextTimezone)
+	config.TimeContextFormat = getStringEnv("TIME_CONTEXT_FORMAT", config.TimeContextFormat)
 
 	config.Character = getStringEnv("CHARACTER", "default")
 	config.Token = os.Getenv("Token")

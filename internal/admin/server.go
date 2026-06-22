@@ -31,24 +31,27 @@ const (
 )
 
 type configResponse struct {
-	AIBaseURL         string   `json:"aiBaseUrl"`
-	AIModel           string   `json:"aiModel"`
-	AIKeyMasked       string   `json:"aiKeyMasked"`
-	AIKeySet          bool     `json:"aiKeySet"`
-	AIProfile         string   `json:"aiProfile"`
-	AIProfiles        []string `json:"aiProfiles"`
-	AIConfigFile      string   `json:"aiConfigFile"`
-	AITemperature     float32  `json:"aiTemperature"`
-	AIMaxTokens       int      `json:"aiMaxTokens"`
-	AITimeout         int      `json:"aiTimeout"`
-	AIRetryCount      int      `json:"aiRetryCount"`
-	AIRateLimit       int      `json:"aiRateLimit"`
-	AITopP            float32  `json:"aiTopP"`
-	AIPromptRaw       string   `json:"aiPromptRaw"`
-	Character         string   `json:"character"`
-	CharacterOptions  []string `json:"characterOptions"`
-	EffectivePrompt   string   `json:"effectivePrompt"`
-	EnvironmentConfig string   `json:"environmentConfig"`
+	AIBaseURL           string   `json:"aiBaseUrl"`
+	AIModel             string   `json:"aiModel"`
+	AIKeyMasked         string   `json:"aiKeyMasked"`
+	AIKeySet            bool     `json:"aiKeySet"`
+	AIProfile           string   `json:"aiProfile"`
+	AIProfiles          []string `json:"aiProfiles"`
+	AIConfigFile        string   `json:"aiConfigFile"`
+	AITemperature       float32  `json:"aiTemperature"`
+	AIMaxTokens         int      `json:"aiMaxTokens"`
+	AITimeout           int      `json:"aiTimeout"`
+	AIRetryCount        int      `json:"aiRetryCount"`
+	AIRateLimit         int      `json:"aiRateLimit"`
+	AITopP              float32  `json:"aiTopP"`
+	AIPromptRaw         string   `json:"aiPromptRaw"`
+	EnableTimeContext   bool     `json:"enableTimeContext"`
+	TimeContextTimezone string   `json:"timeContextTimezone"`
+	TimeContextFormat   string   `json:"timeContextFormat"`
+	Character           string   `json:"character"`
+	CharacterOptions    []string `json:"characterOptions"`
+	EffectivePrompt     string   `json:"effectivePrompt"`
+	EnvironmentConfig   string   `json:"environmentConfig"`
 }
 
 type aiProfileResponse struct {
@@ -66,18 +69,21 @@ type aiProfileResponse struct {
 }
 
 type updateConfigRequest struct {
-	AIBaseURL     string  `json:"aiBaseUrl"`
-	AIModel       string  `json:"aiModel"`
-	AIProfile     string  `json:"aiProfile"`
-	AITemperature float32 `json:"aiTemperature"`
-	AIMaxTokens   int     `json:"aiMaxTokens"`
-	AITimeout     int     `json:"aiTimeout"`
-	AIRetryCount  int     `json:"aiRetryCount"`
-	AIRateLimit   int     `json:"aiRateLimit"`
-	AITopP        float32 `json:"aiTopP"`
-	AIPromptRaw   string  `json:"aiPromptRaw"`
-	Character     string  `json:"character"`
-	AIKey         string  `json:"aiKey"`
+	AIBaseURL           string  `json:"aiBaseUrl"`
+	AIModel             string  `json:"aiModel"`
+	AIProfile           string  `json:"aiProfile"`
+	AITemperature       float32 `json:"aiTemperature"`
+	AIMaxTokens         int     `json:"aiMaxTokens"`
+	AITimeout           int     `json:"aiTimeout"`
+	AIRetryCount        int     `json:"aiRetryCount"`
+	AIRateLimit         int     `json:"aiRateLimit"`
+	AITopP              float32 `json:"aiTopP"`
+	AIPromptRaw         string  `json:"aiPromptRaw"`
+	EnableTimeContext   bool    `json:"enableTimeContext"`
+	TimeContextTimezone string  `json:"timeContextTimezone"`
+	TimeContextFormat   string  `json:"timeContextFormat"`
+	Character           string  `json:"character"`
+	AIKey               string  `json:"aiKey"`
 }
 
 type logFileInfo struct {
@@ -308,10 +314,13 @@ func (s *server) handlePutConfig(c *gin.Context) {
 	}
 
 	updates := map[string]string{
-		"AI_PROFILE":     savedProfileName,
-		"AI_CONFIG_FILE": aiConfigFile,
-		"AI_PROMPT":      req.AIPromptRaw,
-		"CHARACTER":      req.Character,
+		"AI_PROFILE":            savedProfileName,
+		"AI_CONFIG_FILE":        aiConfigFile,
+		"AI_PROMPT":             req.AIPromptRaw,
+		"ENABLE_TIME_CONTEXT":   strconv.FormatBool(req.EnableTimeContext),
+		"TIME_CONTEXT_TIMEZONE": strings.TrimSpace(req.TimeContextTimezone),
+		"TIME_CONTEXT_FORMAT":   strings.TrimSpace(req.TimeContextFormat),
+		"CHARACTER":             req.Character,
 	}
 
 	envFile := resolveEnvFilePath(config.GetEnvFilePath())
@@ -843,24 +852,27 @@ func (s *server) buildConfigResponse() (configResponse, error) {
 	aiPromptRaw := firstNonEmpty(os.Getenv("AI_PROMPT"), readEnvValue(envMap, "AI_PROMPT", "AiPrompt"))
 
 	return configResponse{
-		AIBaseURL:         cfg.AiBaseUrl,
-		AIModel:           cfg.AiModel,
-		AIKeyMasked:       maskSecret(cfg.AiKEY),
-		AIKeySet:          strings.TrimSpace(cfg.AiKEY) != "",
-		AIProfile:         cfg.AiProfile,
-		AIProfiles:        aiProfileNames,
-		AIConfigFile:      cfg.AiConfigFile,
-		AITemperature:     cfg.AiTemperature,
-		AIMaxTokens:       cfg.AiMaxTokens,
-		AITimeout:         cfg.AiTimeout,
-		AIRetryCount:      cfg.AiRetryCount,
-		AIRateLimit:       cfg.AiRateLimit,
-		AITopP:            cfg.AiTopP,
-		AIPromptRaw:       aiPromptRaw,
-		Character:         character,
-		CharacterOptions:  characterOptions,
-		EffectivePrompt:   cfg.AiPrompt,
-		EnvironmentConfig: envFile,
+		AIBaseURL:           cfg.AiBaseUrl,
+		AIModel:             cfg.AiModel,
+		AIKeyMasked:         maskSecret(cfg.AiKEY),
+		AIKeySet:            strings.TrimSpace(cfg.AiKEY) != "",
+		AIProfile:           cfg.AiProfile,
+		AIProfiles:          aiProfileNames,
+		AIConfigFile:        cfg.AiConfigFile,
+		AITemperature:       cfg.AiTemperature,
+		AIMaxTokens:         cfg.AiMaxTokens,
+		AITimeout:           cfg.AiTimeout,
+		AIRetryCount:        cfg.AiRetryCount,
+		AIRateLimit:         cfg.AiRateLimit,
+		AITopP:              cfg.AiTopP,
+		AIPromptRaw:         aiPromptRaw,
+		EnableTimeContext:   cfg.EnableTimeContext,
+		TimeContextTimezone: cfg.TimeContextTimezone,
+		TimeContextFormat:   cfg.TimeContextFormat,
+		Character:           character,
+		CharacterOptions:    characterOptions,
+		EffectivePrompt:     cfg.AiPrompt,
+		EnvironmentConfig:   envFile,
 	}, nil
 }
 

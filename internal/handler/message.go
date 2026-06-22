@@ -179,8 +179,8 @@ func (h *EmotionHandler) startAIChat(c *websocket.Conn, ctx MessageContext, sm *
 			systemPrompt = "你是一个温暖、友善的聊天伙伴。请用自然、亲切的语气与用户对话，回复要简短而有趣。"
 		}
 
-		if cfg.EnableEmotionalMemory {
-			systemPrompt = service.EnhancePromptWithMemory(userID, ctx.SessionID, systemPrompt, ctx.Message)
+		if cfg.EnableEmotionalMemory || cfg.EnableTimeContext {
+			systemPrompt = service.EnhancePromptWithMemory(userID, ctx.SessionID, systemPrompt, ctx.Message, ctx.ReceivedAt)
 		}
 
 		utils.Info("【AI对话启动】注入系统 Prompt (长度: %d): %s...", len(systemPrompt), func() string {
@@ -303,8 +303,8 @@ func (h *LongChatHandler) continueAIChat(c *websocket.Conn, ctx MessageContext, 
 			systemPrompt = "你是一个温暖、友善的聊天伙伴。请用自然、亲切的语气与用户对话，回复要简短而有趣。"
 		}
 
-		if cfg.EnableEmotionalMemory {
-			systemPrompt = service.EnhancePromptWithMemory(userID, ctx.SessionID, systemPrompt, ctx.Message)
+		if cfg.EnableEmotionalMemory || cfg.EnableTimeContext {
+			systemPrompt = service.EnhancePromptWithMemory(userID, ctx.SessionID, systemPrompt, ctx.Message, ctx.ReceivedAt)
 		}
 
 		utils.Info("【AI对话启动】(OnlyLongChat) 注入系统 Prompt (长度: %d): %s...", len(systemPrompt), func() string {
@@ -325,8 +325,8 @@ func (h *LongChatHandler) continueAIChat(c *websocket.Conn, ctx MessageContext, 
 		Content: ctx.Message,
 	})
 
-	if cfg.EnableEmotionalMemory && len(conversation) > 1 {
-		conversation = service.UpdateSystemPromptWithMemory(userID, ctx.SessionID, ctx.Message, conversation)
+	if (cfg.EnableEmotionalMemory || cfg.EnableTimeContext) && len(conversation) > 1 {
+		conversation = service.UpdateSystemPromptWithMemory(userID, ctx.SessionID, ctx.Message, ctx.ReceivedAt, conversation)
 	}
 
 	startedAt := time.Now()

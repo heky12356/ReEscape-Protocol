@@ -59,7 +59,10 @@ type Config struct {
 	LogDir  string // 日志目录
 
 	// 功能开关
-	EnableOnlyLongChat bool // 仅长对话模式
+	EnableOnlyLongChat           bool // 仅长对话模式
+	MessageAggregateIdleWindowMs int  // 消息聚合空闲窗口(毫秒)
+	MessageAggregateMaxWindowMs  int  // 消息聚合最大窗口(毫秒)
+	MessageAggregateMaxMessages  int  // 单次消息聚合最大条数
 }
 
 var config = &Config{}
@@ -145,6 +148,9 @@ func init() {
 
 	// 功能开关
 	config.EnableOnlyLongChat = getBoolEnv("ENABLE_ONLY_LONG_CHAT", false)
+	config.MessageAggregateIdleWindowMs = getIntEnv("MESSAGE_AGGREGATE_IDLE_WINDOW_MS", 2000)
+	config.MessageAggregateMaxWindowMs = getIntEnv("MESSAGE_AGGREGATE_MAX_WINDOW_MS", 10000)
+	config.MessageAggregateMaxMessages = getIntEnv("MESSAGE_AGGREGATE_MAX_MESSAGES", 5)
 
 	cm, err := character.NewCharacterManager("./config/character", config.Character)
 	if err != nil {

@@ -19,16 +19,22 @@ import (
 const aiFallbackReply = "?"
 
 type MessageContext struct {
-	RequestID  string
-	SessionID  string
-	UserID     int64
-	GroupID    int64
-	ChatType   int
-	MessageID  int64
-	RawMessage string
-	Message    string
-	ReceivedAt time.Time
-	DropReason string
+	RequestID    string
+	SessionID    string
+	UserID       int64
+	GroupID      int64
+	ChatType     int
+	MessageID    int64
+	MessageIDs   []int64
+	RawSegments  []string
+	Aggregated   bool
+	SegmentCount int
+	RawMessage   string
+	Message      string
+	ReceivedAt   time.Time
+	StartedAt    time.Time
+	EndedAt      time.Time
+	DropReason   string
 }
 
 func sendAIFallbackReply(c *websocket.Conn, userID int64) (string, error) {
@@ -58,6 +64,8 @@ func NewPresetHandler() *PresetHandler {
 			"难过了":    "别难过，开心点，加油！",
 			"我想你了":   "是嘛？嘿嘿",
 			"能陪我聊聊吗": "好",
+			"晚安":     "晚安",
+			"早安":     "早安",
 		},
 	}
 }
@@ -172,7 +180,7 @@ func (h *EmotionHandler) startAIChat(c *websocket.Conn, ctx MessageContext, sm *
 		}
 
 		if cfg.EnableEmotionalMemory {
-			systemPrompt = service.EnhancePromptWithMemory(userID, systemPrompt)
+			systemPrompt = service.EnhancePromptWithMemory(userID, ctx.SessionID, systemPrompt, ctx.Message)
 		}
 
 		utils.Info("【AI对话启动】注入系统 Prompt (长度: %d): %s...", len(systemPrompt), func() string {
@@ -296,7 +304,7 @@ func (h *LongChatHandler) continueAIChat(c *websocket.Conn, ctx MessageContext, 
 		}
 
 		if cfg.EnableEmotionalMemory {
-			systemPrompt = service.EnhancePromptWithMemory(userID, systemPrompt)
+			systemPrompt = service.EnhancePromptWithMemory(userID, ctx.SessionID, systemPrompt, ctx.Message)
 		}
 
 		utils.Info("【AI对话启动】(OnlyLongChat) 注入系统 Prompt (长度: %d): %s...", len(systemPrompt), func() string {
@@ -318,7 +326,7 @@ func (h *LongChatHandler) continueAIChat(c *websocket.Conn, ctx MessageContext, 
 	})
 
 	if cfg.EnableEmotionalMemory && len(conversation) > 1 {
-		conversation = service.UpdateSystemPromptWithMemory(userID, conversation)
+		conversation = service.UpdateSystemPromptWithMemory(userID, ctx.SessionID, ctx.Message, conversation)
 	}
 
 	startedAt := time.Now()

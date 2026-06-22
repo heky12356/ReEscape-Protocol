@@ -3,6 +3,7 @@ package state
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,6 +40,8 @@ type Session struct {
 	Counters     map[string]int                 `json:"counters"`
 	LastReply    time.Time                      `json:"last_reply"`
 	Conversation []openai.ChatCompletionMessage `json:"conversation"`
+	Summary      string                         `json:"summary"`
+	ActiveTopics []string                       `json:"active_topics"`
 	LastUpdated  time.Time                      `json:"last_updated"`
 }
 
@@ -174,6 +177,7 @@ func (sm *StateManager) AddToConversation(sessionID string, msg openai.ChatCompl
 	sm.mu.Lock()
 	session := sm.ensureSessionLocked(sessionID, 0, 0, 0)
 	session.Conversation = append(session.Conversation, msg)
+	refreshSessionDerivedMemory(session)
 	session.LastUpdated = time.Now()
 	sm.mu.Unlock()
 
@@ -200,6 +204,7 @@ func (sm *StateManager) SetConversation(sessionID string, conversation []openai.
 	sm.mu.Lock()
 	session := sm.ensureSessionLocked(sessionID, 0, 0, 0)
 	session.Conversation = append([]openai.ChatCompletionMessage(nil), conversation...)
+	refreshSessionDerivedMemory(session)
 	session.LastUpdated = time.Now()
 	sm.mu.Unlock()
 
@@ -212,6 +217,8 @@ func (sm *StateManager) ClearConversation(sessionID string) {
 	session := sm.sessions[sessionID]
 	if session != nil {
 		session.Conversation = []openai.ChatCompletionMessage{}
+		session.Summary = ""
+		session.ActiveTopics = []string{}
 		session.LastUpdated = time.Now()
 	}
 	sm.mu.Unlock()
@@ -275,6 +282,8 @@ func (sm *StateManager) ResetSession(sessionID string) {
 		session.Flags = make(map[string]bool)
 		session.Counters = make(map[string]int)
 		session.Conversation = []openai.ChatCompletionMessage{}
+		session.Summary = ""
+		session.ActiveTopics = []string{}
 		session.LastReply = time.Now()
 		session.LastUpdated = time.Now()
 	}
@@ -297,6 +306,7 @@ func (sm *StateManager) ensureSessionLocked(sessionID string, userID, groupID in
 			Counters:     make(map[string]int),
 			LastReply:    now,
 			Conversation: []openai.ChatCompletionMessage{},
+			ActiveTopics: []string{},
 			LastUpdated:  now,
 		}
 		sm.sessions[sessionID] = session
@@ -320,6 +330,9 @@ func (sm *StateManager) ensureSessionLocked(sessionID string, userID, groupID in
 	}
 	if session.Conversation == nil {
 		session.Conversation = []openai.ChatCompletionMessage{}
+	}
+	if session.ActiveTopics == nil {
+		session.ActiveTopics = []string{}
 	}
 	if session.LastReply.IsZero() {
 		session.LastReply = time.Now()
@@ -438,6 +451,9 @@ func (sm *StateManager) normalizeSession(sessionID string, session *Session) {
 	if session.Conversation == nil {
 		session.Conversation = []openai.ChatCompletionMessage{}
 	}
+	if session.ActiveTopics == nil {
+		session.ActiveTopics = []string{}
+	}
 	if session.LastReply.IsZero() {
 		if session.LastUpdated.IsZero() {
 			session.LastReply = time.Now()
@@ -447,6 +463,9 @@ func (sm *StateManager) normalizeSession(sessionID string, session *Session) {
 	}
 	if session.LastUpdated.IsZero() {
 		session.LastUpdated = session.LastReply
+	}
+	if session.Summary == "" && len(session.Conversation) > 0 {
+		refreshSessionDerivedMemory(session)
 	}
 }
 
@@ -473,8 +492,10 @@ func migrateLegacyConversations(conversations map[int64]*legacyConversationData)
 			Counters:     make(map[string]int),
 			LastReply:    lastUpdated,
 			Conversation: append([]openai.ChatCompletionMessage(nil), conversation.Conversation...),
+			ActiveTopics: []string{},
 			LastUpdated:  lastUpdated,
 		}
+		refreshSessionDerivedMemory(sessions[sessionID])
 	}
 
 	return sessions
@@ -507,6 +528,8 @@ func (sm *StateManager) snapshotLocked() map[string]*Session {
 			Counters:     cloneIntMap(session.Counters),
 			LastReply:    session.LastReply,
 			Conversation: append([]openai.ChatCompletionMessage(nil), session.Conversation...),
+			Summary:      session.Summary,
+			ActiveTopics: append([]string(nil), session.ActiveTopics...),
 			LastUpdated:  session.LastUpdated,
 		}
 	}
@@ -528,4 +551,108 @@ func cloneIntMap(source map[string]int) map[string]int {
 		result[key] = value
 	}
 	return result
+}
+
+func (sm *StateManager) GetConversationSummary(sessionID string) string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session := sm.sessions[sessionID]
+	if session == nil {
+		return ""
+	}
+	return session.Summary
+}
+
+func (sm *StateManager) GetActiveTopics(sessionID string) []string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session := sm.sessions[sessionID]
+	if session == nil {
+		return []string{}
+	}
+	return append([]string(nil), session.ActiveTopics...)
+}
+
+func refreshSessionDerivedMemory(session *Session) {
+	session.Summary = summarizeConversation(session.Conversation)
+	session.ActiveTopics = extractActiveTopics(session.Conversation)
+}
+
+func summarizeConversation(conversation []openai.ChatCompletionMessage) string {
+	if len(conversation) == 0 {
+		return ""
+	}
+
+	start := 0
+	if len(conversation) > 6 {
+		start = len(conversation) - 6
+	}
+
+	parts := make([]string, 0, len(conversation)-start)
+	for _, msg := range conversation[start:] {
+		if msg.Role == "system" {
+			continue
+		}
+
+		content := strings.TrimSpace(msg.Content)
+		if content == "" {
+			continue
+		}
+
+		parts = append(parts, fmt.Sprintf("%s:%s", summarizeRole(msg.Role), truncateRunes(content, 32)))
+	}
+
+	return strings.Join(parts, " | ")
+}
+
+func extractActiveTopics(conversation []openai.ChatCompletionMessage) []string {
+	topics := make([]string, 0, 3)
+	seen := make(map[string]struct{})
+
+	for i := len(conversation) - 1; i >= 0 && len(topics) < 3; i-- {
+		msg := conversation[i]
+		if msg.Role != "user" {
+			continue
+		}
+
+		content := strings.TrimSpace(msg.Content)
+		if content == "" {
+			continue
+		}
+
+		topic := truncateRunes(content, 16)
+		if _, ok := seen[topic]; ok {
+			continue
+		}
+		seen[topic] = struct{}{}
+		topics = append([]string{topic}, topics...)
+	}
+
+	return topics
+}
+
+func summarizeRole(role string) string {
+	switch role {
+	case "assistant":
+		return "assistant"
+	case "user":
+		return "user"
+	default:
+		return role
+	}
+}
+
+func truncateRunes(input string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+
+	runes := []rune(input)
+	if len(runes) <= limit {
+		return input
+	}
+
+	return string(runes[:limit]) + "..."
 }

@@ -18,6 +18,7 @@ import (
 	"project-yume/internal/metrics"
 	"project-yume/internal/model"
 	"project-yume/internal/scheduler"
+	"project-yume/internal/service"
 	"project-yume/internal/state"
 	"project-yume/internal/storage"
 	"project-yume/internal/utils"
@@ -74,6 +75,11 @@ func main() {
 	if cfg.EnableOnlyLongChat {
 		utils.Info("仅长聊天模式已启用")
 	}
+	utils.Info("消息聚合已启用: idle=%dms max_window=%dms max_messages=%d",
+		cfg.MessageAggregateIdleWindowMs,
+		cfg.MessageAggregateMaxWindowMs,
+		cfg.MessageAggregateMaxMessages,
+	)
 
 	// 监听中断信号
 	interrupt := make(chan os.Signal, 1)
@@ -89,11 +95,21 @@ func main() {
 		utils.Error("配置情感记忆持久化失败: %v", err)
 		os.Exit(1)
 	}
+	if err := memory.GetProfileManager().ConfigurePersistence(snapshotStore, flushWorker); err != nil {
+		utils.Error("配置用户画像持久化失败: %v", err)
+		os.Exit(1)
+	}
+	if err := memory.GetFactManager().ConfigurePersistence(snapshotStore, flushWorker); err != nil {
+		utils.Error("配置事实记忆持久化失败: %v", err)
+		os.Exit(1)
+	}
 	if err := state.GetManager().ConfigurePersistence(snapshotStore, flushWorker); err != nil {
 		utils.Error("配置会话持久化失败: %v", err)
 		os.Exit(1)
 	}
 	flushWorker.Register(memory.FlushTaskName, memory.GetManager().Flush)
+	flushWorker.Register(memory.ProfileFlushTaskName, memory.GetProfileManager().Flush)
+	flushWorker.Register(memory.FactFlushTaskName, memory.GetFactManager().Flush)
 	flushWorker.Register(state.FlushTaskName, state.GetManager().Flush)
 	go flushWorker.Run(ctx)
 	defer flushWorker.Stop()
@@ -102,13 +118,17 @@ func main() {
 	go admin.Start(ctx)
 
 	// 定义消息通道
-	msgChan := make(chan model.Msg, 100) // 增加缓冲区
+	rawMsgChan := make(chan model.Msg, 100)
+	aggregatedMsgChan := make(chan model.Msg, 100)
 
 	// 启动消息接收协程
-	go startMessageReceiver(c, msgChan, ctx)
+	go startMessageReceiver(c, rawMsgChan, ctx)
+
+	// 启动消息聚合协程
+	go inbound.NewMessageAggregator().Run(ctx, rawMsgChan, aggregatedMsgChan)
 
 	// 启动消息处理协程
-	go startMessageProcessor(c, msgChan, messagePipeline, messageProcessor, ctx)
+	go startMessageProcessor(c, aggregatedMsgChan, messagePipeline, messageProcessor, ctx)
 
 	// 启动定时任务协程
 	if naturalScheduler != nil {
@@ -220,7 +240,6 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 	pipeline *inbound.Pipeline, processor *handler.MessageProcessor, ctx context.Context,
 ) {
 	cfg := config.GetConfig()
-	memoryManager := memory.GetManager()
 
 	for {
 		select {
@@ -234,15 +253,37 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 			}
 
 			sessionID := state.BuildSessionID(msg.User_id, msg.Group_id, msg.Type)
+			startedAt := time.Unix(msg.Time, 0)
+			if msg.StartTime != 0 {
+				startedAt = time.Unix(msg.StartTime, 0)
+			}
+			endedAt := time.Unix(msg.Time, 0)
+			if msg.EndTime != 0 {
+				endedAt = time.Unix(msg.EndTime, 0)
+			}
+			messageIDs := msg.MessageIDs
+			if len(messageIDs) == 0 && msg.MessageID != 0 {
+				messageIDs = []int64{msg.MessageID}
+			}
+			rawSegments := msg.RawSegments
+			if len(rawSegments) == 0 && msg.Message != "" {
+				rawSegments = []string{msg.Message}
+			}
 			messageCtx := handler.MessageContext{
-				RequestID:  buildMessageRequestID(msg.MessageID),
-				SessionID:  sessionID,
-				UserID:     msg.User_id,
-				GroupID:    msg.Group_id,
-				ChatType:   msg.Type,
-				MessageID:  msg.MessageID,
-				RawMessage: msg.Message,
-				ReceivedAt: time.Unix(msg.Time, 0),
+				RequestID:    buildMessageRequestID(msg.MessageID),
+				SessionID:    sessionID,
+				UserID:       msg.User_id,
+				GroupID:      msg.Group_id,
+				ChatType:     msg.Type,
+				MessageID:    msg.MessageID,
+				MessageIDs:   messageIDs,
+				RawSegments:  rawSegments,
+				Aggregated:   msg.Aggregated,
+				SegmentCount: len(rawSegments),
+				RawMessage:   msg.Message,
+				ReceivedAt:   endedAt,
+				StartedAt:    startedAt,
+				EndedAt:      endedAt,
 			}
 
 			if err := pipeline.Run(&messageCtx); err != nil {
@@ -254,6 +295,8 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 						utils.Int64("user_id", msg.User_id),
 						utils.Int64("group_id", msg.Group_id),
 						utils.Int64("message_id", msg.MessageID),
+						utils.Bool("aggregated", messageCtx.Aggregated),
+						utils.Int("segment_count", messageCtx.SegmentCount),
 						utils.String("reason", messageCtx.DropReason),
 					)
 					metrics.IncCounter(
@@ -291,6 +334,8 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 				utils.Int64("user_id", msg.User_id),
 				utils.Int64("group_id", msg.Group_id),
 				utils.Int64("message_id", msg.MessageID),
+				utils.Bool("aggregated", messageCtx.Aggregated),
+				utils.Int("segment_count", messageCtx.SegmentCount),
 				utils.String("message", messageCtx.Message),
 				utils.Int("state", int(state.GetManager().GetState(sessionID))),
 			)
@@ -318,16 +363,17 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 			if cfg.EnableEmotionalMemory && result.Handled {
 				if result.Emotion != "" && result.Intention != "" {
 					utils.Info("记录情感记忆 - 情感: %s, 意图: %s", result.Emotion, result.Intention)
-					memoryManager.RecordInteraction(
-						msg.User_id,
-						msg.Message,
-						result.Reply,
-						result.Emotion,
-						result.Intention,
-					)
 				} else {
-					utils.Warn("跳过情感记忆写入，emotion/intention 无效: emotion=%q intention=%q", result.Emotion, result.Intention)
+					utils.Warn("情绪交互记录将跳过，但仍尝试提取长期偏好/事实: emotion=%q intention=%q", result.Emotion, result.Intention)
 				}
+				service.UpdateLongTermMemory(
+					sessionID,
+					msg.User_id,
+					messageCtx.Message,
+					result.Reply,
+					result.Emotion,
+					result.Intention,
+				)
 			}
 
 			// 更新状态
@@ -339,6 +385,8 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 				utils.Int64("user_id", msg.User_id),
 				utils.Int64("group_id", msg.Group_id),
 				utils.Int64("message_id", msg.MessageID),
+				utils.Bool("aggregated", messageCtx.Aggregated),
+				utils.Int("segment_count", messageCtx.SegmentCount),
 				utils.Bool("handled", result.Handled),
 				utils.String("emotion", result.Emotion),
 				utils.String("intention", result.Intention),

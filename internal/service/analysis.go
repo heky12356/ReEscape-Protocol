@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"project-yume/internal/aifunction"
-	"project-yume/internal/memory"
 	"project-yume/internal/metrics"
 	"project-yume/internal/utils"
 
@@ -210,23 +209,14 @@ func fallbackAnalysis(mode AnalysisMode) MessageAnalysis {
 	return result
 }
 
-// EnhancePromptWithMemory 基于情感记忆增强AI提示词
-func EnhancePromptWithMemory(userID int64, originalPrompt string) string {
-	memoryManager := memory.GetManager()
+// EnhancePromptWithMemory 基于分层记忆增强AI提示词
+func EnhancePromptWithMemory(userID int64, sessionID, originalPrompt, currentMessage string) string {
+	memoryContext := FormatPromptMemory(BuildPromptMemory(userID, sessionID, currentMessage))
+	if memoryContext == "" {
+		return originalPrompt
+	}
 
-	// 获取用户对话模式
-	pattern := memoryManager.GetConversationPattern(userID)
-
-	// 获取最近情感状态
-	recentEmotions := memoryManager.GetRecentEmotions(userID, 5)
-
-	// 构建情感记忆上下文
-	emotionalContext := BuildEmotionalContext(pattern, recentEmotions)
-
-	// 增强提示词
-	enhancedPrompt := originalPrompt + "\n\n" + emotionalContext
-
-	return enhancedPrompt
+	return originalPrompt + "\n\n" + memoryContext
 }
 
 // BuildEmotionalContext 构建情感上下文
@@ -267,60 +257,38 @@ func BuildEmotionalContext(pattern string, recentEmotions []string) string {
 	return context
 }
 
-// UpdateSystemPromptWithMemory 基于情感记忆更新系统提示词
-func UpdateSystemPromptWithMemory(userID int64, conversation []openai.ChatCompletionMessage) []openai.ChatCompletionMessage {
-	memoryManager := memory.GetManager()
-
-	// 获取用户对话模式
-	pattern := memoryManager.GetConversationPattern(userID)
-
-	// 获取最近情感状态
-	recentEmotions := memoryManager.GetRecentEmotions(userID, 3)
-
-	// 构建情感上下文更新
-	emotionalUpdate := BuildEmotionalUpdate(pattern, recentEmotions)
-
-	// 如果有情感更新信息，更新对话中的情感状态
-	if emotionalUpdate != "" {
-		// 查找并替换现有的情感状态更新消息
-		for i, msg := range conversation {
-			if msg.Role == "system" && strings.Contains(msg.Content, "【情感状态更新】") {
-				// 找到现有的情感状态更新，直接替换
-				conversation[i].Content = emotionalUpdate
-				return conversation
-			}
-		}
-
-		// 如果没有找到现有的情感状态更新，则在第一个系统消息后插入新的
-		updatedConversation := make([]openai.ChatCompletionMessage, 0, len(conversation)+1)
-
-		// 复制系统消息
-		if len(conversation) > 0 && conversation[0].Role == "system" {
-			updatedConversation = append(updatedConversation, conversation[0])
-		}
-
-		// 添加情感上下文更新
-		updatedConversation = append(updatedConversation, openai.ChatCompletionMessage{
-			Role:    "system",
-			Content: emotionalUpdate,
-		})
-
-		// 复制其余消息
-		startIndex := 1
-		if len(conversation) > 0 && conversation[0].Role == "system" {
-			startIndex = 1
-		} else {
-			startIndex = 0
-		}
-
-		for i := startIndex; i < len(conversation); i++ {
-			updatedConversation = append(updatedConversation, conversation[i])
-		}
-
-		return updatedConversation
+// UpdateSystemPromptWithMemory 基于分层记忆更新系统提示词
+func UpdateSystemPromptWithMemory(userID int64, sessionID, currentMessage string, conversation []openai.ChatCompletionMessage) []openai.ChatCompletionMessage {
+	memoryContext := FormatPromptMemory(BuildPromptMemory(userID, sessionID, currentMessage))
+	if memoryContext == "" {
+		return conversation
 	}
 
-	return conversation
+	memoryMessage := openai.ChatCompletionMessage{
+		Role:    "system",
+		Content: "【记忆增强】\n" + memoryContext,
+	}
+
+	for i, msg := range conversation {
+		if msg.Role == "system" && strings.Contains(msg.Content, "【记忆增强】") {
+			conversation[i] = memoryMessage
+			return conversation
+		}
+	}
+
+	updated := make([]openai.ChatCompletionMessage, 0, len(conversation)+1)
+	inserted := false
+	for _, msg := range conversation {
+		updated = append(updated, msg)
+		if !inserted && msg.Role == "system" {
+			updated = append(updated, memoryMessage)
+			inserted = true
+		}
+	}
+	if !inserted {
+		updated = append([]openai.ChatCompletionMessage{memoryMessage}, updated...)
+	}
+	return updated
 }
 
 // BuildEmotionalUpdate 构建情感更新信息

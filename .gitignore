@@ -13,7 +13,6 @@ config/ai_profiles.json
 config/character
 debug.env
 logs
-task.md
-task2.md
+doce
 data
 main.exe

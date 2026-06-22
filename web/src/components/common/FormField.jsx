@@ -4,7 +4,8 @@ export function InputField({
   onChange,
   type = "text",
   step,
-  placeholder
+  placeholder,
+  hint
 }) {
   return (
     <label className="field">
@@ -17,11 +18,12 @@ export function InputField({
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
       />
+      {hint ? <span className="field-hint">{hint}</span> : null}
     </label>
   );
 }
 
-export function SelectField({ label, value, options, onChange }) {
+export function SelectField({ label, value, options, onChange, hint }) {
   return (
     <label className="field">
       <span className="field-label">{label}</span>
@@ -36,11 +38,12 @@ export function SelectField({ label, value, options, onChange }) {
           </option>
         ))}
       </select>
+      {hint ? <span className="field-hint">{hint}</span> : null}
     </label>
   );
 }
 
-export function TextAreaField({ label, value, onChange, rows = 10 }) {
+export function TextAreaField({ label, value, onChange, rows = 10, hint }) {
   return (
     <label className="field">
       <span className="field-label">{label}</span>
@@ -50,6 +53,7 @@ export function TextAreaField({ label, value, onChange, rows = 10 }) {
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value)}
       />
+      {hint ? <span className="field-hint">{hint}</span> : null}
     </label>
   );
 }

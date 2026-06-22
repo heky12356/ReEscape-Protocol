@@ -53,8 +53,9 @@ export function PromptPage({ panel }) {
   return (
     <div className="stack">
       <Panel
-        title="人格与 Prompt"
-        subtitle="切换生效人格，编辑 AI_PROMPT，并应用到运行配置"
+        eyebrow="Voice source"
+        title="生效人格与系统补充 Prompt"
+        subtitle="把角色文件和补充提示词拆开处理，避免把“说什么”和“怎么说”混在一起。"
         actions={
           <button
             type="button"
@@ -66,23 +67,36 @@ export function PromptPage({ panel }) {
           </button>
         }
       >
-        <div className="form-row">
-          <SelectField
-            label="人格文件 (CHARACTER)"
-            value={cfg.character}
-            options={cfg.characterOptions}
-            onChange={(v) => updateConfigField(panel, "character", v)}
-          />
+        <div className="split-layout">
+          <div className="stack compact">
+            <SelectField
+              label="人格文件 (CHARACTER)"
+              value={cfg.character}
+              options={cfg.characterOptions}
+              onChange={(v) => updateConfigField(panel, "character", v)}
+            />
+            <TextAreaField
+              label="AI_PROMPT"
+              value={cfg.aiPromptRaw}
+              rows={8}
+              hint="这是附加在系统基础 prompt 上的一层补充说明。"
+              onChange={(v) => updateConfigField(panel, "aiPromptRaw", v)}
+            />
+          </div>
+
+          <div className="insight-card alternate">
+            <div className="insight-kicker">Voice chamber</div>
+            <div className="insight-title">人格文件是长期音色，AI_PROMPT 更像一场次的导演备注。</div>
+            <p className="insight-copy">
+              前者适合写稳定性格、行为倾向、默认措辞；后者适合写这次运行要临时强调的策略。
+            </p>
+            <div className="insight-meta mono">{panel.characterFile || cfg.character || "-"}</div>
+          </div>
         </div>
-        <TextAreaField
-          label="AI_PROMPT (补充提示词)"
-          value={cfg.aiPromptRaw}
-          rows={8}
-          onChange={(v) => updateConfigField(panel, "aiPromptRaw", v)}
-        />
       </Panel>
 
       <Panel
+        eyebrow="Character editor"
         title="人格文件编辑器"
         subtitle={`当前文件: ${panel.characterFile || cfg.character || "-"}`}
         actions={
@@ -105,7 +119,7 @@ export function PromptPage({ panel }) {
             onChange={(v) => updateCharacterField(panel, "name", v)}
           />
           <InputField
-            label="新文件名 (用于新建)"
+            label="新文件名"
             value={newFileName}
             placeholder="example: assistant_v2"
             onChange={setNewFileName}
@@ -121,38 +135,29 @@ export function PromptPage({ panel }) {
           />
         </div>
 
-        <div className="form-row">
+        <div className="editor-grid">
           <TextAreaField
             label="Personality (JSON object)"
             value={personalityText}
-            rows={8}
+            rows={12}
             onChange={setPersonalityText}
           />
-        </div>
-
-        <div className="form-row">
           <TextAreaField
             label="Responses (JSON object)"
             value={responsesText}
-            rows={10}
+            rows={12}
             onChange={setResponsesText}
           />
-        </div>
-
-        <div className="form-row">
           <TextAreaField
             label="Behavior (JSON object)"
             value={behaviorText}
-            rows={10}
+            rows={12}
             onChange={setBehaviorText}
           />
-        </div>
-
-        <div className="form-row">
           <TextAreaField
             label="Quotes (one line per quote)"
             value={quotesText}
-            rows={6}
+            rows={12}
             onChange={setQuotesText}
           />
         </div>
@@ -169,7 +174,11 @@ export function PromptPage({ panel }) {
         </div>
       </Panel>
 
-      <Panel title="最终生效 Prompt" subtitle="系统基础 prompt + AI_PROMPT + 人格 prompt">
+      <Panel
+        eyebrow="Rendered output"
+        title="最终生效 Prompt"
+        subtitle="系统基础 prompt + AI_PROMPT + 人格 prompt 的最终结果。"
+      >
         <pre className="prompt-preview">{cfg.effectivePrompt || "暂无内容"}</pre>
       </Panel>
     </div>

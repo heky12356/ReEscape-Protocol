@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { adminApi } from "../api/adminApi";
 
 const defaultConfig = {
@@ -32,6 +32,13 @@ const defaultCharacterConfig = {
   quotes: []
 };
 
+const defaultProbe = {
+  status: "unknown",
+  checks: {},
+  time: "",
+  uptimeSec: 0
+};
+
 export function useAdminPanel() {
   const [config, setConfig] = useState(defaultConfig);
   const [saving, setSaving] = useState(false);
@@ -39,6 +46,9 @@ export function useAdminPanel() {
   const [loadingAIProfile, setLoadingAIProfile] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+
+  const [health, setHealth] = useState(defaultProbe);
+  const [ready, setReady] = useState(defaultProbe);
 
   const [logFiles, setLogFiles] = useState([]);
   const [selectedLogFile, setSelectedLogFile] = useState("");
@@ -70,6 +80,33 @@ export function useAdminPanel() {
     }
   }, []);
 
+  const loadSystemStatus = useCallback(async () => {
+    const [healthResult, readyResult] = await Promise.allSettled([
+      adminApi.getHealth(),
+      adminApi.getReady()
+    ]);
+
+    if (healthResult.status === "fulfilled") {
+      setHealth((prev) => ({ ...prev, ...healthResult.value }));
+    } else {
+      setHealth((prev) => ({
+        ...prev,
+        status: "down",
+        checks: { process: getErrMsg(healthResult.reason) }
+      }));
+    }
+
+    if (readyResult.status === "fulfilled") {
+      setReady((prev) => ({ ...prev, ...readyResult.value }));
+    } else {
+      setReady((prev) => ({
+        ...prev,
+        status: "down",
+        checks: { process: getErrMsg(readyResult.reason) }
+      }));
+    }
+  }, []);
+
   const saveConfig = useCallback(
     async (override = null) => {
       const nextConfig = override ? { ...config, ...override } : config;
@@ -80,14 +117,15 @@ export function useAdminPanel() {
       try {
         const data = await adminApi.updateConfig(payload);
         setConfig((prev) => ({ ...prev, ...nextConfig, ...data, aiKey: "" }));
-        setStatus("Config saved and hot reloaded");
+        setStatus("配置已保存并热重载");
+        void loadSystemStatus();
       } catch (err) {
         setError(getErrMsg(err));
       } finally {
         setSaving(false);
       }
     },
-    [config, resetMsg]
+    [config, loadSystemStatus, resetMsg]
   );
 
   const loadAIProfile = useCallback(async (name) => {
@@ -220,7 +258,7 @@ export function useAdminPanel() {
         const data = await adminApi.updateCharacterConfig(target, nextConfig);
         setCharacterFile(data.file || target);
         setCharacterConfig(normalizeCharacterConfig(data.config));
-        setStatus("Character file saved");
+        setStatus("人格文件已保存");
         await refreshCharacterOptions();
       } catch (err) {
         setError(getErrMsg(err));
@@ -247,7 +285,7 @@ export function useAdminPanel() {
         setCharacterFile(createdFile);
         setCharacterConfig(normalizeCharacterConfig(data.config));
         setConfig((prev) => ({ ...prev, character: createdFile }));
-        setStatus("Character file created");
+        setStatus("新人格文件已创建");
         await refreshCharacterOptions();
       } catch (err) {
         setError(getErrMsg(err));
@@ -261,7 +299,16 @@ export function useAdminPanel() {
   useEffect(() => {
     void loadConfig();
     void loadLogFiles();
-  }, [loadConfig, loadLogFiles]);
+    void loadSystemStatus();
+  }, [loadConfig, loadLogFiles, loadSystemStatus]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void loadSystemStatus();
+    }, 30000);
+
+    return () => window.clearInterval(timer);
+  }, [loadSystemStatus]);
 
   useEffect(() => {
     if (!config.character) {
@@ -269,6 +316,17 @@ export function useAdminPanel() {
     }
     void loadCharacterConfig(config.character);
   }, [config.character, loadCharacterConfig]);
+
+  const digest = useMemo(
+    () => ({
+      profileCount: config.aiProfiles.length,
+      characterCount: config.characterOptions.length,
+      logCount: logFiles.length,
+      healthState: health.status,
+      readyState: ready.status
+    }),
+    [config.aiProfiles.length, config.characterOptions.length, health.status, logFiles.length, ready.status]
+  );
 
   return {
     config,
@@ -284,6 +342,10 @@ export function useAdminPanel() {
     selectAIProfile,
     loadAIProfile,
     loadConfig,
+    health,
+    ready,
+    loadSystemStatus,
+    digest,
     logFiles,
     selectedLogFile,
     setSelectedLogFile,

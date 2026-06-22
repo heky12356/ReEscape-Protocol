@@ -14,6 +14,12 @@ async function fetchJSON(url, options) {
 }
 
 export const adminApi = {
+  getHealth() {
+    return fetchJSON("/healthz", { cache: "no-store" });
+  },
+  getReady() {
+    return fetchJSON("/readyz", { cache: "no-store" });
+  },
   getConfig() {
     return fetchJSON("/api/admin/config");
   },

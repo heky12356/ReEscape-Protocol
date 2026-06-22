@@ -31,18 +31,38 @@ const (
 
 // Session 保存单个用户/会话的运行态。
 type Session struct {
-	ID           string                         `json:"id"`
-	UserID       int64                          `json:"user_id"`
-	GroupID      int64                          `json:"group_id"`
-	ChatType     int                            `json:"chat_type"`
-	CurrentState BotState                       `json:"current_state"`
-	Flags        map[string]bool                `json:"flags"`
-	Counters     map[string]int                 `json:"counters"`
-	LastReply    time.Time                      `json:"last_reply"`
-	Conversation []openai.ChatCompletionMessage `json:"conversation"`
-	Summary      string                         `json:"summary"`
-	ActiveTopics []string                       `json:"active_topics"`
-	LastUpdated  time.Time                      `json:"last_updated"`
+	ID                     string                         `json:"id"`
+	UserID                 int64                          `json:"user_id"`
+	GroupID                int64                          `json:"group_id"`
+	ChatType               int                            `json:"chat_type"`
+	CurrentState           BotState                       `json:"current_state"`
+	Flags                  map[string]bool                `json:"flags"`
+	Counters               map[string]int                 `json:"counters"`
+	LastReply              time.Time                      `json:"last_reply"`
+	LastReplyMode          string                         `json:"last_reply_mode,omitempty"`
+	LastUserMessageAt      time.Time                      `json:"last_user_message_at,omitempty"`
+	LastAssistantMessageAt time.Time                      `json:"last_assistant_message_at,omitempty"`
+	LastInteractionAt      time.Time                      `json:"last_interaction_at,omitempty"`
+	LastProactiveAt        time.Time                      `json:"last_proactive_at,omitempty"`
+	NextScheduledAt        time.Time                      `json:"next_scheduled_at,omitempty"`
+	Conversation           []openai.ChatCompletionMessage `json:"conversation"`
+	Summary                string                         `json:"summary"`
+	ActiveTopics           []string                       `json:"active_topics"`
+	DialogueState          DialogueState                  `json:"dialogue_state"`
+	LastUpdated            time.Time                      `json:"last_updated"`
+}
+
+// DialogueState 保存最近一轮结构化对话判断，用于影响后续回复。
+type DialogueState struct {
+	Emotion          string    `json:"emotion,omitempty"`
+	Intention        string    `json:"intention,omitempty"`
+	ReplyExpectation string    `json:"reply_expectation,omitempty"`
+	TurnStatus       string    `json:"turn_status,omitempty"`
+	SupportStrategy  string    `json:"support_strategy,omitempty"`
+	Topic            string    `json:"topic,omitempty"`
+	UserNeed         string    `json:"user_need,omitempty"`
+	Confidence       float64   `json:"confidence,omitempty"`
+	UpdatedAt        time.Time `json:"updated_at,omitempty"`
 }
 
 // SessionStorage 会话存储。
@@ -158,6 +178,122 @@ func (sm *StateManager) UpdateLastReply(sessionID string) {
 	sm.mu.Unlock()
 
 	sm.markDirty()
+}
+
+func (sm *StateManager) UpdateLastReplyMode(sessionID, mode string) {
+	sm.mu.Lock()
+	session := sm.ensureSessionLocked(sessionID, 0, 0, 0)
+	session.LastReplyMode = mode
+	session.LastUpdated = time.Now()
+	sm.mu.Unlock()
+
+	sm.markDirty()
+}
+
+func (sm *StateManager) RecordUserTurn(sessionID string, msg openai.ChatCompletionMessage, at time.Time) {
+	sm.mu.Lock()
+	session := sm.ensureSessionLocked(sessionID, 0, 0, 0)
+	session.Conversation = append(session.Conversation, msg)
+	refreshSessionDerivedMemory(session)
+	if at.IsZero() {
+		at = time.Now()
+	}
+	session.LastUserMessageAt = at
+	session.LastInteractionAt = at
+	session.LastUpdated = at
+	sm.mu.Unlock()
+
+	sm.markDirty()
+}
+
+func (sm *StateManager) RecordAssistantTurn(sessionID, content string, at time.Time, proactive bool) {
+	sm.mu.Lock()
+	session := sm.ensureSessionLocked(sessionID, 0, 0, 0)
+	if trimmed := strings.TrimSpace(content); trimmed != "" {
+		session.Conversation = append(session.Conversation, openai.ChatCompletionMessage{
+			Role:    "assistant",
+			Content: trimmed,
+		})
+		refreshSessionDerivedMemory(session)
+	}
+	if at.IsZero() {
+		at = time.Now()
+	}
+	session.LastAssistantMessageAt = at
+	session.LastReply = at
+	session.LastInteractionAt = at
+	if proactive {
+		session.LastProactiveAt = at
+	}
+	session.LastUpdated = at
+	sm.mu.Unlock()
+
+	sm.markDirty()
+}
+
+func (sm *StateManager) SetNextScheduledAt(sessionID string, at time.Time) {
+	sm.mu.Lock()
+	session := sm.ensureSessionLocked(sessionID, 0, 0, 0)
+	session.NextScheduledAt = at
+	session.LastUpdated = time.Now()
+	sm.mu.Unlock()
+
+	sm.markDirty()
+}
+
+func (sm *StateManager) GetNextScheduledAt(sessionID string) time.Time {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session := sm.sessions[sessionID]
+	if session == nil {
+		return time.Time{}
+	}
+	return session.NextScheduledAt
+}
+
+func (sm *StateManager) GetLastInteractionAt(sessionID string) time.Time {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session := sm.sessions[sessionID]
+	if session == nil {
+		return time.Time{}
+	}
+	return session.LastInteractionAt
+}
+
+func (sm *StateManager) GetTimeSinceLastInteraction(sessionID string) time.Duration {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session := sm.sessions[sessionID]
+	if session == nil || session.LastInteractionAt.IsZero() {
+		return 0
+	}
+	return time.Since(session.LastInteractionAt)
+}
+
+func (sm *StateManager) SetDialogueState(sessionID string, dialogueState DialogueState) {
+	sm.mu.Lock()
+	session := sm.ensureSessionLocked(sessionID, 0, 0, 0)
+	dialogueState.UpdatedAt = time.Now()
+	session.DialogueState = dialogueState
+	session.LastUpdated = dialogueState.UpdatedAt
+	sm.mu.Unlock()
+
+	sm.markDirty()
+}
+
+func (sm *StateManager) GetDialogueState(sessionID string) DialogueState {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session := sm.sessions[sessionID]
+	if session == nil {
+		return DialogueState{}
+	}
+	return session.DialogueState
 }
 
 // GetTimeSinceLastReply 获取上次回复时间距离现在的时长
@@ -284,8 +420,16 @@ func (sm *StateManager) ResetSession(sessionID string) {
 		session.Conversation = []openai.ChatCompletionMessage{}
 		session.Summary = ""
 		session.ActiveTopics = []string{}
-		session.LastReply = time.Now()
-		session.LastUpdated = time.Now()
+		session.DialogueState = DialogueState{}
+		now := time.Now()
+		session.LastReply = now
+		session.LastReplyMode = ""
+		session.LastUserMessageAt = time.Time{}
+		session.LastAssistantMessageAt = now
+		session.LastInteractionAt = now
+		session.LastProactiveAt = time.Time{}
+		session.NextScheduledAt = time.Time{}
+		session.LastUpdated = now
 	}
 	sm.mu.Unlock()
 
@@ -297,17 +441,20 @@ func (sm *StateManager) ensureSessionLocked(sessionID string, userID, groupID in
 	if session == nil {
 		now := time.Now()
 		session = &Session{
-			ID:           sessionID,
-			UserID:       userID,
-			GroupID:      groupID,
-			ChatType:     chatType,
-			CurrentState: StateIdle,
-			Flags:        make(map[string]bool),
-			Counters:     make(map[string]int),
-			LastReply:    now,
-			Conversation: []openai.ChatCompletionMessage{},
-			ActiveTopics: []string{},
-			LastUpdated:  now,
+			ID:                     sessionID,
+			UserID:                 userID,
+			GroupID:                groupID,
+			ChatType:               chatType,
+			CurrentState:           StateIdle,
+			Flags:                  make(map[string]bool),
+			Counters:               make(map[string]int),
+			LastReply:              now,
+			LastAssistantMessageAt: now,
+			LastInteractionAt:      now,
+			Conversation:           []openai.ChatCompletionMessage{},
+			ActiveTopics:           []string{},
+			DialogueState:          DialogueState{},
+			LastUpdated:            now,
 		}
 		sm.sessions[sessionID] = session
 		return session
@@ -333,6 +480,24 @@ func (sm *StateManager) ensureSessionLocked(sessionID string, userID, groupID in
 	}
 	if session.ActiveTopics == nil {
 		session.ActiveTopics = []string{}
+	}
+	if session.DialogueState.UpdatedAt.IsZero() && !session.LastUpdated.IsZero() {
+		session.DialogueState.UpdatedAt = session.LastUpdated
+	}
+	if session.LastInteractionAt.IsZero() {
+		switch {
+		case !session.LastUserMessageAt.IsZero():
+			session.LastInteractionAt = session.LastUserMessageAt
+		case !session.LastAssistantMessageAt.IsZero():
+			session.LastInteractionAt = session.LastAssistantMessageAt
+		case !session.LastReply.IsZero():
+			session.LastInteractionAt = session.LastReply
+		case !session.LastUpdated.IsZero():
+			session.LastInteractionAt = session.LastUpdated
+		}
+	}
+	if session.LastAssistantMessageAt.IsZero() && !session.LastReply.IsZero() {
+		session.LastAssistantMessageAt = session.LastReply
 	}
 	if session.LastReply.IsZero() {
 		session.LastReply = time.Now()
@@ -454,6 +619,24 @@ func (sm *StateManager) normalizeSession(sessionID string, session *Session) {
 	if session.ActiveTopics == nil {
 		session.ActiveTopics = []string{}
 	}
+	if session.DialogueState.UpdatedAt.IsZero() && !session.LastUpdated.IsZero() {
+		session.DialogueState.UpdatedAt = session.LastUpdated
+	}
+	if session.LastInteractionAt.IsZero() {
+		switch {
+		case !session.LastUserMessageAt.IsZero():
+			session.LastInteractionAt = session.LastUserMessageAt
+		case !session.LastAssistantMessageAt.IsZero():
+			session.LastInteractionAt = session.LastAssistantMessageAt
+		case !session.LastReply.IsZero():
+			session.LastInteractionAt = session.LastReply
+		case !session.LastUpdated.IsZero():
+			session.LastInteractionAt = session.LastUpdated
+		}
+	}
+	if session.LastAssistantMessageAt.IsZero() && !session.LastReply.IsZero() {
+		session.LastAssistantMessageAt = session.LastReply
+	}
 	if session.LastReply.IsZero() {
 		if session.LastUpdated.IsZero() {
 			session.LastReply = time.Now()
@@ -484,16 +667,18 @@ func migrateLegacyConversations(conversations map[int64]*legacyConversationData)
 		}
 
 		sessions[sessionID] = &Session{
-			ID:           sessionID,
-			UserID:       userID,
-			ChatType:     1,
-			CurrentState: StateIdle,
-			Flags:        make(map[string]bool),
-			Counters:     make(map[string]int),
-			LastReply:    lastUpdated,
-			Conversation: append([]openai.ChatCompletionMessage(nil), conversation.Conversation...),
-			ActiveTopics: []string{},
-			LastUpdated:  lastUpdated,
+			ID:                     sessionID,
+			UserID:                 userID,
+			ChatType:               1,
+			CurrentState:           StateIdle,
+			Flags:                  make(map[string]bool),
+			Counters:               make(map[string]int),
+			LastReply:              lastUpdated,
+			LastAssistantMessageAt: lastUpdated,
+			LastInteractionAt:      lastUpdated,
+			Conversation:           append([]openai.ChatCompletionMessage(nil), conversation.Conversation...),
+			ActiveTopics:           []string{},
+			LastUpdated:            lastUpdated,
 		}
 		refreshSessionDerivedMemory(sessions[sessionID])
 	}
@@ -519,18 +704,25 @@ func (sm *StateManager) snapshotLocked() map[string]*Session {
 			continue
 		}
 		result[sessionID] = &Session{
-			ID:           session.ID,
-			UserID:       session.UserID,
-			GroupID:      session.GroupID,
-			ChatType:     session.ChatType,
-			CurrentState: session.CurrentState,
-			Flags:        cloneBoolMap(session.Flags),
-			Counters:     cloneIntMap(session.Counters),
-			LastReply:    session.LastReply,
-			Conversation: append([]openai.ChatCompletionMessage(nil), session.Conversation...),
-			Summary:      session.Summary,
-			ActiveTopics: append([]string(nil), session.ActiveTopics...),
-			LastUpdated:  session.LastUpdated,
+			ID:                     session.ID,
+			UserID:                 session.UserID,
+			GroupID:                session.GroupID,
+			ChatType:               session.ChatType,
+			CurrentState:           session.CurrentState,
+			Flags:                  cloneBoolMap(session.Flags),
+			Counters:               cloneIntMap(session.Counters),
+			LastReply:              session.LastReply,
+			LastReplyMode:          session.LastReplyMode,
+			LastUserMessageAt:      session.LastUserMessageAt,
+			LastAssistantMessageAt: session.LastAssistantMessageAt,
+			LastInteractionAt:      session.LastInteractionAt,
+			LastProactiveAt:        session.LastProactiveAt,
+			NextScheduledAt:        session.NextScheduledAt,
+			Conversation:           append([]openai.ChatCompletionMessage(nil), session.Conversation...),
+			Summary:                session.Summary,
+			ActiveTopics:           append([]string(nil), session.ActiveTopics...),
+			DialogueState:          session.DialogueState,
+			LastUpdated:            session.LastUpdated,
 		}
 	}
 

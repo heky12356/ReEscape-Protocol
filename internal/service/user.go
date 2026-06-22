@@ -38,6 +38,26 @@ func SendMsg(c *websocket.Conn, userID int64, msg string) error {
 	return nil
 }
 
+func BuildAssistantTranscript(reply string) string {
+	chunks := ParseReplyChunks(reply)
+	parts := make([]string, 0, len(chunks))
+
+	for _, chunk := range chunks {
+		if text := strings.TrimSpace(chunk.Text); text != "" {
+			parts = append(parts, strings.TrimSpace(strings.ReplaceAll(text, "$", " ")))
+		}
+		if chunk.ImageAssetID != "" {
+			parts = append(parts, "[图片]")
+		}
+	}
+
+	if len(parts) == 0 {
+		return strings.TrimSpace(StripReplyDirectives(reply))
+	}
+
+	return strings.Join(parts, " ")
+}
+
 func sendPrivateImageAsset(c *websocket.Conn, userID int64, assetID string) error {
 	asset, err := LookupImageAsset(assetID)
 	if err != nil {

@@ -97,8 +97,10 @@ func (h *PresetHandler) Handle(c *websocket.Conn, ctx MessageContext, sm *state.
 		return nil, err
 	}
 	return &ProcessResult{
-		Handled: true,
-		Reply:   response,
+		Handled:   true,
+		Replied:   true,
+		ReplyMode: service.ReplyModeFullReply,
+		Reply:     response,
 	}, nil
 }
 
@@ -114,44 +116,23 @@ func (h *EmotionHandler) CanHandle(ctx MessageContext, sm *state.StateManager) b
 }
 
 func (h *EmotionHandler) Handle(c *websocket.Conn, ctx MessageContext, sm *state.StateManager) (*ProcessResult, error) {
-	analysis, err := service.AnalyzeMessage(ctx.Message, service.AnalysisModeDefault)
+	analysis, err := service.AnalyzeMessage(service.AnalysisInput{
+		Mode:          service.AnalysisModeDefault,
+		SessionID:     ctx.SessionID,
+		UserID:        ctx.UserID,
+		Message:       ctx.Message,
+		Conversation:  sm.GetConversation(ctx.SessionID),
+		ReferenceTime: ctx.ReceivedAt,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("分析消息失败: %v", err)
 	}
 
-	cfg := config.GetConfig()
-	userID := ctx.UserID
-
-	var response string
-
-	switch analysis.Emotion {
-	case "开心":
-		response = "那很好了。"
-	case "生气":
-		response = "我做错什么了？"
-	case "哲学":
-		response = "乐"
-	default:
-		if analysis.Intention == "想和对方聊天" || analysis.Intention == "想和对方倾诉" {
-			sm.SetState(ctx.SessionID, state.StateLongChat)
-			return h.startAIChat(c, ctx, sm, analysis.Emotion, analysis.Intention)
-		}
-		response = "?"
+	if shouldEnterLongChat(analysis) {
+		sm.SetState(ctx.SessionID, state.StateLongChat)
 	}
 
-	if cfg.EnableEmotionalMemory {
-		response = h.optimizeResponseWithMemory(userID, ctx.Message, analysis.Emotion, analysis.Intention, response)
-	}
-
-	if err := service.SendMsg(c, ctx.UserID, response); err != nil {
-		return nil, err
-	}
-	return &ProcessResult{
-		Handled:   true,
-		Emotion:   analysis.Emotion,
-		Intention: analysis.Intention,
-		Reply:     response,
-	}, nil
+	return applyStructuredReply(c, ctx, sm, analysis, false)
 }
 
 // optimizeResponseWithMemory 基于情感记忆优化回复
@@ -175,38 +156,14 @@ func (h *EmotionHandler) startAIChat(c *websocket.Conn, ctx MessageContext, sm *
 	sm.SetState(ctx.SessionID, state.StateLongChat)
 
 	conversation := sm.GetConversation(ctx.SessionID)
-
-	if len(conversation) == 0 {
-		systemPrompt := cfg.AiPrompt
-		if systemPrompt == "" {
-			systemPrompt = "你是一个温暖、友善的聊天伙伴。请用自然、亲切的语气与用户对话，回复要简短而有趣。"
-		}
-
-		if cfg.EnableEmotionalMemory || cfg.EnableTimeContext {
-			systemPrompt = service.EnhancePromptWithMemory(userID, ctx.SessionID, systemPrompt, ctx.Message, ctx.ReceivedAt)
-		}
-
-		utils.Info("【AI对话启动】注入系统 Prompt (长度: %d): %s...", len(systemPrompt), func() string {
-			if len(systemPrompt) > 20 {
-				return systemPrompt[:20]
-			}
-			return systemPrompt
-		}())
-
-		conversation = append(conversation, openai.ChatCompletionMessage{
-			Role:    "system",
-			Content: systemPrompt,
-		})
+	systemPrompt := cfg.AiPrompt
+	if systemPrompt == "" {
+		systemPrompt = "你是一个温暖、友善的聊天伙伴。请用自然、亲切的语气与用户对话，回复要简短而有趣。"
 	}
-
-	if userMessage, ok := buildUserChatMessage(ctx); ok {
-		conversation = append(conversation, userMessage)
-	} else {
-		conversation = append(conversation, openai.ChatCompletionMessage{
-			Role:    "user",
-			Content: ctx.Message,
-		})
+	if cfg.EnableEmotionalMemory || cfg.EnableTimeContext {
+		systemPrompt = service.EnhancePromptWithMemory(userID, ctx.SessionID, systemPrompt, ctx.Message, ctx.ReceivedAt)
 	}
+	conversation = ensureSystemPrompt(conversation, systemPrompt)
 
 	startedAt := time.Now()
 	newConversation, responses, err := aifunction.QueryaiWithChain(conversation)
@@ -273,29 +230,20 @@ func (h *LongChatHandler) CanHandle(ctx MessageContext, sm *state.StateManager) 
 }
 
 func (h *LongChatHandler) Handle(c *websocket.Conn, ctx MessageContext, sm *state.StateManager) (*ProcessResult, error) {
-	analysis, err := service.AnalyzeMessage(ctx.Message, service.AnalysisModeLongChat)
+	analysis, err := service.AnalyzeMessage(service.AnalysisInput{
+		Mode:          service.AnalysisModeLongChat,
+		SessionID:     ctx.SessionID,
+		UserID:        ctx.UserID,
+		Message:       ctx.Message,
+		Conversation:  sm.GetConversation(ctx.SessionID),
+		ReferenceTime: ctx.ReceivedAt,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("分析消息失败: %v", err)
 	}
 
-	if config.GetConfig().EnableOnlyLongChat {
-		return h.continueAIChat(c, ctx, sm, analysis.Emotion, analysis.Intention)
-	}
-
-	if analysis.WannaBye == "想结束对话" {
-		reply, err := h.endAIChat(c, ctx, sm)
-		if err != nil {
-			return nil, err
-		}
-		return &ProcessResult{
-			Handled:   true,
-			Emotion:   analysis.Emotion,
-			Intention: analysis.Intention,
-			Reply:     reply,
-		}, nil
-	}
-
-	return h.continueAIChat(c, ctx, sm, analysis.Emotion, analysis.Intention)
+	sm.SetState(ctx.SessionID, state.StateLongChat)
+	return applyStructuredReply(c, ctx, sm, analysis, true)
 }
 
 func (h *LongChatHandler) continueAIChat(c *websocket.Conn, ctx MessageContext, sm *state.StateManager, emotion, intention string) (*ProcessResult, error) {
@@ -303,38 +251,14 @@ func (h *LongChatHandler) continueAIChat(c *websocket.Conn, ctx MessageContext, 
 	userID := ctx.UserID
 
 	conversation := sm.GetConversation(ctx.SessionID)
-
-	if len(conversation) == 0 {
-		systemPrompt := cfg.AiPrompt
-		if systemPrompt == "" {
-			systemPrompt = "你是一个温暖、友善的聊天伙伴。请用自然、亲切的语气与用户对话，回复要简短而有趣。"
-		}
-
-		if cfg.EnableEmotionalMemory || cfg.EnableTimeContext {
-			systemPrompt = service.EnhancePromptWithMemory(userID, ctx.SessionID, systemPrompt, ctx.Message, ctx.ReceivedAt)
-		}
-
-		utils.Info("【AI对话启动】(OnlyLongChat) 注入系统 Prompt (长度: %d): %s...", len(systemPrompt), func() string {
-			if len(systemPrompt) > 20 {
-				return systemPrompt[:20]
-			}
-			return systemPrompt
-		}())
-
-		conversation = append(conversation, openai.ChatCompletionMessage{
-			Role:    "system",
-			Content: systemPrompt,
-		})
+	systemPrompt := cfg.AiPrompt
+	if systemPrompt == "" {
+		systemPrompt = "你是一个温暖、友善的聊天伙伴。请用自然、亲切的语气与用户对话，回复要简短而有趣。"
 	}
-
-	if userMessage, ok := buildUserChatMessage(ctx); ok {
-		conversation = append(conversation, userMessage)
-	} else {
-		conversation = append(conversation, openai.ChatCompletionMessage{
-			Role:    "user",
-			Content: ctx.Message,
-		})
+	if cfg.EnableEmotionalMemory || cfg.EnableTimeContext {
+		systemPrompt = service.EnhancePromptWithMemory(userID, ctx.SessionID, systemPrompt, ctx.Message, ctx.ReceivedAt)
 	}
+	conversation = ensureSystemPrompt(conversation, systemPrompt)
 
 	if (cfg.EnableEmotionalMemory || cfg.EnableTimeContext) && len(conversation) > 1 {
 		conversation = service.UpdateSystemPromptWithMemory(userID, ctx.SessionID, ctx.Message, ctx.ReceivedAt, conversation)
@@ -404,12 +328,81 @@ func (h *LongChatHandler) endAIChat(c *websocket.Conn, ctx MessageContext, sm *s
 	return reply, nil
 }
 
+func shouldEnterLongChat(analysis service.MessageAnalysis) bool {
+	switch analysis.Intention {
+	case "想和对方聊天", "想被对方鼓励", "想和对方倾诉":
+		return true
+	}
+	switch analysis.SupportStrategy {
+	case "comfort", "encourage", "continue_chat", "answer_directly":
+		return analysis.ReplyMode != service.ReplyModeNoReply
+	}
+	return false
+}
+
+func applyStructuredReply(c *websocket.Conn, ctx MessageContext, sm *state.StateManager, analysis service.MessageAnalysis, longChat bool) (*ProcessResult, error) {
+	sm.SetDialogueState(ctx.SessionID, state.DialogueState{
+		Emotion:          analysis.Emotion,
+		Intention:        analysis.Intention,
+		ReplyExpectation: analysis.ReplyExpectation,
+		TurnStatus:       analysis.TurnStatus,
+		SupportStrategy:  analysis.SupportStrategy,
+		Topic:            analysis.Topic,
+		UserNeed:         analysis.UserNeed,
+		Confidence:       analysis.Confidence,
+	})
+
+	if analysis.ReplyMode == service.ReplyModeNoReply {
+		if longChat && analysis.WannaBye == "想结束对话" {
+			sm.SetState(ctx.SessionID, state.StateIdle)
+		}
+		return &ProcessResult{
+			Handled:   true,
+			Replied:   false,
+			Emotion:   analysis.Emotion,
+			Intention: analysis.Intention,
+			ReplyMode: analysis.ReplyMode,
+			Reply:     "",
+		}, nil
+	}
+
+	reply := analysis.VisibleReply
+	if reply == "" {
+		fallback, err := sendAIFallbackReply(c, ctx.UserID)
+		if err != nil {
+			return nil, err
+		}
+		reply = fallback
+	} else {
+		if err := service.SendMsg(c, ctx.UserID, reply); err != nil {
+			return nil, err
+		}
+	}
+
+	cleanReply := service.BuildAssistantTranscript(reply)
+
+	if longChat && analysis.WannaBye == "想结束对话" {
+		sm.SetState(ctx.SessionID, state.StateIdle)
+	}
+
+	return &ProcessResult{
+		Handled:   true,
+		Replied:   true,
+		Emotion:   analysis.Emotion,
+		Intention: analysis.Intention,
+		ReplyMode: analysis.ReplyMode,
+		Reply:     cleanReply,
+	}, nil
+}
+
 // ProcessResult 消息处理结果
 type ProcessResult struct {
-	Handled   bool   // 是否被处理
-	Emotion   string // 检测到的情感
-	Intention string // 检测到的意图
-	Reply     string // 回复内容
+	Handled   bool              // 是否被处理
+	Replied   bool              // 是否真正发送了回复
+	Emotion   string            // 检测到的情感
+	Intention string            // 检测到的意图
+	ReplyMode service.ReplyMode // 回复模式
+	Reply     string            // 回复内容
 }
 
 // MessageProcessor 消息处理器管理器
@@ -460,12 +453,14 @@ func (mp *MessageProcessor) Process(c *websocket.Conn, ctx MessageContext) (*Pro
 
 	err := service.SendMsg(c, ctx.UserID, "?")
 	return &ProcessResult{
-		Handled: true,
-		Reply:   "?",
+		Handled:   true,
+		Replied:   true,
+		ReplyMode: service.ReplyModeFullReply,
+		Reply:     "?",
 	}, err
 }
 
-func buildUserChatMessage(ctx MessageContext) (openai.ChatCompletionMessage, bool) {
+func BuildConversationUserMessage(ctx MessageContext) (openai.ChatCompletionMessage, bool) {
 	cfg := config.GetConfig()
 	if !cfg.EnableVisionInput {
 		return openai.ChatCompletionMessage{
@@ -521,4 +516,24 @@ func normalizeVisionImageDetail(raw string) openai.ImageURLDetail {
 	default:
 		return openai.ImageURLDetailAuto
 	}
+}
+
+func ensureSystemPrompt(conversation []openai.ChatCompletionMessage, systemPrompt string) []openai.ChatCompletionMessage {
+	if strings.TrimSpace(systemPrompt) == "" {
+		return append([]openai.ChatCompletionMessage(nil), conversation...)
+	}
+
+	if len(conversation) > 0 && conversation[0].Role == "system" {
+		updated := append([]openai.ChatCompletionMessage(nil), conversation...)
+		updated[0].Content = systemPrompt
+		return updated
+	}
+
+	updated := make([]openai.ChatCompletionMessage, 0, len(conversation)+1)
+	updated = append(updated, openai.ChatCompletionMessage{
+		Role:    "system",
+		Content: systemPrompt,
+	})
+	updated = append(updated, conversation...)
+	return updated
 }

@@ -12,22 +12,15 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type nowState int
-
-const (
-	isLongChat nowState = iota
-	isBusy
-	suitTime = 0 // 合适的时间
-)
+const defaultSchedulerSweepInterval = 15 * time.Second
 
 // NaturalScheduler 自然定时器
 type NaturalScheduler struct {
-	baseInterval    time.Duration
-	randomFactor    float64
-	activeHours     []int // 活跃时间段
-	sleepHours      []int // 休息时间段
-	messagePool     *MessagePool
-	lastMessageTime time.Time
+	baseInterval time.Duration
+	randomFactor float64
+	activeHours  []int // 活跃时间段
+	sleepHours   []int // 休息时间段
+	messagePool  *MessagePool
 }
 
 // MessagePool 消息池
@@ -40,8 +33,7 @@ type MessagePool struct {
 
 func NewNaturalScheduler() *NaturalScheduler {
 	ns := &NaturalScheduler{
-		messagePool:     newMessagePool(),
-		lastMessageTime: time.Now(),
+		messagePool: newMessagePool(),
 	}
 	ns.reloadConfig()
 	return ns
@@ -155,7 +147,7 @@ func maxInt(a, b int) int {
 }
 
 // SelectMessage 智能选择消息
-func (ns *NaturalScheduler) SelectMessage() string {
+func (ns *NaturalScheduler) SelectMessage(sessionID string) string {
 	now := time.Now()
 	hour := now.Hour()
 
@@ -177,9 +169,9 @@ func (ns *NaturalScheduler) SelectMessage() string {
 		weights["casual"] -= 10
 	}
 
-	// 根据上次发送时间调整
-	timeSinceLastMessage := time.Since(ns.lastMessageTime)
-	if timeSinceLastMessage > 2*time.Hour {
+	// 根据最近互动时间调整
+	timeSinceLastInteraction := state.GetManager().GetTimeSinceLastInteraction(sessionID)
+	if timeSinceLastInteraction > 2*time.Hour {
 		weights["question"] += 10 // 长时间未联系，增加问候
 	}
 
@@ -246,41 +238,73 @@ func (ns *NaturalScheduler) isSleepHour(hour int) bool {
 	return false
 }
 
-// ShouldSend 判断是否应该发送消息
-func (ns *NaturalScheduler) ShouldSend(sessionID string) nowState {
+func (ns *NaturalScheduler) RescheduleFrom(sessionID string, baseTime time.Time) time.Time {
+	if baseTime.IsZero() {
+		baseTime = time.Now()
+	}
+	next := baseTime.Add(ns.GetNextIntervalForSession(sessionID))
+	state.GetManager().SetNextScheduledAt(sessionID, next)
+	return next
+}
+
+func (ns *NaturalScheduler) EnsureScheduled(sessionID string, now time.Time) time.Time {
+	next := state.GetManager().GetNextScheduledAt(sessionID)
+	if !next.IsZero() {
+		return next
+	}
+
+	baseTime := state.GetManager().GetLastInteractionAt(sessionID)
+	if baseTime.IsZero() {
+		baseTime = now
+	}
+	return ns.RescheduleFrom(sessionID, baseTime)
+}
+
+func (ns *NaturalScheduler) GetNextIntervalForSession(sessionID string) time.Duration {
 	sm := state.GetManager()
+	interval := ns.GetNextInterval()
 
-	// 如果正在长对话，不发送
-	if sm.GetState(sessionID) == state.StateLongChat {
-		return isLongChat
+	switch sm.GetState(sessionID) {
+	case state.StateLongChat:
+		return time.Duration(float64(interval) * 1.6)
+	case state.StateBusy:
+		return time.Duration(float64(interval) * 1.3)
+	default:
+		return interval
 	}
-
-	// 如果最近刚回复过，延长间隔
-	if sm.GetState(sessionID) == state.StateBusy && sm.GetTimeSinceLastReply(sessionID) < 1*time.Hour {
-		return isBusy
-	}
-
-	return suitTime
 }
 
 // SendScheduledMessage 发送定时消息
 func (ns *NaturalScheduler) SendScheduledMessage(c *websocket.Conn, sessionID string, targetUserID int64) error {
 	state.GetManager().EnsureSession(sessionID, targetUserID, 0, 1)
-
-	// 看下是在长对话还是最近刚发过消息
-	nowstate := ns.ShouldSend(sessionID)
-	if nowstate != suitTime {
-		utils.Info("当前状态不适合发送消息, state: %v", nowstate)
+	if shouldSend, nextAt := ns.ShouldSendNow(sessionID, time.Now()); !shouldSend {
+		utils.Info("主动消息发送前检查未到时间, next=%s", nextAt.Format(time.RFC3339))
 		return nil
 	}
-
-	message := ns.SelectMessage()
-	ns.lastMessageTime = time.Now()
+	message := ns.SelectMessage(sessionID)
 
 	// 根据消息类型设置状态
 	if message == "想你了" || message == "有点想聊天" {
 		state.GetManager().SetState(sessionID, state.StateNeedComfort)
 	}
 
-	return service.SendMsg(c, targetUserID, message)
+	if err := service.SendMsg(c, targetUserID, message); err != nil {
+		return err
+	}
+
+	sentAt := time.Now()
+	state.GetManager().RecordAssistantTurn(sessionID, service.BuildAssistantTranscript(message), sentAt, true)
+	state.GetManager().UpdateLastReplyMode(sessionID, "proactive")
+	next := ns.RescheduleFrom(sessionID, sentAt)
+	utils.Info("主动消息已发送，下一次主动触达时间: %s", next.Format(time.RFC3339))
+	return nil
+}
+
+func (ns *NaturalScheduler) ShouldSendNow(sessionID string, now time.Time) (bool, time.Time) {
+	next := ns.EnsureScheduled(sessionID, now)
+	return !now.Before(next), next
+}
+
+func (ns *NaturalScheduler) SweepInterval() time.Duration {
+	return defaultSchedulerSweepInterval
 }

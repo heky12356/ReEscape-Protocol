@@ -25,6 +25,7 @@ import (
 	"project-yume/internal/utils"
 
 	"github.com/gorilla/websocket"
+	"github.com/sashabaranov/go-openai"
 )
 
 func main() {
@@ -129,7 +130,7 @@ func main() {
 	go inbound.NewMessageAggregator().Run(ctx, rawMsgChan, aggregatedMsgChan)
 
 	// 启动消息处理协程
-	go startMessageProcessor(c, aggregatedMsgChan, messagePipeline, messageProcessor, ctx)
+	go startMessageProcessor(c, aggregatedMsgChan, messagePipeline, messageProcessor, naturalScheduler, ctx)
 
 	// 启动定时任务协程
 	if naturalScheduler != nil {
@@ -249,7 +250,7 @@ func startMessageReceiver(c *websocket.Conn, msgChan chan model.Msg, ctx context
 
 // startMessageProcessor 启动消息处理协程
 func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
-	pipeline *inbound.Pipeline, processor *handler.MessageProcessor, ctx context.Context,
+	pipeline *inbound.Pipeline, processor *handler.MessageProcessor, naturalScheduler *scheduler.NaturalScheduler, ctx context.Context,
 ) {
 	cfg := config.GetConfig()
 
@@ -344,6 +345,10 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 			}
 
 			state.GetManager().EnsureSession(sessionID, msg.User_id, msg.Group_id, msg.Type)
+			recordIncomingConversationTurn(messageCtx)
+			if naturalScheduler != nil {
+				naturalScheduler.RescheduleFrom(sessionID, endedAt)
+			}
 
 			utils.Infow("message processing started",
 				utils.String("request_id", messageCtx.RequestID),
@@ -394,7 +399,16 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 			}
 
 			// 更新状态
-			state.GetManager().UpdateLastReply(sessionID)
+			if result.Replied {
+				recordedAt := time.Now()
+				recordAssistantConversationTurn(sessionID, result.Reply, false, recordedAt)
+				if naturalScheduler != nil {
+					naturalScheduler.RescheduleFrom(sessionID, recordedAt)
+				}
+			}
+			if result.ReplyMode != "" {
+				state.GetManager().UpdateLastReplyMode(sessionID, string(result.ReplyMode))
+			}
 
 			utils.Infow("message processing completed",
 				utils.String("request_id", messageCtx.RequestID),
@@ -405,6 +419,8 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 				utils.Bool("aggregated", messageCtx.Aggregated),
 				utils.Int("segment_count", messageCtx.SegmentCount),
 				utils.Bool("handled", result.Handled),
+				utils.Bool("replied", result.Replied),
+				utils.String("reply_mode", string(result.ReplyMode)),
 				utils.String("emotion", result.Emotion),
 				utils.String("intention", result.Intention),
 				utils.String("reply", result.Reply),
@@ -423,32 +439,28 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 func startScheduler(c *websocket.Conn, scheduler *scheduler.NaturalScheduler, ctx context.Context, sessionID string, targetUserID int64) {
 	// 初始延迟
 	time.Sleep(time.Second)
+	ticker := time.NewTicker(scheduler.SweepInterval())
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			utils.Info("定时器已停止")
 			return
-		default:
-			interval := scheduler.GetNextInterval()
-			utils.Info("下次发送间隔: %v", interval)
+		case <-ticker.C:
+			now := time.Now()
+			shouldSend, nextAt := scheduler.ShouldSendNow(sessionID, now)
+			utils.Info("自然调度检查: next=%s due=%t", nextAt.Format(time.RFC3339), shouldSend)
+			if !shouldSend {
+				continue
+			}
 
-			timer := time.NewTimer(interval)
-			// timer := time.NewTimer(1 * time.Minute)
-
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return
-			case <-timer.C:
-				utils.Info("定时器触发")
-
-				err := scheduler.SendScheduledMessage(c, sessionID, targetUserID)
-				if err != nil {
-					utils.Error("定时消息发送失败: %v", err)
-				} else {
-					utils.Info("定时器触发成功")
-				}
+			utils.Info("定时器触发")
+			err := scheduler.SendScheduledMessage(c, sessionID, targetUserID)
+			if err != nil {
+				utils.Error("定时消息发送失败: %v", err)
+			} else {
+				utils.Info("定时器触发成功")
 			}
 		}
 	}
@@ -466,10 +478,35 @@ func startStatusMonitor(ctx context.Context, sessionID string) {
 			return
 		case <-ticker.C:
 			sm := state.GetManager()
-			utils.Info("当前状态(%s): %v, 上次回复: %v",
-				sessionID, sm.GetState(sessionID), sm.GetTimeSinceLastReply(sessionID))
+			utils.Info("当前状态(%s): %v, 上次回复: %v, 上次互动: %v, 下次主动触达: %s",
+				sessionID,
+				sm.GetState(sessionID),
+				sm.GetTimeSinceLastReply(sessionID),
+				sm.GetTimeSinceLastInteraction(sessionID),
+				sm.GetNextScheduledAt(sessionID).Format(time.RFC3339),
+			)
 		}
 	}
+}
+
+func recordIncomingConversationTurn(messageCtx handler.MessageContext) {
+	if userMessage, ok := handler.BuildConversationUserMessage(messageCtx); ok {
+		state.GetManager().RecordUserTurn(messageCtx.SessionID, userMessage, messageCtx.EndedAt)
+		return
+	}
+
+	state.GetManager().RecordUserTurn(messageCtx.SessionID, openai.ChatCompletionMessage{
+		Role:    "user",
+		Content: messageCtx.Message,
+	}, messageCtx.EndedAt)
+}
+
+func recordAssistantConversationTurn(sessionID, reply string, proactive bool, recordedAt time.Time) {
+	trimmed := strings.TrimSpace(service.BuildAssistantTranscript(reply))
+	if trimmed == "" {
+		return
+	}
+	state.GetManager().RecordAssistantTurn(sessionID, trimmed, recordedAt, proactive)
 }
 
 func buildMessageRequestID(messageID int64) string {

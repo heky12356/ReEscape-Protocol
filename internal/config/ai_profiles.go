@@ -31,9 +31,9 @@ type AIProfileSet struct {
 func GetAIConfigFilePath() string {
 	raw := strings.TrimSpace(os.Getenv("AI_CONFIG_FILE"))
 	if raw == "" {
-		return filepath.Clean(defaultAIConfigFilePath)
+		return resolveProjectPath(defaultAIConfigFilePath)
 	}
-	return filepath.Clean(raw)
+	return resolveProjectPath(raw)
 }
 
 func LoadAIProfileSet(path string) (AIProfileSet, error) {

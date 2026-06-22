@@ -67,7 +67,7 @@ func ReloadRuntimeConfig() error {
 	config.Character = getStringEnv("CHARACTER", "default")
 	config.Token = os.Getenv("Token")
 
-	characterManager, err := character.NewCharacterManager("./config/character", config.Character)
+	characterManager, err := character.NewCharacterManager(getCharacterConfigDir(), config.Character)
 	if err != nil {
 		return fmt.Errorf("reload character config failed: %w", err)
 	}

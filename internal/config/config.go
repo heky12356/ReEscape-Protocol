@@ -170,7 +170,7 @@ func init() {
 	config.ImageAssetDir = getStringEnv("IMAGE_ASSET_DIR", "./assets/images")
 	config.ImageAssetIndexFile = getStringEnv("IMAGE_ASSET_INDEX_FILE", "./assets/images/index.json")
 
-	cm, err := character.NewCharacterManager("./config/character", config.Character)
+	cm, err := character.NewCharacterManager(getCharacterConfigDir(), config.Character)
 	if err != nil {
 		utils.Error("Failed to create character manager: %v", err)
 		os.Exit(1)

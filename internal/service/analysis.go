@@ -35,7 +35,6 @@ type AnalysisInput struct {
 	SessionID     string
 	UserID        int64
 	Message       string
-	Conversation  []openai.ChatCompletionMessage
 	ReferenceTime time.Time
 }
 
@@ -132,6 +131,7 @@ func AnalyzeMessage(input AnalysisInput) (MessageAnalysis, error) {
 		utils.Warn("AnalyzeMessage fallback due to parse error: %v, raw=%q", err, raw)
 		return fallbackAnalysis(input.Mode), nil
 	}
+	result = rebalanceMessageAnalysis(input.Message, result, input.Mode)
 
 	metrics.IncCounter(
 		"bot_ai_requests_total",
@@ -143,11 +143,37 @@ func AnalyzeMessage(input AnalysisInput) (MessageAnalysis, error) {
 
 func buildAnalysisPrompt(input AnalysisInput) string {
 	cfg := config.GetConfig()
+	visibleReplyInstruction := "3. 只在 light_ack 场景下生成一个极短的 visible_reply 作为实际发给用户的轻回应"
+	visibleReplyFieldRule := "- visible_reply: 仅在 reply_mode=light_ack 时填写一个极短的实际回复，其他情况返回空字符串"
+	replyModePreferenceRules := []string{
+		"- 只有在用户明显还在续说、补充、且暂时没有把话头交给你时，才选择 no_reply 或 light_ack。",
+		"- 只要用户已经像是在等你回应、征求看法、提问、求安慰、求建议、求判断，就优先 full_reply。",
+	}
+	if cfg.LightAckMode == "template" {
+		visibleReplyInstruction = "3. 只在 light_ack 场景下生成一个极短的 visible_reply 作为轻回应风格参考"
+		visibleReplyFieldRule = "- visible_reply: 仅在 reply_mode=light_ack 时填写一个极短的参考短句，其他情况返回空字符串"
+	}
+	switch cfg.ShortReplyStrictness {
+	case "conservative":
+		replyModePreferenceRules = []string{
+			"- 只有在用户明显把话头交给你时，才优先 full_reply。",
+			"- 用户若更像在续说、补充、整理想法，可以选择 no_reply 或 light_ack。",
+		}
+	case "reply_first":
+		replyModePreferenceRules = []string{
+			"- 除非用户非常明显还在续说、补充、且暂时没有把话头交给你，否则优先 full_reply。",
+			"- 只要用户已经像是在等你回应、征求看法、提问、求安慰、求建议、求判断，就必须优先 full_reply。",
+		}
+	}
+	characterToneSummary := config.GetCharacterToneSummary()
+	if strings.TrimSpace(characterToneSummary) == "" {
+		characterToneSummary = "【角色语气摘要】\n- 角色：默认聊天伙伴\n- 用途：仅作为轻回应和最终回复的音色参考，不参与 JSON 字段判断。"
+	}
 	baseRules := `
 你是一个对话引擎的内部决策器。你需要同时完成：
 1. 分析用户当前说话方式与情绪
 2. 判断此刻是否该回复，以及回复强度
-3. 生成最终给用户看到的 visible_reply
+` + visibleReplyInstruction + `
 
 请严格返回 JSON，不要输出解释，不要使用 markdown 代码块。
 
@@ -162,21 +188,22 @@ func buildAnalysisPrompt(input AnalysisInput) string {
 - topic: 用一句短语概括当前主题，没有就返回空字符串
 - user_need: 用一句短语概括当前更像需要什么，没有就返回空字符串
 - confidence: 0 到 1 之间的小数
-- visible_reply: 给用户看的最终回复文本
+` + visibleReplyFieldRule + `
 
 额外要求：
 - 所有字段都必须出现。
 - 如果意图不明确，intention 选择 "想和对方聊天"。
 - 如果情感不明确，emotion 选择 "中性"。
-- 如果用户更像在继续表达自己、补充观点、并未明显把话头交给你，可以选择 no_reply 或 light_ack。
+` + strings.Join(replyModePreferenceRules, "\n") + `
 - no_reply 时 visible_reply 必须为空字符串。
 - light_ack 时 visible_reply 控制在 2 到 12 个字，不主动展开新话题，作用是接住但不抢话。
-- full_reply 时 visible_reply 才能正常展开。
+- full_reply 时 visible_reply 必须为空字符串，后续会由另一次自然语言生成调用完成正式回复。
 - visible_reply 必须符合角色设定和输出风格要求。
+- 角色设定只影响 visible_reply 的语气，不得影响 emotion/intention/reply_mode 等客观字段判断。
 - 只返回单个 JSON 对象。
 
-角色与回复风格要求：
-` + cfg.AiPrompt + `
+角色语气摘要：
+` + characterToneSummary + `
 `
 
 	if input.Mode == AnalysisModeLongChat {
@@ -189,9 +216,9 @@ wanna_bye 判断标准：
 - 当意图不明确时，必须选择 "想继续"，避免误结束对话。
 
 reply_mode 额外要求：
-- 如果用户在延续自我表达，只需轻微附和，优先 light_ack。
+- 如果用户只是延续自我表达、补一句、明显还没说完，才优先 light_ack。
 - 如果用户明确提问、求安慰、求建议、求判断，优先 full_reply。
-- 如果用户只是补充上一句并且明显还没说完，可以 no_reply。
+- 如果用户只是补充上一句并且明显还没说完，才可以 no_reply。
 
 输出示例：
 {"emotion":"开心","intention":"想和对方聊天","wanna_bye":"想继续","reply_mode":"light_ack","reply_expectation":"medium","turn_status":"user_holds_floor","support_strategy":"acknowledge_and_wait","topic":"最近的烦恼","user_need":"被倾听","confidence":0.82,"visible_reply":"嗯，你继续说。"}
@@ -204,11 +231,11 @@ reply_mode 额外要求：
 wanna_bye 默认返回 "想继续"。
 
 reply_mode 判断标准：
-- 用户明显在自我延续、补充观点、没有直接向你发问时，可选 no_reply 或 light_ack。
+- 用户明显在自我延续、补充观点、而且明显还没把话头交给你时，可选 no_reply 或 light_ack。
 - 用户明确寻求回应时，选 full_reply。
 
 输出示例：
-{"emotion":"中性","intention":"想和对方聊天","wanna_bye":"想继续","reply_mode":"full_reply","reply_expectation":"high","turn_status":"handoff_to_ai","support_strategy":"continue_chat","topic":"今天的安排","user_need":"被回应","confidence":0.76,"visible_reply":"听起来你今天事情还不少。$你最想先处理哪件？"}
+{"emotion":"中性","intention":"想和对方聊天","wanna_bye":"想继续","reply_mode":"full_reply","reply_expectation":"high","turn_status":"handoff_to_ai","support_strategy":"continue_chat","topic":"今天的安排","user_need":"被回应","confidence":0.76,"visible_reply":""}
 `
 }
 
@@ -305,8 +332,8 @@ func validateMessageAnalysis(result MessageAnalysis, mode AnalysisMode) error {
 			return fmt.Errorf("light_ack visible_reply length invalid: %q", result.VisibleReply)
 		}
 	}
-	if result.ReplyMode == ReplyModeFullReply && result.VisibleReply == "" {
-		return fmt.Errorf("visible_reply must not be empty when reply_mode=full_reply")
+	if result.ReplyMode == ReplyModeFullReply && result.VisibleReply != "" {
+		return fmt.Errorf("visible_reply must be empty when reply_mode=full_reply")
 	}
 	return nil
 }
@@ -316,19 +343,160 @@ func fallbackAnalysis(mode AnalysisMode) MessageAnalysis {
 		Emotion:          "中性",
 		Intention:        "想和对方聊天",
 		WannaBye:         "想继续",
-		ReplyMode:        ReplyModeLightAck,
-		ReplyExpectation: "medium",
+		ReplyMode:        ReplyModeFullReply,
+		ReplyExpectation: "high",
 		TurnStatus:       "handoff_to_ai",
 		SupportStrategy:  "continue_chat",
 		Topic:            "",
 		UserNeed:         "",
-		VisibleReply:     "嗯。",
+		VisibleReply:     "",
 		Confidence:       0.3,
 	}
 	if mode == AnalysisModeLongChat {
 		return result
 	}
 	return result
+}
+
+func rebalanceMessageAnalysis(message string, result MessageAnalysis, mode AnalysisMode) MessageAnalysis {
+	if shouldPromoteToFullReply(message, result, mode) {
+		result.ReplyMode = ReplyModeFullReply
+		result.VisibleReply = ""
+		if result.ReplyExpectation == "low" || strings.TrimSpace(result.ReplyExpectation) == "" {
+			result.ReplyExpectation = "high"
+		}
+		result.TurnStatus = "handoff_to_ai"
+		if result.SupportStrategy == "acknowledge_and_wait" {
+			result.SupportStrategy = "continue_chat"
+		}
+	}
+
+	return result
+}
+
+func shouldPromoteToFullReply(message string, result MessageAnalysis, mode AnalysisMode) bool {
+	strictness := config.GetConfig().ShortReplyStrictness
+	if result.ReplyMode == ReplyModeFullReply {
+		return false
+	}
+	if strictness == "conservative" {
+		return shouldPromoteToFullReplyConservative(message, result, mode)
+	}
+	if strictness == "reply_first" {
+		return shouldPromoteToFullReplyReplyFirst(message, result, mode)
+	}
+	return shouldPromoteToFullReplyBalanced(message, result, mode)
+}
+
+func shouldPromoteToFullReplyConservative(message string, result MessageAnalysis, mode AnalysisMode) bool {
+	if result.TurnStatus == "handoff_to_ai" && (result.ReplyExpectation == "high" || looksLikeDirectQuestion(message)) {
+		return true
+	}
+	switch result.SupportStrategy {
+	case "answer_directly", "close_conversation":
+		return true
+	}
+	return false
+}
+
+func shouldPromoteToFullReplyBalanced(message string, result MessageAnalysis, mode AnalysisMode) bool {
+	if result.ReplyMode == ReplyModeNoReply && !looksLikeContinuationOnly(message) {
+		return true
+	}
+	if result.TurnStatus == "handoff_to_ai" {
+		return true
+	}
+	if result.ReplyExpectation == "high" {
+		return true
+	}
+	switch result.SupportStrategy {
+	case "comfort", "encourage", "answer_directly", "close_conversation":
+		return true
+	}
+	if looksLikeDirectQuestion(message) {
+		return true
+	}
+	if mode == AnalysisModeDefault && !looksLikeContinuationOnly(message) && result.ReplyMode == ReplyModeLightAck {
+		if result.UserNeed == "被回应" || result.UserNeed == "建议" || result.UserNeed == "安慰" {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldPromoteToFullReplyReplyFirst(message string, result MessageAnalysis, mode AnalysisMode) bool {
+	if result.ReplyMode == ReplyModeNoReply && !looksLikeContinuationOnly(message) {
+		return true
+	}
+	if looksLikeDirectQuestion(message) {
+		return true
+	}
+	if result.TurnStatus == "handoff_to_ai" {
+		return true
+	}
+	if result.ReplyExpectation == "high" || result.ReplyExpectation == "medium" {
+		return true
+	}
+	switch result.SupportStrategy {
+	case "comfort", "encourage", "answer_directly", "continue_chat", "close_conversation":
+		return true
+	}
+	if mode == AnalysisModeDefault && result.ReplyMode == ReplyModeLightAck && !looksLikeContinuationOnly(message) {
+		return true
+	}
+	return false
+}
+
+func looksLikeDirectQuestion(message string) bool {
+	trimmed := strings.TrimSpace(message)
+	if trimmed == "" {
+		return false
+	}
+
+	if strings.Contains(trimmed, "?") || strings.Contains(trimmed, "？") {
+		return true
+	}
+
+	keywords := []string{
+		"吗", "么", "怎么", "怎么办", "为什么", "为何", "要不要", "是不是", "能不能",
+		"可不可以", "你觉得", "你怎么看", "帮我", "建议", "告诉我", "如何",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(trimmed, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeContinuationOnly(message string) bool {
+	trimmed := strings.TrimSpace(message)
+	if trimmed == "" {
+		return false
+	}
+	if looksLikeDirectQuestion(trimmed) {
+		return false
+	}
+
+	prefixes := []string{"然后", "还有", "而且", "就是", "不过", "另外", "以及", "其实"}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(trimmed, prefix) {
+			return true
+		}
+	}
+
+	suffixes := []string{"...", "。。。", "……", "，", ",", "、"}
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(trimmed, suffix) {
+			return true
+		}
+	}
+
+	shortContinuations := map[string]struct{}{
+		"然后呢": {}, "还有": {}, "就这": {}, "没了": {}, "先这样": {},
+	}
+	_, ok := shortContinuations[trimmed]
+	return ok
 }
 
 func buildAnalysisPayload(input AnalysisInput) string {
@@ -343,7 +511,6 @@ func buildAnalysisPayload(input AnalysisInput) string {
 		sections = append(sections, memoryContext)
 	}
 
-	sections = append(sections, "【最近对话】\n"+formatRecentConversation(input.Conversation))
 	sections = append(sections, "【当前用户消息】\n"+strings.TrimSpace(input.Message))
 	return strings.Join(sections, "\n\n")
 }
@@ -380,68 +547,6 @@ func buildDialogueStatePromptContext(sessionID string) string {
 		return ""
 	}
 	return "【最近隐藏对话状态】\n" + strings.Join(lines, "\n")
-}
-
-func formatRecentConversation(conversation []openai.ChatCompletionMessage) string {
-	if len(conversation) == 0 {
-		return "暂无"
-	}
-
-	start := 0
-	if len(conversation) > 8 {
-		start = len(conversation) - 8
-	}
-
-	lines := make([]string, 0, len(conversation)-start)
-	for _, msg := range conversation[start:] {
-		if msg.Role == "system" {
-			continue
-		}
-		content := strings.TrimSpace(chatMessagePlainTextForAnalysis(msg))
-		if content == "" {
-			continue
-		}
-		lines = append(lines, fmt.Sprintf("%s: %s", summarizeRoleForAnalysis(msg.Role), content))
-	}
-	if len(lines) == 0 {
-		return "暂无"
-	}
-	return strings.Join(lines, "\n")
-}
-
-func chatMessagePlainTextForAnalysis(msg openai.ChatCompletionMessage) string {
-	if strings.TrimSpace(msg.Content) != "" {
-		return msg.Content
-	}
-	if len(msg.MultiContent) == 0 {
-		return ""
-	}
-
-	parts := make([]string, 0, len(msg.MultiContent))
-	for _, part := range msg.MultiContent {
-		switch part.Type {
-		case openai.ChatMessagePartTypeText:
-			text := strings.TrimSpace(part.Text)
-			if text != "" {
-				parts = append(parts, text)
-			}
-		case openai.ChatMessagePartTypeImageURL:
-			parts = append(parts, "[图片]")
-		}
-	}
-
-	return strings.Join(parts, " ")
-}
-
-func summarizeRoleForAnalysis(role string) string {
-	switch role {
-	case "assistant":
-		return "assistant"
-	case "user":
-		return "user"
-	default:
-		return role
-	}
 }
 
 // EnhancePromptWithMemory 基于分层记忆增强AI提示词

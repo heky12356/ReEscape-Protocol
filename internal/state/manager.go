@@ -767,8 +767,27 @@ func (sm *StateManager) GetActiveTopics(sessionID string) []string {
 	return append([]string(nil), session.ActiveTopics...)
 }
 
+func (sm *StateManager) BuildConversationContextLayers(sessionID string, recentTurns int, summaryMaxTurns int, openLoopLimit int) ConversationContextLayers {
+	sm.mu.RLock()
+	session := sm.sessions[sessionID]
+	if session == nil {
+		sm.mu.RUnlock()
+		return ConversationContextLayers{}
+	}
+
+	conversation := append([]openai.ChatCompletionMessage(nil), session.Conversation...)
+	sm.mu.RUnlock()
+
+	return buildConversationContextLayers(conversation, recentTurns, summaryMaxTurns, openLoopLimit)
+}
+
 func refreshSessionDerivedMemory(session *Session) {
-	session.Summary = summarizeConversation(session.Conversation)
+	layers := buildConversationContextLayers(session.Conversation, defaultRecentTurns, defaultSummaryMaxTurn, defaultOpenLoopLimit)
+	if layers.RollingSummary != "" {
+		session.Summary = layers.RollingSummary
+	} else {
+		session.Summary = summarizeConversation(session.Conversation)
+	}
 	session.ActiveTopics = extractActiveTopics(session.Conversation)
 }
 

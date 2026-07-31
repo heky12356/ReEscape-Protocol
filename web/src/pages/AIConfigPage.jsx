@@ -4,6 +4,7 @@ import { InputField, SelectField } from "../components/common/FormField";
 
 const BOOLEAN_OPTIONS = ["true", "false"];
 const VISION_DETAIL_OPTIONS = ["auto", "low", "high"];
+const REACT_TRACE_OPTIONS = ["off", "basic", "full"];
 
 export function AIConfigPage({ panel }) {
   const cfg = panel.config;
@@ -210,6 +211,54 @@ export function AIConfigPage({ panel }) {
               {panel.digest.imageAssetCount || 0} assets · {cfg.enableVisionInput ? "vision on" : "vision off"}
             </div>
           </div>
+        </div>
+      </Panel>
+
+      <Panel
+        eyebrow="ReAct runtime"
+        title="工具调用运行时"
+        subtitle="这层只控制工具循环与 trace，不改变最终用户可见回复的角色口吻。"
+      >
+        <div className="form-grid">
+          <SelectField
+            label="Enable ReAct agent"
+            value={String(cfg.enableReactAgent)}
+            options={BOOLEAN_OPTIONS}
+            hint="开启后走工具循环；关闭后保留旧回复链路。"
+            onChange={(v) => updateField(panel, "enableReactAgent", v === "true")}
+          />
+          <SelectField
+            label="Trace mode"
+            value={cfg.reactTraceMode}
+            options={REACT_TRACE_OPTIONS}
+            hint="basic 只记录摘要，full 记录参数与完整观察。"
+            onChange={(v) => updateField(panel, "reactTraceMode", v)}
+          />
+          <InputField
+            label="Max steps"
+            type="number"
+            value={cfg.reactMaxSteps}
+            onChange={(v) => updateField(panel, "reactMaxSteps", v)}
+          />
+          <InputField
+            label="Tool timeout (ms)"
+            type="number"
+            value={cfg.reactToolTimeoutMs}
+            onChange={(v) => updateField(panel, "reactToolTimeoutMs", v)}
+          />
+          <InputField
+            label="Total timeout (ms)"
+            type="number"
+            value={cfg.reactTotalTimeoutMs}
+            onChange={(v) => updateField(panel, "reactTotalTimeoutMs", v)}
+          />
+          <SelectField
+            label="Allow write tools"
+            value={String(cfg.reactAllowWriteTools)}
+            options={BOOLEAN_OPTIONS}
+            hint="关闭时写工具会被策略层拦截。"
+            onChange={(v) => updateField(panel, "reactAllowWriteTools", v === "true")}
+          />
         </div>
       </Panel>
 

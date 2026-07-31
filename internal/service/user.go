@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"project-yume/internal/assets"
+	"project-yume/internal/config"
 	"project-yume/internal/connect"
 	"project-yume/internal/model"
 	"project-yume/internal/utils"
@@ -18,7 +20,7 @@ func SendMsg(c *websocket.Conn, userID int64, msg string) error {
 	chunks := ParseReplyChunks(msg)
 	for _, chunk := range chunks {
 		if text := strings.TrimSpace(chunk.Text); text != "" {
-			for _, segment := range strings.Split(text, "$") {
+			for _, segment := range splitReplySegments(text) {
 				trimmed := strings.TrimSpace(segment)
 				if trimmed == "" {
 					continue
@@ -44,7 +46,7 @@ func BuildAssistantTranscript(reply string) string {
 
 	for _, chunk := range chunks {
 		if text := strings.TrimSpace(chunk.Text); text != "" {
-			parts = append(parts, strings.TrimSpace(strings.ReplaceAll(text, "$", " ")))
+			parts = append(parts, strings.TrimSpace(strings.Join(splitReplySegments(text), " ")))
 		}
 		if chunk.ImageAssetID != "" {
 			parts = append(parts, "[图片]")
@@ -58,13 +60,30 @@ func BuildAssistantTranscript(reply string) string {
 	return strings.Join(parts, " ")
 }
 
+func splitReplySegments(text string) []string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return nil
+	}
+
+	if strings.Contains(trimmed, "$") {
+		return strings.Split(trimmed, "$")
+	}
+
+	if config.GetConfig().EnableSpaceSegmentDelimiter && strings.Contains(trimmed, " ") {
+		return strings.Fields(trimmed)
+	}
+
+	return []string{trimmed}
+}
+
 func sendPrivateImageAsset(c *websocket.Conn, userID int64, assetID string) error {
-	asset, err := LookupImageAsset(assetID)
+	asset, err := assets.LookupImageAsset(assetID)
 	if err != nil {
 		return err
 	}
 
-	fileValue, err := ResolveImageAssetCQFile(asset)
+	fileValue, err := assets.ResolveImageAssetCQFile(asset)
 	if err != nil {
 		return err
 	}

@@ -1,4 +1,4 @@
-package service
+package assets
 
 import (
 	"encoding/json"
@@ -6,16 +6,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
 	"project-yume/internal/config"
 )
 
-const imageAssetPromptLimit = 4
-
-var imageDirectivePattern = regexp.MustCompile(`\[\[image:([a-zA-Z0-9._-]+)\]\]`)
+const defaultRelevantAssetLimit = 4
 
 type ImageAsset struct {
 	ID          string   `json:"id"`
@@ -28,74 +25,6 @@ type ImageAsset struct {
 
 type imageAssetCatalog struct {
 	Assets []ImageAsset `json:"assets"`
-}
-
-type replyChunk struct {
-	Text         string
-	ImageAssetID string
-}
-
-func BuildImageAssetPromptContext(currentMessage string) string {
-	cfg := config.GetConfig()
-	if !cfg.EnableImageAssetReply {
-		return ""
-	}
-
-	assets, err := listRelevantImageAssets(currentMessage, imageAssetPromptLimit)
-	if err != nil || len(assets) == 0 {
-		return ""
-	}
-
-	lines := []string{
-		"【图片素材】",
-		"如果你判断适合发送现有图片素材，可以在回复中插入 [[image:asset_id]]。",
-		"该指令不会展示给用户，系统会把它替换成图片发送。",
-		"每次回复最多使用一张图片素材。",
-		"当前候选素材：",
-	}
-
-	for _, asset := range assets {
-		description := strings.TrimSpace(asset.Description)
-		if description == "" {
-			description = strings.TrimSpace(asset.Title)
-		}
-		tags := strings.Join(asset.Tags, "、")
-		if tags != "" {
-			lines = append(lines, fmt.Sprintf("- %s: %s（标签：%s）", asset.ID, description, tags))
-			continue
-		}
-		lines = append(lines, fmt.Sprintf("- %s: %s", asset.ID, description))
-	}
-
-	return strings.Join(lines, "\n")
-}
-
-func ParseReplyChunks(reply string) []replyChunk {
-	matches := imageDirectivePattern.FindAllStringSubmatchIndex(reply, -1)
-	if len(matches) == 0 {
-		return []replyChunk{{Text: reply}}
-	}
-
-	chunks := make([]replyChunk, 0, len(matches)*2+1)
-	last := 0
-	for _, match := range matches {
-		if match[0] > last {
-			chunks = append(chunks, replyChunk{Text: reply[last:match[0]]})
-		}
-		chunks = append(chunks, replyChunk{ImageAssetID: reply[match[2]:match[3]]})
-		last = match[1]
-	}
-	if last < len(reply) {
-		chunks = append(chunks, replyChunk{Text: reply[last:]})
-	}
-	return chunks
-}
-
-func StripReplyDirectives(reply string) string {
-	cleaned := imageDirectivePattern.ReplaceAllString(reply, "")
-	cleaned = strings.ReplaceAll(cleaned, "  ", " ")
-	cleaned = strings.ReplaceAll(cleaned, "\n\n\n", "\n\n")
-	return strings.TrimSpace(cleaned)
 }
 
 func LookupImageAsset(assetID string) (ImageAsset, error) {
@@ -124,6 +53,54 @@ func ListImageAssets() ([]ImageAsset, error) {
 	result := make([]ImageAsset, 0, len(catalog.Assets))
 	for _, asset := range catalog.Assets {
 		result = append(result, normalizeImageAsset(asset))
+	}
+	return result, nil
+}
+
+func ListRelevantImageAssets(query string, limit int) ([]ImageAsset, error) {
+	catalog, err := loadImageAssetCatalog()
+	if err != nil {
+		return nil, err
+	}
+
+	if limit <= 0 {
+		limit = defaultRelevantAssetLimit
+	}
+
+	normalizedQuery := normalizeAssetLookupText(query)
+	requestingImage := looksLikeImageRequest(normalizedQuery)
+
+	type scoredAsset struct {
+		asset ImageAsset
+		score int
+	}
+
+	scored := make([]scoredAsset, 0, len(catalog.Assets))
+	for _, asset := range catalog.Assets {
+		if !asset.Enabled {
+			continue
+		}
+
+		score := scoreImageAsset(asset, normalizedQuery)
+		if score == 0 && !requestingImage {
+			continue
+		}
+		scored = append(scored, scoredAsset{asset: asset, score: score})
+	}
+
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].score == scored[j].score {
+			return scored[i].asset.ID < scored[j].asset.ID
+		}
+		return scored[i].score > scored[j].score
+	})
+
+	result := make([]ImageAsset, 0, minInt(limit, len(scored)))
+	for _, item := range scored {
+		result = append(result, item.asset)
+		if len(result) >= limit {
+			break
+		}
 	}
 	return result, nil
 }
@@ -181,54 +158,6 @@ func loadImageAssetCatalog() (imageAssetCatalog, error) {
 	return catalog, nil
 }
 
-func listRelevantImageAssets(query string, limit int) ([]ImageAsset, error) {
-	catalog, err := loadImageAssetCatalog()
-	if err != nil {
-		return nil, err
-	}
-
-	if limit <= 0 {
-		limit = imageAssetPromptLimit
-	}
-
-	normalizedQuery := normalizeAssetLookupText(query)
-	requestingImage := looksLikeImageRequest(normalizedQuery)
-
-	type scoredAsset struct {
-		asset ImageAsset
-		score int
-	}
-
-	scored := make([]scoredAsset, 0, len(catalog.Assets))
-	for _, asset := range catalog.Assets {
-		if !asset.Enabled {
-			continue
-		}
-
-		score := scoreImageAsset(asset, normalizedQuery)
-		if score == 0 && !requestingImage {
-			continue
-		}
-		scored = append(scored, scoredAsset{asset: asset, score: score})
-	}
-
-	sort.SliceStable(scored, func(i, j int) bool {
-		if scored[i].score == scored[j].score {
-			return scored[i].asset.ID < scored[j].asset.ID
-		}
-		return scored[i].score > scored[j].score
-	})
-
-	result := make([]ImageAsset, 0, minInt(limit, len(scored)))
-	for _, item := range scored {
-		result = append(result, item.asset)
-		if len(result) >= limit {
-			break
-		}
-	}
-	return result, nil
-}
-
 func scoreImageAsset(asset ImageAsset, normalizedQuery string) int {
 	if normalizedQuery == "" {
 		return 0
@@ -262,9 +191,6 @@ func normalizeImageAsset(asset ImageAsset) ImageAsset {
 	asset.Description = strings.TrimSpace(asset.Description)
 	if asset.Tags == nil {
 		asset.Tags = []string{}
-	}
-	if !asset.Enabled {
-		asset.Enabled = asset.Enabled
 	}
 	return asset
 }

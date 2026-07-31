@@ -42,6 +42,7 @@ export function LogsPage({ panel }) {
 
   const selectedLogFile = panel.selectedLogFile;
   const setSelectedLogFile = panel.setSelectedLogFile;
+  const recentEvents = (panel.events || []).slice(-6).reverse();
 
   useEffect(() => {
     if (!streamEnabled) {
@@ -188,9 +189,44 @@ export function LogsPage({ panel }) {
                 </li>
               </ul>
             </div>
+            <div className="artifact-card">
+              <div className="artifact-title">ReAct events</div>
+              <ul className="artifact-list">
+                {recentEvents.map((event) => (
+                  <li key={event.id || `${event.type}-${event.created_at}`}>
+                    <span>{formatEvent(event)}</span>
+                    <span>{formatEventTime(event.created_at)}</span>
+                  </li>
+                ))}
+                {recentEvents.length === 0 ? <li>暂无事件</li> : null}
+              </ul>
+            </div>
           </aside>
         </div>
       </Panel>
     </div>
   );
+}
+
+function formatEvent(event) {
+  const type = event.type || "-";
+  if (event.tool) {
+    return `${type} · ${event.tool}`;
+  }
+  return type;
+}
+
+function formatEventTime(value) {
+  if (!value) {
+    return "-";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+  return date.toLocaleTimeString("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
 }

@@ -6,6 +6,9 @@ export function OverviewPage({ panel }) {
   const logCount = panel.logFiles?.length || 0;
   const configChecks = Object.entries(panel.ready.checks || {});
   const healthChecks = Object.entries(panel.health.checks || {});
+  const tools = panel.toolDefinitions || [];
+  const events = panel.events || [];
+  const affection = panel.affectionState;
 
   return (
     <div className="stack">
@@ -31,7 +34,7 @@ export function OverviewPage({ panel }) {
         <MetricCard
           label="Retry window"
           value={`${panel.config.aiTimeout || 0}s`}
-          hint={`${panel.config.aiRetryCount || 0} retries / ${panel.config.aiRateLimit || 0} rpm · logs ${logCount} (${latestLogFile})`}
+          hint={`${panel.config.aiRetryCount || 0} retries / ${panel.config.aiRateLimit || 0} rpm · tools ${panel.digest.toolCount || 0}`}
         />
       </div>
 
@@ -86,6 +89,50 @@ export function OverviewPage({ panel }) {
       </div>
 
       <Panel
+        eyebrow="ReAct diagnostics"
+        title="工具、事件与好感状态"
+        subtitle={`events ${panel.digest.eventCount || 0} · affection ${formatAffection(affection)}`}
+        actions={
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => void panel.loadDiagnostics()}
+            disabled={panel.loadingDiagnostics}
+          >
+            刷新诊断
+          </button>
+        }
+      >
+        <div className="artifact-grid">
+          <div className="artifact-card">
+            <div className="artifact-title">Tool registry</div>
+            <ul className="artifact-list mono">
+              {tools.slice(0, 8).map((tool) => (
+                <li key={tool.name}>
+                  <span>{tool.name}</span>
+                  <span>{tool.readOnly ? "read" : "write"}</span>
+                </li>
+              ))}
+              {tools.length === 0 ? <li>暂无工具定义</li> : null}
+            </ul>
+          </div>
+
+          <div className="artifact-card">
+            <div className="artifact-title">Recent ReAct events</div>
+            <ul className="artifact-list">
+              {events.slice(-6).reverse().map((event) => (
+                <li key={event.id || `${event.type}-${event.created_at}`}>
+                  <span>{formatEvent(event)}</span>
+                  <span>{formatDate(event.created_at)}</span>
+                </li>
+              ))}
+              {events.length === 0 ? <li>暂无事件</li> : null}
+            </ul>
+          </div>
+        </div>
+      </Panel>
+
+      <Panel
         eyebrow="Recent artifacts"
         title="最近日志与资产"
         subtitle="保持操作者对文件层的直觉，不必先切去日志页。"
@@ -107,7 +154,7 @@ export function OverviewPage({ panel }) {
           <div className="artifact-card emphasis">
             <div className="artifact-title">Operator note</div>
             <p className="artifact-note">
-              这个面板的单一任务不是“展示所有配置”，而是帮你更快判断现在该改模型、改人格，还是直接去监听日志流。
+              当前日志 {logCount} 个，最新文件 {latestLogFile}。诊断区直接展示工具和事件，不必先切去日志页。
             </p>
           </div>
         </div>
@@ -146,6 +193,21 @@ function ProbeBlock({ title, status, checks }) {
       </div>
     </div>
   );
+}
+
+function formatAffection(state) {
+  if (!state) {
+    return "-";
+  }
+  return `${state.score ?? 0} / ${state.stage || "-"}`;
+}
+
+function formatEvent(event) {
+  const type = event.type || "-";
+  if (event.tool) {
+    return `${type} · ${event.tool}`;
+  }
+  return type;
 }
 
 function formatDate(value) {

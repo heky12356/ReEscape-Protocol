@@ -15,11 +15,15 @@ import (
 	"strings"
 	"time"
 
+	"project-yume/internal/agent"
 	"project-yume/internal/aifunction"
+	"project-yume/internal/assets"
 	"project-yume/internal/character"
 	"project-yume/internal/config"
+	"project-yume/internal/domain/affection"
+	"project-yume/internal/eventlog"
 	"project-yume/internal/metrics"
-	"project-yume/internal/service"
+	"project-yume/internal/tools/catalog"
 	"project-yume/internal/utils"
 
 	"github.com/gin-gonic/gin"
@@ -32,33 +36,51 @@ const (
 )
 
 type configResponse struct {
-	AIBaseURL              string   `json:"aiBaseUrl"`
-	AIModel                string   `json:"aiModel"`
-	AIKeyMasked            string   `json:"aiKeyMasked"`
-	AIKeySet               bool     `json:"aiKeySet"`
-	AIProfile              string   `json:"aiProfile"`
-	AIProfiles             []string `json:"aiProfiles"`
-	AIConfigFile           string   `json:"aiConfigFile"`
-	AITemperature          float32  `json:"aiTemperature"`
-	AIMaxTokens            int      `json:"aiMaxTokens"`
-	AITimeout              int      `json:"aiTimeout"`
-	AIRetryCount           int      `json:"aiRetryCount"`
-	AIRateLimit            int      `json:"aiRateLimit"`
-	AITopP                 float32  `json:"aiTopP"`
-	AIPromptRaw            string   `json:"aiPromptRaw"`
-	EnableTimeContext      bool     `json:"enableTimeContext"`
-	TimeContextTimezone    string   `json:"timeContextTimezone"`
-	TimeContextFormat      string   `json:"timeContextFormat"`
-	EnableVisionInput      bool     `json:"enableVisionInput"`
-	VisionImageDetail      string   `json:"visionImageDetail"`
-	EnableImageOCRFallback bool     `json:"enableImageOCRFallback"`
-	EnableImageAssetReply  bool     `json:"enableImageAssetReply"`
-	ImageAssetDir          string   `json:"imageAssetDir"`
-	ImageAssetIndexFile    string   `json:"imageAssetIndexFile"`
-	Character              string   `json:"character"`
-	CharacterOptions       []string `json:"characterOptions"`
-	EffectivePrompt        string   `json:"effectivePrompt"`
-	EnvironmentConfig      string   `json:"environmentConfig"`
+	TargetID                          int64         `json:"targetId"`
+	AIBaseURL                         string        `json:"aiBaseUrl"`
+	AIModel                           string        `json:"aiModel"`
+	AIKeyMasked                       string        `json:"aiKeyMasked"`
+	AIKeySet                          bool          `json:"aiKeySet"`
+	AIProfile                         string        `json:"aiProfile"`
+	AIProfiles                        []string      `json:"aiProfiles"`
+	AIConfigFile                      string        `json:"aiConfigFile"`
+	AITemperature                     float32       `json:"aiTemperature"`
+	AIMaxTokens                       int           `json:"aiMaxTokens"`
+	AITimeout                         int           `json:"aiTimeout"`
+	AIRetryCount                      int           `json:"aiRetryCount"`
+	AIRateLimit                       int           `json:"aiRateLimit"`
+	AITopP                            float32       `json:"aiTopP"`
+	AIPromptRaw                       string        `json:"aiPromptRaw"`
+	CharacterIdentityMode             string        `json:"characterIdentityMode"`
+	AllowCharacterIdentityExplanation bool          `json:"allowCharacterIdentityExplanation"`
+	EnableTimeContext                 bool          `json:"enableTimeContext"`
+	TimeContextTimezone               string        `json:"timeContextTimezone"`
+	TimeContextFormat                 string        `json:"timeContextFormat"`
+	EnableVisionInput                 bool          `json:"enableVisionInput"`
+	VisionImageDetail                 string        `json:"visionImageDetail"`
+	EnableImageOCRFallback            bool          `json:"enableImageOCRFallback"`
+	EnableImageAssetReply             bool          `json:"enableImageAssetReply"`
+	ImageAssetDir                     string        `json:"imageAssetDir"`
+	ImageAssetIndexFile               string        `json:"imageAssetIndexFile"`
+	Character                         string        `json:"character"`
+	CharacterOptions                  []string      `json:"characterOptions"`
+	EffectivePrompt                   string        `json:"effectivePrompt"`
+	PromptPreview                     PromptPreview `json:"promptPreview"`
+	EnvironmentConfig                 string        `json:"environmentConfig"`
+	EnableReactAgent                  bool          `json:"enableReactAgent"`
+	ReactMaxSteps                     int           `json:"reactMaxSteps"`
+	ReactToolTimeoutMs                int           `json:"reactToolTimeoutMs"`
+	ReactAllowWriteTools              bool          `json:"reactAllowWriteTools"`
+	ReactTraceMode                    string        `json:"reactTraceMode"`
+	ReactTotalTimeoutMs               int           `json:"reactTotalTimeoutMs"`
+}
+
+type PromptPreview struct {
+	BasePrompt      string `json:"basePrompt"`
+	UserPrompt      string `json:"userPrompt"`
+	CharacterPrompt string `json:"characterPrompt"`
+	AgentPrompt     string `json:"agentPrompt"`
+	EffectivePrompt string `json:"effectivePrompt"`
 }
 
 type aiProfileResponse struct {
@@ -76,31 +98,51 @@ type aiProfileResponse struct {
 }
 
 type updateConfigRequest struct {
-	AIBaseURL              string  `json:"aiBaseUrl"`
-	AIModel                string  `json:"aiModel"`
-	AIProfile              string  `json:"aiProfile"`
-	AITemperature          float32 `json:"aiTemperature"`
-	AIMaxTokens            int     `json:"aiMaxTokens"`
-	AITimeout              int     `json:"aiTimeout"`
-	AIRetryCount           int     `json:"aiRetryCount"`
-	AIRateLimit            int     `json:"aiRateLimit"`
-	AITopP                 float32 `json:"aiTopP"`
-	AIPromptRaw            string  `json:"aiPromptRaw"`
-	EnableTimeContext      bool    `json:"enableTimeContext"`
-	TimeContextTimezone    string  `json:"timeContextTimezone"`
-	TimeContextFormat      string  `json:"timeContextFormat"`
-	EnableVisionInput      bool    `json:"enableVisionInput"`
-	VisionImageDetail      string  `json:"visionImageDetail"`
-	EnableImageOCRFallback bool    `json:"enableImageOCRFallback"`
-	EnableImageAssetReply  bool    `json:"enableImageAssetReply"`
-	ImageAssetDir          string  `json:"imageAssetDir"`
-	ImageAssetIndexFile    string  `json:"imageAssetIndexFile"`
-	Character              string  `json:"character"`
-	AIKey                  string  `json:"aiKey"`
+	AIBaseURL                         string  `json:"aiBaseUrl"`
+	AIModel                           string  `json:"aiModel"`
+	AIProfile                         string  `json:"aiProfile"`
+	AITemperature                     float32 `json:"aiTemperature"`
+	AIMaxTokens                       int     `json:"aiMaxTokens"`
+	AITimeout                         int     `json:"aiTimeout"`
+	AIRetryCount                      int     `json:"aiRetryCount"`
+	AIRateLimit                       int     `json:"aiRateLimit"`
+	AITopP                            float32 `json:"aiTopP"`
+	AIPromptRaw                       string  `json:"aiPromptRaw"`
+	CharacterIdentityMode             string  `json:"characterIdentityMode"`
+	AllowCharacterIdentityExplanation bool    `json:"allowCharacterIdentityExplanation"`
+	EnableTimeContext                 bool    `json:"enableTimeContext"`
+	TimeContextTimezone               string  `json:"timeContextTimezone"`
+	TimeContextFormat                 string  `json:"timeContextFormat"`
+	EnableVisionInput                 bool    `json:"enableVisionInput"`
+	VisionImageDetail                 string  `json:"visionImageDetail"`
+	EnableImageOCRFallback            bool    `json:"enableImageOCRFallback"`
+	EnableImageAssetReply             bool    `json:"enableImageAssetReply"`
+	ImageAssetDir                     string  `json:"imageAssetDir"`
+	ImageAssetIndexFile               string  `json:"imageAssetIndexFile"`
+	Character                         string  `json:"character"`
+	AIKey                             string  `json:"aiKey"`
+	EnableReactAgent                  bool    `json:"enableReactAgent"`
+	ReactMaxSteps                     int     `json:"reactMaxSteps"`
+	ReactToolTimeoutMs                int     `json:"reactToolTimeoutMs"`
+	ReactAllowWriteTools              bool    `json:"reactAllowWriteTools"`
+	ReactTraceMode                    string  `json:"reactTraceMode"`
+	ReactTotalTimeoutMs               int     `json:"reactTotalTimeoutMs"`
 }
 
 type imageAssetsResponse struct {
-	Assets []service.ImageAsset `json:"assets"`
+	Assets []assets.ImageAsset `json:"assets"`
+}
+
+type eventLogResponse struct {
+	Events []eventlog.Event `json:"events"`
+}
+
+type toolsResponse struct {
+	Tools []catalog.Definition `json:"tools"`
+}
+
+type affectionResponse struct {
+	State affection.State `json:"state"`
 }
 
 type logFileInfo struct {
@@ -192,6 +234,9 @@ func (s *server) routes() *gin.Engine {
 		adminGroup.PUT("/config", s.handlePutConfig)
 		adminGroup.GET("/ai-profiles/:name", s.handleGetAIProfile)
 		adminGroup.GET("/image-assets", s.handleImageAssets)
+		adminGroup.GET("/tools", s.handleTools)
+		adminGroup.GET("/events", s.handleEvents)
+		adminGroup.GET("/affection/:userID", s.handleAffection)
 		adminGroup.GET("/logs/files", s.handleLogFiles)
 		adminGroup.GET("/logs/content", s.handleLogContent)
 		adminGroup.GET("/logs/stream", s.handleLogStream)
@@ -332,19 +377,27 @@ func (s *server) handlePutConfig(c *gin.Context) {
 	}
 
 	updates := map[string]string{
-		"AI_PROFILE":                savedProfileName,
-		"AI_CONFIG_FILE":            aiConfigFile,
-		"AI_PROMPT":                 req.AIPromptRaw,
-		"ENABLE_TIME_CONTEXT":       strconv.FormatBool(req.EnableTimeContext),
-		"TIME_CONTEXT_TIMEZONE":     strings.TrimSpace(req.TimeContextTimezone),
-		"TIME_CONTEXT_FORMAT":       strings.TrimSpace(req.TimeContextFormat),
-		"ENABLE_VISION_INPUT":       strconv.FormatBool(req.EnableVisionInput),
-		"VISION_IMAGE_DETAIL":       strings.TrimSpace(req.VisionImageDetail),
-		"ENABLE_IMAGE_OCR_FALLBACK": strconv.FormatBool(req.EnableImageOCRFallback),
-		"ENABLE_IMAGE_ASSET_REPLY":  strconv.FormatBool(req.EnableImageAssetReply),
-		"IMAGE_ASSET_DIR":           strings.TrimSpace(req.ImageAssetDir),
-		"IMAGE_ASSET_INDEX_FILE":    strings.TrimSpace(req.ImageAssetIndexFile),
-		"CHARACTER":                 req.Character,
+		"AI_PROFILE":                           savedProfileName,
+		"AI_CONFIG_FILE":                       aiConfigFile,
+		"AI_PROMPT":                            req.AIPromptRaw,
+		"CHARACTER":                            req.Character,
+		"CHARACTER_IDENTITY_MODE":              strings.ToLower(strings.TrimSpace(req.CharacterIdentityMode)),
+		"ALLOW_CHARACTER_IDENTITY_EXPLANATION": strconv.FormatBool(req.AllowCharacterIdentityExplanation),
+		"ENABLE_TIME_CONTEXT":                  strconv.FormatBool(req.EnableTimeContext),
+		"TIME_CONTEXT_TIMEZONE":                strings.TrimSpace(req.TimeContextTimezone),
+		"TIME_CONTEXT_FORMAT":                  strings.TrimSpace(req.TimeContextFormat),
+		"ENABLE_VISION_INPUT":                  strconv.FormatBool(req.EnableVisionInput),
+		"VISION_IMAGE_DETAIL":                  strings.TrimSpace(req.VisionImageDetail),
+		"ENABLE_IMAGE_OCR_FALLBACK":            strconv.FormatBool(req.EnableImageOCRFallback),
+		"ENABLE_IMAGE_ASSET_REPLY":             strconv.FormatBool(req.EnableImageAssetReply),
+		"IMAGE_ASSET_DIR":                      strings.TrimSpace(req.ImageAssetDir),
+		"IMAGE_ASSET_INDEX_FILE":               strings.TrimSpace(req.ImageAssetIndexFile),
+		"ENABLE_REACT_AGENT":                   strconv.FormatBool(req.EnableReactAgent),
+		"REACT_MAX_STEPS":                      strconv.Itoa(req.ReactMaxSteps),
+		"REACT_TOOL_TIMEOUT_MS":                strconv.Itoa(req.ReactToolTimeoutMs),
+		"REACT_ALLOW_WRITE_TOOLS":              strconv.FormatBool(req.ReactAllowWriteTools),
+		"REACT_TRACE_MODE":                     strings.TrimSpace(req.ReactTraceMode),
+		"REACT_TOTAL_TIMEOUT_MS":               strconv.Itoa(req.ReactTotalTimeoutMs),
 	}
 
 	envFile := resolveEnvFilePath(config.GetEnvFilePath())
@@ -422,12 +475,50 @@ func (s *server) handleGetAIProfile(c *gin.Context) {
 }
 
 func (s *server) handleImageAssets(c *gin.Context) {
-	assets, err := service.ListImageAssets()
+	imageAssets, err := assets.ListImageAssets()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, imageAssetsResponse{Assets: assets})
+	c.JSON(http.StatusOK, imageAssetsResponse{Assets: imageAssets})
+}
+
+func (s *server) handleTools(c *gin.Context) {
+	c.JSON(http.StatusOK, toolsResponse{Tools: catalog.ListDefinitions()})
+}
+
+func (s *server) handleEvents(c *gin.Context) {
+	limit := 200
+	if raw := c.Query("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err == nil && parsed > 0 {
+			if parsed > 1000 {
+				parsed = 1000
+			}
+			limit = parsed
+		}
+	}
+
+	store := eventlog.Default()
+	if store == nil {
+		c.JSON(http.StatusOK, eventLogResponse{})
+		return
+	}
+	events, err := store.List(c.Request.Context(), limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, eventLogResponse{Events: events})
+}
+
+func (s *server) handleAffection(c *gin.Context) {
+	userID, err := strconv.ParseInt(strings.TrimSpace(c.Param("userID")), 10, 64)
+	if err != nil || userID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "valid userID is required"})
+		return
+	}
+	c.JSON(http.StatusOK, affectionResponse{State: affection.GetManager().Get(userID)})
 }
 
 func (s *server) handleLogFiles(c *gin.Context) {
@@ -607,129 +698,6 @@ func (s *server) handleLogStream(c *gin.Context) {
 	}
 }
 
-func setNoCacheHeaders(c *gin.Context) {
-	c.Header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-	c.Header("Pragma", "no-cache")
-	c.Header("Expires", "0")
-}
-
-func requestIDMiddleware() gin.HandlerFunc {
-	header := strings.TrimSpace(config.GetConfig().RequestIDHeader)
-	if header == "" {
-		header = "X-Request-ID"
-	}
-
-	return func(c *gin.Context) {
-		requestID := strings.TrimSpace(c.GetHeader(header))
-		if requestID == "" {
-			requestID = utils.NewRequestID("http")
-		}
-
-		c.Set("request_id", requestID)
-		c.Writer.Header().Set(header, requestID)
-		c.Next()
-	}
-}
-
-func accessLogMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		startedAt := time.Now()
-		c.Next()
-
-		requestID := requestIDFromContext(c)
-		path := c.FullPath()
-		if path == "" {
-			path = c.Request.URL.Path
-		}
-		status := c.Writer.Status()
-		latency := time.Since(startedAt)
-		statusText := strconv.Itoa(status)
-
-		labels := map[string]string{
-			"method": c.Request.Method,
-			"path":   path,
-			"status": statusText,
-		}
-		metrics.IncCounter(
-			"bot_http_requests_total",
-			"Total HTTP requests by path, method, and status.",
-			labels,
-		)
-		metrics.ObserveDuration(
-			"bot_http_request_duration",
-			"HTTP request duration.",
-			latency,
-			labels,
-		)
-
-		fields := []utils.Field{
-			utils.String("request_id", requestID),
-			utils.String("method", c.Request.Method),
-			utils.String("path", path),
-			utils.Int("status", status),
-			utils.Duration("latency", latency),
-			utils.String("client_ip", c.ClientIP()),
-		}
-		if len(c.Errors) > 0 {
-			fields = append(fields, utils.String("errors", c.Errors.String()))
-		}
-
-		if status >= http.StatusInternalServerError {
-			utils.Errorw("http request completed", fields...)
-			return
-		}
-		utils.Infow("http request completed", fields...)
-	}
-}
-
-func requestIDFromContext(c *gin.Context) string {
-	if value, ok := c.Get("request_id"); ok {
-		if requestID, ok := value.(string); ok {
-			return requestID
-		}
-	}
-	return ""
-}
-
-func resolveMetricsPath(path string) string {
-	trimmed := strings.TrimSpace(path)
-	if trimmed == "" {
-		return "/metrics"
-	}
-	if strings.HasPrefix(trimmed, "/") {
-		return trimmed
-	}
-	return "/" + trimmed
-}
-
-func ensureDirWritable(path string) error {
-	resolved := strings.TrimSpace(path)
-	if resolved == "" {
-		return fmt.Errorf("path is empty")
-	}
-	if err := os.MkdirAll(resolved, 0o755); err != nil {
-		return err
-	}
-
-	file, err := os.CreateTemp(resolved, ".health-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(file.Name())
-	return file.Close()
-}
-
-func latestLogFileName(logDir string) (string, error) {
-	files, err := listLogFiles(logDir)
-	if err != nil {
-		return "", err
-	}
-	if len(files) == 0 {
-		return "", nil
-	}
-	return files[0].Name, nil
-}
-
 func (s *server) handleCharacters(c *gin.Context) {
 	names, err := listCharacterNames()
 	if err != nil {
@@ -883,36 +851,65 @@ func (s *server) buildConfigResponse() (configResponse, error) {
 	envMap, _ := readEnvMap(envFile)
 	character := firstNonEmpty(cfg.Character, readEnvValue(envMap, "CHARACTER", "Character"))
 	aiPromptRaw := firstNonEmpty(os.Getenv("AI_PROMPT"), readEnvValue(envMap, "AI_PROMPT", "AiPrompt"))
+	promptSections := config.CurrentPromptSections()
+	toolNames := listToolNames()
+	promptPreview := PromptPreview{
+		BasePrompt:      promptSections.BasePrompt,
+		UserPrompt:      promptSections.UserPrompt,
+		CharacterPrompt: promptSections.CharacterPrompt,
+		AgentPrompt:     agent.BuildSystemPrompt(toolNames),
+		EffectivePrompt: promptSections.EffectivePrompt,
+	}
 
 	return configResponse{
-		AIBaseURL:              cfg.AiBaseUrl,
-		AIModel:                cfg.AiModel,
-		AIKeyMasked:            maskSecret(cfg.AiKEY),
-		AIKeySet:               strings.TrimSpace(cfg.AiKEY) != "",
-		AIProfile:              cfg.AiProfile,
-		AIProfiles:             aiProfileNames,
-		AIConfigFile:           cfg.AiConfigFile,
-		AITemperature:          cfg.AiTemperature,
-		AIMaxTokens:            cfg.AiMaxTokens,
-		AITimeout:              cfg.AiTimeout,
-		AIRetryCount:           cfg.AiRetryCount,
-		AIRateLimit:            cfg.AiRateLimit,
-		AITopP:                 cfg.AiTopP,
-		AIPromptRaw:            aiPromptRaw,
-		EnableTimeContext:      cfg.EnableTimeContext,
-		TimeContextTimezone:    cfg.TimeContextTimezone,
-		TimeContextFormat:      cfg.TimeContextFormat,
-		EnableVisionInput:      cfg.EnableVisionInput,
-		VisionImageDetail:      cfg.VisionImageDetail,
-		EnableImageOCRFallback: cfg.EnableImageOCRFallback,
-		EnableImageAssetReply:  cfg.EnableImageAssetReply,
-		ImageAssetDir:          cfg.ImageAssetDir,
-		ImageAssetIndexFile:    cfg.ImageAssetIndexFile,
-		Character:              character,
-		CharacterOptions:       characterOptions,
-		EffectivePrompt:        cfg.AiPrompt,
-		EnvironmentConfig:      envFile,
+		TargetID:                          cfg.TargetId,
+		AIBaseURL:                         cfg.AiBaseUrl,
+		AIModel:                           cfg.AiModel,
+		AIKeyMasked:                       maskSecret(cfg.AiKEY),
+		AIKeySet:                          strings.TrimSpace(cfg.AiKEY) != "",
+		AIProfile:                         cfg.AiProfile,
+		AIProfiles:                        aiProfileNames,
+		AIConfigFile:                      cfg.AiConfigFile,
+		AITemperature:                     cfg.AiTemperature,
+		AIMaxTokens:                       cfg.AiMaxTokens,
+		AITimeout:                         cfg.AiTimeout,
+		AIRetryCount:                      cfg.AiRetryCount,
+		AIRateLimit:                       cfg.AiRateLimit,
+		AITopP:                            cfg.AiTopP,
+		AIPromptRaw:                       aiPromptRaw,
+		CharacterIdentityMode:             cfg.CharacterIdentityMode,
+		AllowCharacterIdentityExplanation: cfg.AllowCharacterIdentityExplanation,
+		EnableTimeContext:                 cfg.EnableTimeContext,
+		TimeContextTimezone:               cfg.TimeContextTimezone,
+		TimeContextFormat:                 cfg.TimeContextFormat,
+		EnableVisionInput:                 cfg.EnableVisionInput,
+		VisionImageDetail:                 cfg.VisionImageDetail,
+		EnableImageOCRFallback:            cfg.EnableImageOCRFallback,
+		EnableImageAssetReply:             cfg.EnableImageAssetReply,
+		ImageAssetDir:                     cfg.ImageAssetDir,
+		ImageAssetIndexFile:               cfg.ImageAssetIndexFile,
+		Character:                         character,
+		CharacterOptions:                  characterOptions,
+		EffectivePrompt:                   cfg.AiPrompt,
+		PromptPreview:                     promptPreview,
+		EnvironmentConfig:                 envFile,
+		EnableReactAgent:                  cfg.EnableReactAgent,
+		ReactMaxSteps:                     cfg.ReactMaxSteps,
+		ReactToolTimeoutMs:                cfg.ReactToolTimeoutMs,
+		ReactAllowWriteTools:              cfg.ReactAllowWriteTools,
+		ReactTraceMode:                    cfg.ReactTraceMode,
+		ReactTotalTimeoutMs:               cfg.ReactTotalTimeoutMs,
 	}, nil
+}
+
+func listToolNames() []string {
+	definitions := catalog.ListDefinitions()
+	names := make([]string, 0, len(definitions))
+	for _, definition := range definitions {
+		names = append(names, definition.Name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func readEnvMap(path string) (map[string]string, error) {
@@ -1036,6 +1033,14 @@ func validateUpdateRequest(req updateConfigRequest) error {
 	if strings.TrimSpace(req.Character) == "" {
 		return fmt.Errorf("character is required")
 	}
+	if strings.TrimSpace(req.CharacterIdentityMode) == "" {
+		return fmt.Errorf("characterIdentityMode is required")
+	}
+	switch strings.ToLower(strings.TrimSpace(req.CharacterIdentityMode)) {
+	case "product_identity", "legacy":
+	default:
+		return fmt.Errorf("characterIdentityMode must be one of product_identity/legacy")
+	}
 	if req.AIMaxTokens <= 0 {
 		return fmt.Errorf("aiMaxTokens must be > 0")
 	}
@@ -1064,6 +1069,20 @@ func validateUpdateRequest(req updateConfigRequest) error {
 	}
 	if strings.TrimSpace(req.ImageAssetIndexFile) == "" {
 		return fmt.Errorf("imageAssetIndexFile is required")
+	}
+	if req.ReactMaxSteps <= 0 {
+		return fmt.Errorf("reactMaxSteps must be > 0")
+	}
+	if req.ReactToolTimeoutMs <= 0 {
+		return fmt.Errorf("reactToolTimeoutMs must be > 0")
+	}
+	if req.ReactTotalTimeoutMs <= 0 {
+		return fmt.Errorf("reactTotalTimeoutMs must be > 0")
+	}
+	switch strings.ToLower(strings.TrimSpace(req.ReactTraceMode)) {
+	case "off", "basic", "full":
+	default:
+		return fmt.Errorf("reactTraceMode must be one of off/basic/full")
 	}
 	return nil
 }
@@ -1172,28 +1191,11 @@ func writeCharacterConfigFile(name string, cfg character.CharacterConfig, overwr
 }
 
 func normalizeCharacterConfig(cfg *character.CharacterConfig) {
-	cfg.Name = strings.TrimSpace(cfg.Name)
-	cfg.Description = strings.TrimSpace(cfg.Description)
-	if cfg.Personality == nil {
-		cfg.Personality = map[string]string{}
-	}
-	if cfg.Responses == nil {
-		cfg.Responses = map[string]interface{}{}
-	}
-	if cfg.Behavior == nil {
-		cfg.Behavior = map[string]interface{}{}
-	}
-	if cfg.Quotes == nil {
-		cfg.Quotes = []string{}
-	}
+	character.NormalizeConfig(cfg)
 }
 
 func validateCharacterConfig(cfg *character.CharacterConfig) error {
-	normalizeCharacterConfig(cfg)
-	if cfg.Name == "" {
-		return fmt.Errorf("character config.name is required")
-	}
-	return nil
+	return character.ValidateConfig(cfg)
 }
 
 func listLogFiles(logDir string) ([]logFileInfo, error) {
@@ -1396,18 +1398,4 @@ func maskSecret(raw string) string {
 		return "****"
 	}
 	return trimmed[:4] + strings.Repeat("*", len(trimmed)-8) + trimmed[len(trimmed)-4:]
-}
-
-func corsMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
-
-		if c.Request.Method == http.MethodOptions {
-			c.AbortWithStatus(http.StatusNoContent)
-			return
-		}
-		c.Next()
-	}
 }

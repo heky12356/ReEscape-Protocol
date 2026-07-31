@@ -13,18 +13,23 @@ import (
 
 type Config struct {
 	// 基础配置
-	Hostadd      string
-	WsPort       string
-	HttpPort     string
-	TargetId     int64
-	AiKEY        string
-	AiBaseUrl    string
-	AiPrompt     string
-	AiModel      string
-	AiProfile    string
-	AiConfigFile string
-	Character    string
-	Token        string
+	Hostadd                           string
+	WsPort                            string
+	HttpPort                          string
+	TargetId                          int64
+	AiKEY                             string
+	AiBaseUrl                         string
+	AiPrompt                          string
+	BasePrompt                        string
+	UserPrompt                        string
+	CharacterPrompt                   string
+	AiModel                           string
+	AiProfile                         string
+	AiConfigFile                      string
+	Character                         string
+	CharacterIdentityMode             string
+	AllowCharacterIdentityExplanation bool
+	Token                             string
 
 	// 调度器配置
 	EnableNaturalScheduler bool    // 启用自然定时器
@@ -47,6 +52,7 @@ type Config struct {
 	LogToFile      bool   // 是否记录到文件
 	LogFormat      string // 日志格式，text/json
 	LogEnableColor bool   // 控制台日志颜色
+	EnableAIRawLog bool   // 是否记录 AI 原始调用日志
 
 	// 可观测性配置
 	RequestIDHeader      string // 请求 ID Header
@@ -72,6 +78,20 @@ type Config struct {
 	EnableImageAssetReply        bool   // 启用图片素材回复
 	ImageAssetDir                string // 图片素材目录
 	ImageAssetIndexFile          string // 图片素材索引文件
+	EnableSpaceSegmentDelimiter  bool   // 允许将空格视为回复分段符
+	LightAckMode                 string // 轻回应模式: llm/template
+	ShortReplyStrictness         string // 短回复严格度: conservative/balanced/reply_first
+	ContextRecentTurns           int    // prompt 中保留的最近 turn 数
+	ContextSummaryMaxTurns       int    // rolling summary 覆盖的历史 turn 上限
+	ContextOpenLoopLimit         int    // prompt 中注入的 open loop 数量
+
+	// ReAct Agent 配置
+	EnableReactAgent     bool   // 启用 ReAct Agent Runtime
+	ReactMaxSteps        int    // 单轮最大 tool loop 步数
+	ReactToolTimeoutMs   int    // 单个工具超时(毫秒)
+	ReactAllowWriteTools bool   // 是否允许写工具产生副作用
+	ReactTraceMode       string // trace 记录模式: off/basic/full
+	ReactTotalTimeoutMs  int    // 单轮总超时(毫秒)
 }
 
 var config = &Config{}
@@ -90,22 +110,6 @@ func init() {
 		utils.Warn("env file not loaded (%s), fallback to system env only: %v", envFile, err)
 	}
 
-	// basePrompt
-	var basePrompt string = `
-	【技术指令】
-	0. 注意将无意义的乱码去掉
-	1. 回复时使用 $ 作为分段标记，每段内容应该简短自然
-	2. 每段长度控制在10-20字以内
-	3. 分段应该符合语义完整性
-	4. 避免在一个完整的句子中间分段
-	5. 不要使用表情
-
-	【回复格式示例】
-	第一段内容$第二段内容$第三段内容
-
-	【角色】
-	`
-
 	// 基础配置
 	config.Hostadd = os.Getenv("HOSTADD")
 	config.WsPort = os.Getenv("WsPort")
@@ -113,12 +117,16 @@ func init() {
 	config.TargetId, _ = strconv.ParseInt(os.Getenv("TARGETID"), 10, 64)
 	config.AiKEY = os.Getenv("AI_KEY")
 	config.AiBaseUrl = os.Getenv("AI_BASEURL")
-	config.AiPrompt = basePrompt + os.Getenv("AI_PROMPT")
+	config.EnableSpaceSegmentDelimiter = getBoolEnv("ENABLE_SPACE_SEGMENT_DELIMITER", false)
+	basePrompt := buildBasePrompt(config.EnableSpaceSegmentDelimiter)
 	systemBasePrompt = basePrompt
+	config.UserPrompt = os.Getenv("AI_PROMPT")
 	config.AiModel = os.Getenv("AI_MODEL")
 	config.AiProfile = getStringEnv("AI_PROFILE", "default")
 	config.AiConfigFile = GetAIConfigFilePath()
-	config.Character = os.Getenv("CHARACTER")
+	config.Character = getStringEnv("CHARACTER", "default")
+	config.CharacterIdentityMode = normalizeCharacterIdentityMode(getStringEnv("CHARACTER_IDENTITY_MODE", "product_identity"))
+	config.AllowCharacterIdentityExplanation = getBoolEnv("ALLOW_CHARACTER_IDENTITY_EXPLANATION", false)
 	config.Token = os.Getenv("Token")
 
 	// 调度器配置
@@ -146,6 +154,7 @@ func init() {
 	config.LogToFile = getBoolEnv("LOG_TO_FILE", true)
 	config.LogFormat = getStringEnv("LOG_FORMAT", "text")
 	config.LogEnableColor = getBoolEnv("LOG_ENABLE_COLOR", true)
+	config.EnableAIRawLog = getBoolEnv("ENABLE_AI_RAW_LOG", false)
 	config.RequestIDHeader = getStringEnv("REQUEST_ID_HEADER", "X-Request-ID")
 	config.EnableHealthEndpoint = getBoolEnv("ENABLE_HEALTH_ENDPOINT", true)
 	config.EnableMetrics = getBoolEnv("ENABLE_METRICS", true)
@@ -169,13 +178,25 @@ func init() {
 	config.EnableImageAssetReply = getBoolEnv("ENABLE_IMAGE_ASSET_REPLY", true)
 	config.ImageAssetDir = getStringEnv("IMAGE_ASSET_DIR", "./assets/images")
 	config.ImageAssetIndexFile = getStringEnv("IMAGE_ASSET_INDEX_FILE", "./assets/images/index.json")
+	config.LightAckMode = normalizeLightAckMode(getStringEnv("LIGHT_ACK_MODE", "llm"))
+	config.ShortReplyStrictness = normalizeShortReplyStrictness(getStringEnv("SHORT_REPLY_STRICTNESS", "balanced"))
+	config.ContextRecentTurns = getIntEnv("CONTEXT_RECENT_TURNS", 8)
+	config.ContextSummaryMaxTurns = getIntEnv("CONTEXT_SUMMARY_MAX_TURNS", 24)
+	config.ContextOpenLoopLimit = getIntEnv("CONTEXT_OPEN_LOOP_LIMIT", 4)
+	config.EnableReactAgent = getBoolEnv("ENABLE_REACT_AGENT", false)
+	config.ReactMaxSteps = getIntEnv("REACT_MAX_STEPS", 4)
+	config.ReactToolTimeoutMs = getIntEnv("REACT_TOOL_TIMEOUT_MS", 3000)
+	config.ReactAllowWriteTools = getBoolEnv("REACT_ALLOW_WRITE_TOOLS", false)
+	config.ReactTraceMode = normalizeReactTraceMode(getStringEnv("REACT_TRACE_MODE", "basic"))
+	config.ReactTotalTimeoutMs = getIntEnv("REACT_TOTAL_TIMEOUT_MS", 30000)
 
-	cm, err := character.NewCharacterManager(getCharacterConfigDir(), config.Character)
+	characterManager, err := character.NewCharacterManager(getCharacterConfigDir(), config.Character)
 	if err != nil {
 		utils.Error("Failed to create character manager: %v", err)
 		os.Exit(1)
 	}
-	config.AiPrompt += cm.GetPrompt()
+	cm = characterManager
+	applyPromptSections(systemBasePrompt, config.UserPrompt)
 }
 
 func GetConfig() *Config {
@@ -246,4 +267,64 @@ func getIntArrayEnv(key string, defaultValue []int) []int {
 	}
 
 	return result
+}
+
+func normalizeLightAckMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "template":
+		return "template"
+	default:
+		return "llm"
+	}
+}
+
+func normalizeShortReplyStrictness(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "conservative":
+		return "conservative"
+	case "reply_first":
+		return "reply_first"
+	default:
+		return "balanced"
+	}
+}
+
+func normalizeReactTraceMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "off", "full":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "basic"
+	}
+}
+
+func normalizeCharacterIdentityMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "legacy":
+		return "legacy"
+	default:
+		return "product_identity"
+	}
+}
+
+func buildBasePrompt(enableSpaceSegmentDelimiter bool) string {
+	segmentInstruction := `1. 回复时使用 "$" 作为分段标记，每段内容应该简短自然，这个特别重要请务必要遵守`
+	replyFormatExample := "第一段内容$第二段内容$第三段内容"
+	if enableSpaceSegmentDelimiter {
+		segmentInstruction = `1. 回复时优先使用 "$" 作为分段标记；如果你更自然地输出空格分段，也可以用空格隔开各段`
+		replyFormatExample = "第一段内容$第二段内容$第三段内容 或 第一段内容 第二段内容 第三段内容"
+	}
+
+	return strings.TrimSpace(`
+	【技术指令】
+	0. 注意将无意义的乱码去掉
+	` + segmentInstruction + `
+	2. 每段长度控制在10-20字以内
+	3. 分段应该符合语义完整性
+	4. 避免在一个完整的句子中间分段
+	5. 不要使用表情
+
+	【回复格式示例】
+	` + replyFormatExample + `
+	`)
 }

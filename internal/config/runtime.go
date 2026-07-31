@@ -44,6 +44,7 @@ func ReloadRuntimeConfig() error {
 	config.LogToFile = getBoolEnv("LOG_TO_FILE", config.LogToFile)
 	config.LogFormat = getStringEnv("LOG_FORMAT", config.LogFormat)
 	config.LogEnableColor = getBoolEnv("LOG_ENABLE_COLOR", config.LogEnableColor)
+	config.EnableAIRawLog = getBoolEnv("ENABLE_AI_RAW_LOG", config.EnableAIRawLog)
 	config.RequestIDHeader = getStringEnv("REQUEST_ID_HEADER", config.RequestIDHeader)
 	config.EnableHealthEndpoint = getBoolEnv("ENABLE_HEALTH_ENDPOINT", config.EnableHealthEndpoint)
 	config.EnableMetrics = getBoolEnv("ENABLE_METRICS", config.EnableMetrics)
@@ -63,6 +64,20 @@ func ReloadRuntimeConfig() error {
 	config.EnableImageAssetReply = getBoolEnv("ENABLE_IMAGE_ASSET_REPLY", config.EnableImageAssetReply)
 	config.ImageAssetDir = getStringEnv("IMAGE_ASSET_DIR", config.ImageAssetDir)
 	config.ImageAssetIndexFile = getStringEnv("IMAGE_ASSET_INDEX_FILE", config.ImageAssetIndexFile)
+	config.EnableSpaceSegmentDelimiter = getBoolEnv("ENABLE_SPACE_SEGMENT_DELIMITER", config.EnableSpaceSegmentDelimiter)
+	config.LightAckMode = normalizeLightAckMode(getStringEnv("LIGHT_ACK_MODE", config.LightAckMode))
+	config.ShortReplyStrictness = normalizeShortReplyStrictness(getStringEnv("SHORT_REPLY_STRICTNESS", config.ShortReplyStrictness))
+	config.ContextRecentTurns = getIntEnv("CONTEXT_RECENT_TURNS", config.ContextRecentTurns)
+	config.ContextSummaryMaxTurns = getIntEnv("CONTEXT_SUMMARY_MAX_TURNS", config.ContextSummaryMaxTurns)
+	config.ContextOpenLoopLimit = getIntEnv("CONTEXT_OPEN_LOOP_LIMIT", config.ContextOpenLoopLimit)
+	config.EnableReactAgent = getBoolEnv("ENABLE_REACT_AGENT", config.EnableReactAgent)
+	config.ReactMaxSteps = getIntEnv("REACT_MAX_STEPS", config.ReactMaxSteps)
+	config.ReactToolTimeoutMs = getIntEnv("REACT_TOOL_TIMEOUT_MS", config.ReactToolTimeoutMs)
+	config.ReactAllowWriteTools = getBoolEnv("REACT_ALLOW_WRITE_TOOLS", config.ReactAllowWriteTools)
+	config.ReactTraceMode = normalizeReactTraceMode(getStringEnv("REACT_TRACE_MODE", config.ReactTraceMode))
+	config.ReactTotalTimeoutMs = getIntEnv("REACT_TOTAL_TIMEOUT_MS", config.ReactTotalTimeoutMs)
+	config.CharacterIdentityMode = normalizeCharacterIdentityMode(getStringEnv("CHARACTER_IDENTITY_MODE", config.CharacterIdentityMode))
+	config.AllowCharacterIdentityExplanation = getBoolEnv("ALLOW_CHARACTER_IDENTITY_EXPLANATION", config.AllowCharacterIdentityExplanation)
 
 	config.Character = getStringEnv("CHARACTER", "default")
 	config.Token = os.Getenv("Token")
@@ -72,7 +87,8 @@ func ReloadRuntimeConfig() error {
 		return fmt.Errorf("reload character config failed: %w", err)
 	}
 	cm = characterManager
-	config.AiPrompt = systemBasePrompt + os.Getenv("AI_PROMPT") + cm.GetPrompt()
+	systemBasePrompt = buildBasePrompt(config.EnableSpaceSegmentDelimiter)
+	applyPromptSections(systemBasePrompt, os.Getenv("AI_PROMPT"))
 
 	if err := utils.ConfigureDefaultLogger(
 		utils.ParseLogLevel(config.LogLevel),
@@ -82,6 +98,9 @@ func ReloadRuntimeConfig() error {
 		config.LogFormat,
 	); err != nil {
 		return fmt.Errorf("configure logger failed: %w", err)
+	}
+	if err := utils.ConfigureAIRawLogger(config.EnableAIRawLog, config.LogDir); err != nil {
+		return fmt.Errorf("configure ai raw logger failed: %w", err)
 	}
 
 	return nil

@@ -1,59 +1,119 @@
 # ReEscape Protocol
 
-一个基于 OneBot WebSocket 的聊天机器人系统，包含会话状态隔离、消息聚合、AI 分类回复、长期记忆、自然定时和 Web 管理后台。
+ReEscape Protocol 是一个基于 OneBot WebSocket 的聊天机器人运行时，目标是把“消息接入、上下文管理、角色提示词、ReAct 工具调用、长期记忆、自然调度和管理后台”拆成清晰边界。
+
+当前主链路已经从“固定分类器 + 回复函数”过渡到“Agent Runtime + Tool Registry”的结构：模型在需要时可以通过工具读取记忆、更新好感、查询会话状态、获取时间上下文或选择图片素材。
 
 ## 系统概览
 
-- `cmd/bot` 负责启动机器人主进程
-- `internal/inbound` 负责消息入站处理
-- `internal/handler` 负责回复决策
-- `internal/state` 负责按用户/会话维护状态和对话
-- `internal/memory` 负责情绪、画像和事实记忆
-- `internal/admin` 负责健康检查、指标、配置和日志管理
-- `web/` 提供管理后台前端
+- `cmd/bot`：程序入口，只负责启动主进程。
+- `internal/app`：应用装配层，负责连接配置、存储、入站管线、Agent、调度器和管理后台。
+- `internal/connect`：OneBot WebSocket/API 连接和消息发送。
+- `internal/inbound`：入站消息管线，负责聚合、去重、过滤和标准化。
+- `internal/agent`：ReAct Agent Runtime，负责系统提示词、上下文、工具循环、预算、trace 和结果归一。
+- `internal/tools`：工具注册、执行、schema 和策略；当前包含记忆、好感、图片素材、会话状态和时间工具。
+- `internal/domain`：业务领域逻辑，例如好感系统。
+- `internal/state`：按用户/会话维护状态、对话历史和上下文层。
+- `internal/memory`：长期画像、事实记忆和情绪记忆。
+- `internal/service`：共享服务与遗留回复逻辑；部分旧分类和回复辅助逻辑仍在这里，后续应继续收敛到 Agent/Tools/Domain 边界。
+- `internal/config`：环境变量、AI profiles、Character Card 和 prompt section 组合。
+- `internal/admin`：管理后台 API、健康检查、指标、配置和日志接口。
+- `web/`：管理后台前端。
 
 ## 主要能力
 
-- 预设回复和长对话
-- 情绪、意图、结束意图的结构化分类
-- 消息聚合：把连续碎片消息合并成一次上下文
-- 按用户/会话隔离状态和对话历史
-- 情绪记忆、长期偏好和事实记忆
-- 自然定时发送
-- 结构化日志、健康检查、就绪检查、Prometheus 指标
-- 角色配置和在线管理后台
+- OneBot WebSocket 收发消息。
+- 连续碎片消息聚合。
+- 按用户/会话隔离上下文和状态。
+- ReAct 工具调用，可按需读取或写入业务状态。
+- 长期记忆：用户画像、事实记忆、情绪状态。
+- 好感系统：领域逻辑在 `internal/domain/affection`，工具入口在 `internal/tools/affection`。
+- 图片素材回复：素材索引在 `assets/images/index.json`。
+- Character Card：角色身份、语气、边界和示例回复来自 `config/character/*.json`。
+- AI profile：模型、base URL、key、temperature、token、timeout 等模型参数来自 `config/ai_profiles.json`。
+- 自然定时发送。
+- Web 管理后台、结构化日志、健康检查、就绪检查和 Prometheus 指标。
 
-## 配置分类
+## 配置边界
+
+项目现在有三类配置源，建议按下面的职责使用：
+
+- `.env`：运行环境和选择器。用于连接 OneBot、选择当前 AI profile、选择当前 Character Card、功能开关、日志和数据目录。
+- `config/ai_profiles.json`：AI 模型主配置。该文件通常由 `config/ai_profiles.example.json` 复制生成，并被 `.gitignore` 忽略。
+- `config/character/*.json`：Character Card。`CHARACTER=default` 会加载 `config/character/default.json`。
+
+AI 参数的优先级：
+
+1. `AI_CONFIG_FILE` 决定读取哪个 profile 文件，默认是 `./config/ai_profiles.json`。
+2. `AI_PROFILE` 决定使用 profile 文件里的哪个 profile。
+3. active profile 中的 `aiBaseUrl`、`aiModel`、`aiKey`、`aiTemperature` 等字段会写入运行时配置。
+4. `.env` 中的 `AI_KEY`、`AI_BASEURL`、`AI_MODEL`、`AI_TEMPERATURE` 等仍然有效，但主要作为首次生成 profile 或 profile 缺失时的兜底值。
+
+因此，日常修改模型配置时优先改 `config/ai_profiles.json` 或通过管理后台修改；`.env` 主要保留连接、选择器和功能开关。
+
+## 常用配置项
 
 - 连接：`HOSTADD`、`WsPort`、`HttpPort`、`Token`、`TARGETID`
-- AI：`AI_PROFILE`、`AI_KEY`、`AI_BASEURL`、`AI_MODEL`、`AI_PROMPT`
-- 行为：`ENABLE_EMOTIONAL_MEMORY`、`ENABLE_NATURAL_SCHEDULER`、`ENABLE_ONLY_LONG_CHAT`
+- AI profile：`AI_PROFILE`、`AI_CONFIG_FILE`
+- AI fallback：`AI_KEY`、`AI_BASEURL`、`AI_MODEL`
+- 角色：`CHARACTER`、`CHARACTER_IDENTITY_MODE`、`ALLOW_CHARACTER_IDENTITY_EXPLANATION`
+- ReAct：`ENABLE_REACT_AGENT`、`REACT_MAX_STEPS`、`REACT_TOOL_TIMEOUT_MS`、`REACT_ALLOW_WRITE_TOOLS`、`REACT_TRACE_MODE`
+- 回复策略：`LIGHT_ACK_MODE`、`SHORT_REPLY_STRICTNESS`、`ENABLE_SPACE_SEGMENT_DELIMITER`
 - 聚合：`MESSAGE_AGGREGATE_IDLE_WINDOW_MS`、`MESSAGE_AGGREGATE_MAX_WINDOW_MS`、`MESSAGE_AGGREGATE_MAX_MESSAGES`
+- 上下文：`CONTEXT_RECENT_TURNS`、`CONTEXT_SUMMARY_MAX_TURNS`、`CONTEXT_OPEN_LOOP_LIMIT`
+- 图片：`ENABLE_VISION_INPUT`、`ENABLE_IMAGE_ASSET_REPLY`、`IMAGE_ASSET_DIR`、`IMAGE_ASSET_INDEX_FILE`
 - 运行：`DATA_DIR`、`LOG_DIR`、`LOG_LEVEL`、`LOG_FORMAT`
+- 调试：`ENABLE_AI_RAW_LOG` 会把 AI 原始请求/响应写入 `LOG_DIR/ai_raw_YYYY-MM-DD.log`
 
-## 入站链路
+其中与对话回复风格直接相关的几个开关如下：
 
-`raw message -> aggregate -> dedupe -> filter -> normalize -> dispatch`
+- `LIGHT_ACK_MODE`
+  - `llm`：轻回应由模型直接生成。
+  - `template`：轻回应走本地模板库。
+- `SHORT_REPLY_STRICTNESS`
+  - `conservative`：更容易 `no_reply / light_ack`。
+  - `balanced`：折中，默认值。
+  - `reply_first`：更倾向 `full_reply`。
+- `ENABLE_SPACE_SEGMENT_DELIMITER`
+  - 默认 `false`。
+  - 关闭时仅把 `$` 识别为回复分段符。
+  - 开启时仍优先 `$`，但如果模型使用空格分段，发送链路也会按空格拆段。
 
-## 目录结构
+## 对话链路
 
-- `cmd/bot`：程序入口
-- `internal/config`：环境变量和运行时配置
-- `internal/inbound`：入站处理链路
-- `internal/handler`：消息回复逻辑
-- `internal/memory`：情绪/画像/事实记忆
-- `internal/state`：会话状态与对话历史
-- `internal/admin`：管理后台 HTTP 服务
-- `web`：管理后台前端
+```text
+OneBot event
+  -> internal/app receiver
+  -> internal/inbound aggregate/dedupe/filter/normalize
+  -> internal/app turn processor
+  -> state + memory + prompt sections
+  -> internal/agent ReAct runtime
+  -> internal/tools registry/executor
+  -> connect outbound send
+```
+
+当 `ENABLE_REACT_AGENT=false` 时，系统仍可走旧的 handler/service 回复路径。该路径主要用于兼容和回退，新的能力应优先落在 `internal/agent`、`internal/tools` 或 `internal/domain`。
+
+## 上下文记忆
+
+会话完整 transcript 保存在 `Session.Conversation`，作为持久化和调试的事实来源，不在每次 AI 调用时完整塞入 prompt。
+
+AI 调用会使用分层、有界的上下文：
+
+- 最近上下文按 user turn 裁剪，而不是按原始消息条数裁剪。
+- 较早对话压缩为 deterministic rolling summary。
+- 未闭合问题、待跟进承诺、用户画像、事实记忆和情绪状态会单独注入 prompt。
+- ReAct 模式下，模型也可以通过工具主动读取或更新相关状态。
+- `CONTEXT_RECENT_TURNS`、`CONTEXT_SUMMARY_MAX_TURNS`、`CONTEXT_OPEN_LOOP_LIMIT` 控制 prompt 体积。
 
 ## 快速开始
 
-见 [QUICKSTART.md](./QUICKSTART.md)
+见 [QUICKSTART.md](./QUICKSTART.md)。
 
 ## 帮助
 
-见 [HELP.md](./HELP.md)
+见 [HELP.md](./HELP.md)。
 
 ## Web 管理后台
 
-前端说明见 [web/README.md](./web/README.md)
+前端说明见 [web/README.md](./web/README.md)。

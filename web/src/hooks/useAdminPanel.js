@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { adminApi } from "../api/adminApi";
 
 const defaultConfig = {
+  targetId: 0,
   aiBaseUrl: "",
   aiModel: "",
   aiProfile: "default",
@@ -14,6 +15,8 @@ const defaultConfig = {
   aiRateLimit: 20,
   aiTopP: 0.9,
   aiPromptRaw: "",
+  characterIdentityMode: "product_identity",
+  allowCharacterIdentityExplanation: false,
   enableTimeContext: true,
   timeContextTimezone: "Asia/Shanghai",
   timeContextFormat: "2006-01-02 15:04:05",
@@ -29,12 +32,49 @@ const defaultConfig = {
   aiKeySet: false,
   characterOptions: [],
   effectivePrompt: "",
+  promptPreview: {
+    basePrompt: "",
+    userPrompt: "",
+    characterPrompt: "",
+    agentPrompt: "",
+    effectivePrompt: ""
+  },
+  enableReactAgent: false,
+  reactMaxSteps: 4,
+  reactToolTimeoutMs: 3000,
+  reactAllowWriteTools: false,
+  reactTraceMode: "basic",
+  reactTotalTimeoutMs: 30000,
   environmentConfig: ".env"
 };
 
 const defaultCharacterConfig = {
   name: "",
   description: "",
+  identity: {
+    roleName: "",
+    productIdentity: "",
+    selfReference: "",
+    identityPolicy: ""
+  },
+  voice: {
+    tone: "",
+    style: "",
+    pacing: "",
+    vocabulary: [],
+    avoid: []
+  },
+  boundaries: {
+    doNotReveal: [],
+    safetyBoundaries: [],
+    relationshipRules: []
+  },
+  relationship: {
+    defaultStage: "",
+    addressing: "",
+    intimacyRule: ""
+  },
+  examples: [],
   personality: {},
   responses: {},
   behavior: {},
@@ -61,10 +101,14 @@ export function useAdminPanel() {
 
   const [logFiles, setLogFiles] = useState([]);
   const [imageAssets, setImageAssets] = useState([]);
+  const [toolDefinitions, setToolDefinitions] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [affectionState, setAffectionState] = useState(null);
   const [selectedLogFile, setSelectedLogFile] = useState("");
   const [logLines, setLogLines] = useState(200);
   const [logContent, setLogContent] = useState("");
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [loadingDiagnostics, setLoadingDiagnostics] = useState(false);
 
   const [characterFile, setCharacterFile] = useState("");
   const [characterConfig, setCharacterConfig] = useState(defaultCharacterConfig);
@@ -82,7 +126,12 @@ export function useAdminPanel() {
     setError("");
     try {
       const data = await adminApi.getConfig();
-      setConfig((prev) => ({ ...prev, ...data, aiKey: "" }));
+      setConfig((prev) => ({
+        ...prev,
+        ...data,
+        promptPreview: { ...defaultConfig.promptPreview, ...(data.promptPreview || {}) },
+        aiKey: ""
+      }));
     } catch (err) {
       setError(getErrMsg(err));
     } finally {
@@ -234,6 +283,40 @@ export function useAdminPanel() {
     }
   }, []);
 
+  const loadDiagnostics = useCallback(
+    async (targetId = config.targetId) => {
+      const userID = Number(targetId || 0);
+      setLoadingDiagnostics(true);
+      try {
+        const [toolsResult, eventsResult, affectionResult] = await Promise.allSettled([
+          adminApi.getTools(),
+          adminApi.getEvents(80),
+          userID > 0 ? adminApi.getAffection(userID) : Promise.resolve({ state: null })
+        ]);
+
+        if (toolsResult.status === "fulfilled") {
+          setToolDefinitions(toolsResult.value.tools || []);
+        }
+        if (eventsResult.status === "fulfilled") {
+          setEvents(eventsResult.value.events || []);
+        }
+        if (affectionResult.status === "fulfilled") {
+          setAffectionState(affectionResult.value.state || null);
+        }
+
+        const failed = [toolsResult, eventsResult, affectionResult].find(
+          (result) => result.status === "rejected"
+        );
+        if (failed) {
+          setError(getErrMsg(failed.reason));
+        }
+      } finally {
+        setLoadingDiagnostics(false);
+      }
+    },
+    [config.targetId]
+  );
+
   const loadCharacterConfig = useCallback(async (name) => {
     const target = String(name || "").trim();
     if (!target) {
@@ -320,16 +403,25 @@ export function useAdminPanel() {
     void loadConfig();
     void loadLogFiles();
     void loadImageAssets();
+    void loadDiagnostics();
     void loadSystemStatus();
-  }, [loadConfig, loadImageAssets, loadLogFiles, loadSystemStatus]);
+  }, [loadConfig, loadDiagnostics, loadImageAssets, loadLogFiles, loadSystemStatus]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
       void loadSystemStatus();
+      void loadDiagnostics();
     }, 30000);
 
     return () => window.clearInterval(timer);
-  }, [loadSystemStatus]);
+  }, [loadDiagnostics, loadSystemStatus]);
+
+  useEffect(() => {
+    if (!config.targetId) {
+      return;
+    }
+    void loadDiagnostics(config.targetId);
+  }, [config.targetId, loadDiagnostics]);
 
   useEffect(() => {
     if (!config.character) {
@@ -343,11 +435,26 @@ export function useAdminPanel() {
       profileCount: config.aiProfiles.length,
       characterCount: config.characterOptions.length,
       imageAssetCount: imageAssets.length,
+      toolCount: toolDefinitions.length,
+      eventCount: events.length,
+      affectionScore: affectionState?.score ?? null,
+      affectionStage: affectionState?.stage || "",
       logCount: logFiles.length,
       healthState: health.status,
       readyState: ready.status
     }),
-    [config.aiProfiles.length, config.characterOptions.length, health.status, imageAssets.length, logFiles.length, ready.status]
+    [
+      affectionState?.score,
+      affectionState?.stage,
+      config.aiProfiles.length,
+      config.characterOptions.length,
+      events.length,
+      health.status,
+      imageAssets.length,
+      logFiles.length,
+      ready.status,
+      toolDefinitions.length
+    ]
   );
 
   return {
@@ -379,6 +486,11 @@ export function useAdminPanel() {
     loadLogContent,
     imageAssets,
     loadImageAssets,
+    toolDefinitions,
+    events,
+    affectionState,
+    loadingDiagnostics,
+    loadDiagnostics,
     characterFile,
     characterConfig,
     setCharacterConfig,
@@ -396,6 +508,30 @@ function normalizeCharacterConfig(raw) {
   return {
     name: config.name || "",
     description: config.description || "",
+    identity: {
+      roleName: config.identity?.roleName || config.name || "",
+      productIdentity: config.identity?.productIdentity || "",
+      selfReference: config.identity?.selfReference || "",
+      identityPolicy: config.identity?.identityPolicy || ""
+    },
+    voice: {
+      tone: config.voice?.tone || "",
+      style: config.voice?.style || "",
+      pacing: config.voice?.pacing || "",
+      vocabulary: Array.isArray(config.voice?.vocabulary) ? config.voice.vocabulary : [],
+      avoid: Array.isArray(config.voice?.avoid) ? config.voice.avoid : []
+    },
+    boundaries: {
+      doNotReveal: Array.isArray(config.boundaries?.doNotReveal) ? config.boundaries.doNotReveal : [],
+      safetyBoundaries: Array.isArray(config.boundaries?.safetyBoundaries) ? config.boundaries.safetyBoundaries : [],
+      relationshipRules: Array.isArray(config.boundaries?.relationshipRules) ? config.boundaries.relationshipRules : []
+    },
+    relationship: {
+      defaultStage: config.relationship?.defaultStage || "",
+      addressing: config.relationship?.addressing || "",
+      intimacyRule: config.relationship?.intimacyRule || ""
+    },
+    examples: Array.isArray(config.examples) ? config.examples : [],
     personality: config.personality && typeof config.personality === "object" ? config.personality : {},
     responses: config.responses && typeof config.responses === "object" ? config.responses : {},
     behavior: config.behavior && typeof config.behavior === "object" ? config.behavior : {},
@@ -415,6 +551,8 @@ function buildConfigPayload(config) {
     aiRateLimit: Number(config.aiRateLimit),
     aiTopP: Number(config.aiTopP),
     aiPromptRaw: config.aiPromptRaw,
+    characterIdentityMode: String(config.characterIdentityMode || "product_identity").trim(),
+    allowCharacterIdentityExplanation: Boolean(config.allowCharacterIdentityExplanation),
     enableTimeContext: Boolean(config.enableTimeContext),
     timeContextTimezone: String(config.timeContextTimezone || "").trim(),
     timeContextFormat: String(config.timeContextFormat || "").trim(),
@@ -425,7 +563,13 @@ function buildConfigPayload(config) {
     imageAssetDir: String(config.imageAssetDir || "").trim(),
     imageAssetIndexFile: String(config.imageAssetIndexFile || "").trim(),
     character: config.character,
-    aiKey: config.aiKey
+    aiKey: config.aiKey,
+    enableReactAgent: Boolean(config.enableReactAgent),
+    reactMaxSteps: Number(config.reactMaxSteps),
+    reactToolTimeoutMs: Number(config.reactToolTimeoutMs),
+    reactAllowWriteTools: Boolean(config.reactAllowWriteTools),
+    reactTraceMode: String(config.reactTraceMode || "basic").trim(),
+    reactTotalTimeoutMs: Number(config.reactTotalTimeoutMs)
   };
 }
 

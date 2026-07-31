@@ -189,39 +189,6 @@ func (mm *MemoryManager) GetConversationPattern(userID int64) string {
 	}
 }
 
-// SuggestResponse 基于记忆建议回复
-func (mm *MemoryManager) SuggestResponse(userID int64, currentMsg, emotion string) string {
-	pattern := mm.GetConversationPattern(userID)
-	recentEmotions := mm.GetRecentEmotions(userID, 5)
-
-	// 基于历史情感和当前情感建议回复
-	switch pattern {
-	case "需要关怀":
-		if emotion == "难过" {
-			return "我一直都在这里陪着你"
-		}
-		return "看起来你心情好一些了"
-
-	case "积极活跃":
-		if emotion == "开心" {
-			return "哈哈，你的好心情也感染到我了"
-		}
-		return "怎么了，遇到什么事了吗"
-
-	case "情绪波动":
-		return "我们慢慢聊，不着急"
-
-	default:
-		// 检查是否有情感变化趋势
-		if len(recentEmotions) >= 2 {
-			if recentEmotions[len(recentEmotions)-1] != recentEmotions[len(recentEmotions)-2] {
-				return "感觉你的心情有些变化"
-			}
-		}
-		return ""
-	}
-}
-
 func (mm *MemoryManager) generateContext(memory *EmotionalMemory) string {
 	if len(memory.Interactions) == 0 {
 		return "初次对话"

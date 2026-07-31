@@ -36,6 +36,19 @@ export const adminApi = {
   getImageAssets() {
     return fetchJSON("/api/admin/image-assets");
   },
+  getTools() {
+    return fetchJSON("/api/admin/tools", { cache: "no-store" });
+  },
+  getEvents(limit = 80) {
+    return fetchJSON(`/api/admin/events?limit=${encodeURIComponent(limit)}`, {
+      cache: "no-store"
+    });
+  },
+  getAffection(userID) {
+    return fetchJSON(`/api/admin/affection/${encodeURIComponent(userID)}`, {
+      cache: "no-store"
+    });
+  },
   getCharacters() {
     return fetchJSON("/api/admin/characters");
   },

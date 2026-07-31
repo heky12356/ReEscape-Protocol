@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"strings"
 
+	"project-yume/internal/config"
 	"project-yume/internal/memory"
 	"project-yume/internal/state"
 )
 
 type PromptMemory struct {
-	ShortTermSummary string
-	ActiveTopics     []string
+	ContextLayers    state.ConversationContextLayers
 	Profile          memory.UserProfile
 	Facts            []memory.FactMemory
 	EmotionalPattern string
@@ -20,10 +20,16 @@ type PromptMemory struct {
 func BuildPromptMemory(userID int64, sessionID, currentMessage string) PromptMemory {
 	stateManager := state.GetManager()
 	emotionalManager := memory.GetManager()
+	cfg := config.GetConfig()
+	layers := stateManager.BuildConversationContextLayers(
+		sessionID,
+		cfg.ContextRecentTurns,
+		cfg.ContextSummaryMaxTurns,
+		cfg.ContextOpenLoopLimit,
+	)
 
 	return PromptMemory{
-		ShortTermSummary: stateManager.GetConversationSummary(sessionID),
-		ActiveTopics:     stateManager.GetActiveTopics(sessionID),
+		ContextLayers:    normalizePromptContextLayers(layers, currentMessage),
 		Profile:          memory.GetProfileManager().GetProfile(userID),
 		Facts:            memory.GetFactManager().FindRelevantFacts(userID, currentMessage, 4),
 		EmotionalPattern: emotionalManager.GetConversationPattern(userID),
@@ -54,12 +60,15 @@ func FormatPromptMemory(promptMemory PromptMemory) string {
 }
 
 func formatShortTermMemory(promptMemory PromptMemory) string {
-	lines := make([]string, 0, 2)
-	if promptMemory.ShortTermSummary != "" {
-		lines = append(lines, "最近对话摘要："+promptMemory.ShortTermSummary)
+	lines := make([]string, 0, 3)
+	if recent := formatRecentTurns(promptMemory.ContextLayers.RecentTurns); recent != "" {
+		lines = append(lines, "最近回合：\n"+recent)
 	}
-	if len(promptMemory.ActiveTopics) > 0 {
-		lines = append(lines, "当前活跃话题："+strings.Join(promptMemory.ActiveTopics, "、"))
+	if summary := strings.TrimSpace(promptMemory.ContextLayers.RollingSummary); summary != "" {
+		lines = append(lines, "滚动摘要："+summary)
+	}
+	if loops := formatOpenLoops(promptMemory.ContextLayers.OpenLoops); loops != "" {
+		lines = append(lines, "未闭合事项：\n"+loops)
 	}
 	if len(lines) == 0 {
 		return ""
@@ -104,4 +113,76 @@ func formatFactMemory(facts []memory.FactMemory) string {
 	}
 
 	return "【事实记忆】\n" + strings.Join(lines, "\n")
+}
+
+func normalizePromptContextLayers(layers state.ConversationContextLayers, currentMessage string) state.ConversationContextLayers {
+	normalizedCurrent := normalizePromptText(currentMessage)
+	if normalizedCurrent == "" || len(layers.RecentTurns) == 0 {
+		return layers
+	}
+
+	last := layers.RecentTurns[len(layers.RecentTurns)-1]
+	if last.Assistant == "" && normalizePromptText(last.User) == normalizedCurrent {
+		layers.RecentTurns = append([]state.ConversationTurn(nil), layers.RecentTurns[:len(layers.RecentTurns)-1]...)
+	}
+
+	return layers
+}
+
+func formatRecentTurns(turns []state.ConversationTurn) string {
+	if len(turns) == 0 {
+		return ""
+	}
+
+	lines := make([]string, 0, len(turns)*2)
+	for _, turn := range turns {
+		if text := strings.TrimSpace(turn.User); text != "" {
+			lines = append(lines, "user: "+text)
+		}
+		if text := strings.TrimSpace(turn.Assistant); text != "" {
+			lines = append(lines, "assistant: "+text)
+		}
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func formatOpenLoops(loops []state.OpenLoop) string {
+	if len(loops) == 0 {
+		return ""
+	}
+
+	lines := make([]string, 0, len(loops))
+	for _, loop := range loops {
+		description := strings.TrimSpace(loop.Description)
+		if description == "" {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("- [%s] %s", mapOpenLoopKind(loop.Kind), description))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func mapOpenLoopKind(kind string) string {
+	switch strings.TrimSpace(kind) {
+	case "unanswered_question":
+		return "待回答问题"
+	case "unresolved_problem":
+		return "待解决问题"
+	case "assistant_follow_up":
+		return "待跟进承诺"
+	case "pending_user_thread":
+		return "待继续话题"
+	default:
+		return "未闭合事项"
+	}
+}
+
+func normalizePromptText(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	return strings.Join(strings.Fields(value), " ")
 }

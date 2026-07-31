@@ -5,70 +5,25 @@ import (
 	"time"
 
 	"project-yume/internal/config"
-	"project-yume/internal/service"
-	"project-yume/internal/state"
-	"project-yume/internal/utils"
-
-	"github.com/gorilla/websocket"
 )
 
 const defaultSchedulerSweepInterval = 15 * time.Second
 
-// NaturalScheduler 自然定时器
+// NaturalScheduler owns proactive timing only. Message selection lives in legacy scheduler fallback.
 type NaturalScheduler struct {
 	baseInterval time.Duration
 	randomFactor float64
-	activeHours  []int // 活跃时间段
-	sleepHours   []int // 休息时间段
-	messagePool  *MessagePool
-}
-
-// MessagePool 消息池
-type MessagePool struct {
-	casual    []string       // 日常消息
-	emotional []string       // 情感消息
-	question  []string       // 问候消息
-	weights   map[string]int // 消息类型权重
+	activeHours  []int
+	sleepHours   []int
 }
 
 func NewNaturalScheduler() *NaturalScheduler {
-	ns := &NaturalScheduler{
-		messagePool: newMessagePool(),
-	}
+	ns := &NaturalScheduler{}
 	ns.reloadConfig()
 	return ns
 }
 
-func newMessagePool() *MessagePool {
-	return &MessagePool{
-		casual: []string{
-			"在干嘛呢",
-			"最近怎么样",
-			"今天过得好吗",
-			"有什么新鲜事吗",
-			"忙什么呢",
-		},
-		emotional: []string{
-			"想你了",
-			"有点想聊天",
-			"感觉有点无聊",
-			"今天心情不错",
-		},
-		question: []string{
-			"在吗",
-			"睡了吗",
-			"吃饭了吗",
-			"休息了吗",
-		},
-		weights: map[string]int{
-			"casual":    60, // 60%概率发日常消息
-			"emotional": 25, // 25%概率发情感消息
-			"question":  15, // 15%概率发问候消息
-		},
-	}
-}
-
-// GetNextInterval 计算下一次发送间隔
+// GetNextInterval calculates the next proactive trigger interval.
 func (ns *NaturalScheduler) GetNextInterval() time.Duration {
 	ns.reloadConfig()
 
@@ -79,23 +34,17 @@ func (ns *NaturalScheduler) GetNextInterval() time.Duration {
 		baseMinutes = 45
 	}
 
-	// 基础间隔调整
 	var interval time.Duration
 	if ns.isActiveHour(hour) {
-		// 默认 45 分钟时约为 30-60 分钟。
 		interval = randomDurationInMinutes(maxInt(5, (baseMinutes*2)/3), maxInt(5, (baseMinutes*4)/3))
 	} else if ns.isSleepHour(hour) {
-		// 默认 45 分钟时约为 2-4.5 小时。
 		interval = randomDurationInMinutes(maxInt(120, baseMinutes*3), maxInt(120, baseMinutes*6))
 	} else {
 		interval = randomDurationInMinutes(maxInt(5, baseMinutes), maxInt(5, baseMinutes*2))
 	}
 
-	// 添加随机因子
 	randomOffset := time.Duration(float64(interval) * ns.randomFactor * (rand.Float64() - 0.5))
-	interval += randomOffset
-
-	return interval
+	return interval + randomOffset
 }
 
 func (ns *NaturalScheduler) reloadConfig() {
@@ -126,100 +75,6 @@ func (ns *NaturalScheduler) reloadConfig() {
 	}
 }
 
-func randomDurationInMinutes(minMinutes, maxMinutes int) time.Duration {
-	if minMinutes <= 0 {
-		minMinutes = 1
-	}
-	if maxMinutes < minMinutes {
-		maxMinutes = minMinutes
-	}
-	if maxMinutes == minMinutes {
-		return time.Duration(minMinutes) * time.Minute
-	}
-	return time.Duration(minMinutes+rand.Intn(maxMinutes-minMinutes+1)) * time.Minute
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-// SelectMessage 智能选择消息
-func (ns *NaturalScheduler) SelectMessage(sessionID string) string {
-	now := time.Now()
-	hour := now.Hour()
-
-	// 根据时间调整消息类型权重
-	weights := make(map[string]int)
-	for k, v := range ns.messagePool.weights {
-		weights[k] = v
-	}
-
-	// 晚上增加情感消息权重
-	if hour >= 20 || hour <= 2 {
-		weights["emotional"] += 20
-		weights["casual"] -= 10
-	}
-
-	// 早上增加问候消息权重
-	if hour >= 7 && hour <= 10 {
-		weights["question"] += 15
-		weights["casual"] -= 10
-	}
-
-	// 根据最近互动时间调整
-	timeSinceLastInteraction := state.GetManager().GetTimeSinceLastInteraction(sessionID)
-	if timeSinceLastInteraction > 2*time.Hour {
-		weights["question"] += 10 // 长时间未联系，增加问候
-	}
-
-	// 加权随机选择
-	messageType := ns.weightedRandomSelect(weights)
-	return ns.selectFromPool(messageType)
-}
-
-func (ns *NaturalScheduler) weightedRandomSelect(weights map[string]int) string {
-	total := 0
-	for _, weight := range weights {
-		total += weight
-	}
-
-	r := rand.Intn(total)
-	current := 0
-
-	for msgType, weight := range weights {
-		current += weight
-		if r < current {
-			return msgType
-		}
-	}
-
-	return "casual" // 默认返回日常消息
-}
-
-func (ns *NaturalScheduler) selectFromPool(messageType string) string {
-	var pool []string
-
-	switch messageType {
-	case "casual":
-		pool = ns.messagePool.casual
-	case "emotional":
-		pool = ns.messagePool.emotional
-	case "question":
-		pool = ns.messagePool.question
-	default:
-		pool = ns.messagePool.casual
-	}
-
-	if len(pool) == 0 {
-		return "在干嘛"
-	}
-
-	return pool[rand.Intn(len(pool))]
-}
-
 func (ns *NaturalScheduler) isActiveHour(hour int) bool {
 	for _, h := range ns.activeHours {
 		if h == hour {
@@ -238,73 +93,22 @@ func (ns *NaturalScheduler) isSleepHour(hour int) bool {
 	return false
 }
 
-func (ns *NaturalScheduler) RescheduleFrom(sessionID string, baseTime time.Time) time.Time {
-	if baseTime.IsZero() {
-		baseTime = time.Now()
+func randomDurationInMinutes(minMinutes, maxMinutes int) time.Duration {
+	if minMinutes <= 0 {
+		minMinutes = 1
 	}
-	next := baseTime.Add(ns.GetNextIntervalForSession(sessionID))
-	state.GetManager().SetNextScheduledAt(sessionID, next)
-	return next
+	if maxMinutes < minMinutes {
+		maxMinutes = minMinutes
+	}
+	if maxMinutes == minMinutes {
+		return time.Duration(minMinutes) * time.Minute
+	}
+	return time.Duration(minMinutes+rand.Intn(maxMinutes-minMinutes+1)) * time.Minute
 }
 
-func (ns *NaturalScheduler) EnsureScheduled(sessionID string, now time.Time) time.Time {
-	next := state.GetManager().GetNextScheduledAt(sessionID)
-	if !next.IsZero() {
-		return next
+func maxInt(a, b int) int {
+	if a > b {
+		return a
 	}
-
-	baseTime := state.GetManager().GetLastInteractionAt(sessionID)
-	if baseTime.IsZero() {
-		baseTime = now
-	}
-	return ns.RescheduleFrom(sessionID, baseTime)
-}
-
-func (ns *NaturalScheduler) GetNextIntervalForSession(sessionID string) time.Duration {
-	sm := state.GetManager()
-	interval := ns.GetNextInterval()
-
-	switch sm.GetState(sessionID) {
-	case state.StateLongChat:
-		return time.Duration(float64(interval) * 1.6)
-	case state.StateBusy:
-		return time.Duration(float64(interval) * 1.3)
-	default:
-		return interval
-	}
-}
-
-// SendScheduledMessage 发送定时消息
-func (ns *NaturalScheduler) SendScheduledMessage(c *websocket.Conn, sessionID string, targetUserID int64) error {
-	state.GetManager().EnsureSession(sessionID, targetUserID, 0, 1)
-	if shouldSend, nextAt := ns.ShouldSendNow(sessionID, time.Now()); !shouldSend {
-		utils.Info("主动消息发送前检查未到时间, next=%s", nextAt.Format(time.RFC3339))
-		return nil
-	}
-	message := ns.SelectMessage(sessionID)
-
-	// 根据消息类型设置状态
-	if message == "想你了" || message == "有点想聊天" {
-		state.GetManager().SetState(sessionID, state.StateNeedComfort)
-	}
-
-	if err := service.SendMsg(c, targetUserID, message); err != nil {
-		return err
-	}
-
-	sentAt := time.Now()
-	state.GetManager().RecordAssistantTurn(sessionID, service.BuildAssistantTranscript(message), sentAt, true)
-	state.GetManager().UpdateLastReplyMode(sessionID, "proactive")
-	next := ns.RescheduleFrom(sessionID, sentAt)
-	utils.Info("主动消息已发送，下一次主动触达时间: %s", next.Format(time.RFC3339))
-	return nil
-}
-
-func (ns *NaturalScheduler) ShouldSendNow(sessionID string, now time.Time) (bool, time.Time) {
-	next := ns.EnsureScheduled(sessionID, now)
-	return !now.Before(next), next
-}
-
-func (ns *NaturalScheduler) SweepInterval() time.Duration {
-	return defaultSchedulerSweepInterval
+	return b
 }

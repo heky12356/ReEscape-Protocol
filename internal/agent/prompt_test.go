@@ -73,3 +73,32 @@ func TestBuildSystemPromptDoesNotSuggestMemoryWritesWithoutWriteTools(t *testing
 		t.Fatalf("expected write-tool unavailable guidance, got %q", prompt)
 	}
 }
+
+func TestBuildSystemPromptDoesNotContainRuntimeContext(t *testing.T) {
+	prompt := BuildSystemPrompt([]string{"get_memory_context", "get_state"})
+
+	forbidden := []string{
+		"【Runtime Context】",
+		"【Temporal Context】",
+		"当前本地时间",
+		"当前用户消息发送于",
+		"距离上次用户消息",
+		"本轮由",
+	}
+	for _, item := range forbidden {
+		if strings.Contains(prompt, item) {
+			t.Fatalf("did not expect system prompt to contain runtime context item %q: %q", item, prompt)
+		}
+	}
+}
+
+func TestBuildSystemPromptStableForSameToolSet(t *testing.T) {
+	toolNames := []string{"get_memory_context", "get_state", "web_search"}
+
+	first := BuildSystemPrompt(toolNames)
+	second := BuildSystemPrompt(toolNames)
+
+	if first != second {
+		t.Fatalf("expected system prompt to be stable for same tool set")
+	}
+}

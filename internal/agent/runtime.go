@@ -122,10 +122,10 @@ func (r *Runtime) buildMessages(turn *TurnContext) []openai.ChatCompletionMessag
 		Role:    openai.ChatMessageRoleSystem,
 		Content: BuildSystemPrompt(toolNames),
 	})
-	if temporalContext := buildTemporalContext(turn); temporalContext != "" {
+	if runtimeContext := buildRuntimeContext(turn); runtimeContext != "" {
 		messages = append(messages, openai.ChatCompletionMessage{
-			Role:    openai.ChatMessageRoleSystem,
-			Content: temporalContext,
+			Role:    openai.ChatMessageRoleUser,
+			Content: runtimeContext,
 		})
 	}
 	messages = append(messages, conversation...)

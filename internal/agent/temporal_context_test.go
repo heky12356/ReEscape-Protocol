@@ -50,7 +50,53 @@ func TestBuildTemporalContextCanBeDisabled(t *testing.T) {
 	}
 }
 
-func TestRuntimeBuildMessagesInjectsTemporalContextBeforeConversation(t *testing.T) {
+func TestBuildRuntimeContextWrapsTemporalContext(t *testing.T) {
+	restoreTemporalConfig(t, true, "Asia/Shanghai", "2006-01-02 15:04:05")
+
+	turn := NewTurnContext(TurnInput{
+		Message:       "这是真实用户消息，不应复制到 runtime context",
+		ReferenceTime: time.Date(2026, 8, 1, 6, 30, 12, 0, time.UTC),
+	})
+
+	context := buildRuntimeContext(turn)
+
+	assertTemporalContains(t, context, "【Runtime Context】")
+	assertTemporalContains(t, context, "不是用户原文")
+	assertTemporalContains(t, context, "【Temporal Context】")
+	if strings.Contains(context, turn.Message()) {
+		t.Fatalf("did not expect runtime context to duplicate user message: %q", context)
+	}
+}
+
+func TestBuildRuntimeContextCanBeDisabled(t *testing.T) {
+	restoreTemporalConfig(t, false, "Asia/Shanghai", "2006-01-02 15:04:05")
+
+	turn := NewTurnContext(TurnInput{ReferenceTime: time.Now()})
+	if context := buildRuntimeContext(turn); context != "" {
+		t.Fatalf("expected empty runtime context, got %q", context)
+	}
+}
+
+func TestBuildRuntimeContextIncludesProactiveTriggerTiming(t *testing.T) {
+	restoreTemporalConfig(t, true, "Asia/Shanghai", "2006-01-02 15:04:05")
+
+	triggerTime := time.Date(2026, 8, 1, 7, 15, 0, 0, time.UTC)
+	turn := NewTurnContext(TurnInput{
+		ReferenceTime: triggerTime,
+		EndedAt:       triggerTime,
+		Trigger:       TriggerProactive,
+	})
+
+	context := buildRuntimeContext(turn)
+
+	assertTemporalContains(t, context, "【Runtime Context】")
+	assertTemporalContains(t, context, "当前主动触发时间：2026-08-01 15:15:00")
+	if strings.Contains(context, "当前用户消息发送于") {
+		t.Fatalf("did not expect proactive runtime context to use user message timing: %q", context)
+	}
+}
+
+func TestRuntimeBuildMessagesInjectsRuntimeContextBeforeConversation(t *testing.T) {
 	restoreTemporalConfig(t, true, "Asia/Shanghai", "2006-01-02 15:04")
 	sm := state.GetManager()
 	sm.ClearAllSessions()
@@ -80,11 +126,14 @@ func TestRuntimeBuildMessagesInjectsTemporalContextBeforeConversation(t *testing
 	if messages[0].Role != openai.ChatMessageRoleSystem || !strings.Contains(messages[0].Content, "【Agent Policy】") {
 		t.Fatalf("expected first message to be agent system prompt, got %#v", messages[0])
 	}
-	if messages[1].Role != openai.ChatMessageRoleSystem || !strings.Contains(messages[1].Content, "【Temporal Context】") {
-		t.Fatalf("expected second message to be temporal system context, got %#v", messages[1])
+	if messages[1].Role != openai.ChatMessageRoleUser ||
+		!strings.Contains(messages[1].Content, "【Runtime Context】") ||
+		!strings.Contains(messages[1].Content, "【Temporal Context】") ||
+		!strings.Contains(messages[1].Content, "不是用户原文") {
+		t.Fatalf("expected second message to be runtime user context, got %#v", messages[1])
 	}
 	if messages[2].Role != openai.ChatMessageRoleUser || messages[2].Content != "昨天那个事情我想了一下" {
-		t.Fatalf("expected conversation after temporal context, got %#v", messages[2])
+		t.Fatalf("expected conversation after runtime context, got %#v", messages[2])
 	}
 }
 

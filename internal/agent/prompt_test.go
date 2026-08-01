@@ -20,6 +20,10 @@ func TestBuildSystemPromptSeparatesToolRulesAndFinalOutput(t *testing.T) {
 		"【Memory Tool Rules】",
 		"当当前问题依赖用户过往偏好、身份、事实、未闭合事项或情绪模式时，先调用 get_memory_context。",
 		"当前写记忆工具不可用，不要尝试写入或声称已经记住。",
+		"【Interaction Frame】",
+		"当前互动发生在聊天软件的对话窗口中",
+		"不要主动把自己描述成模型、程序、系统实例、虚拟体、AI 助手或扮演任务。",
+		"不主动破坏当前聊天现场感。",
 		"【Scene / Relationship State】",
 		"【Final Output Contract】",
 		"保持角色身份和说话方式。",
@@ -28,6 +32,22 @@ func TestBuildSystemPromptSeparatesToolRulesAndFinalOutput(t *testing.T) {
 		if !strings.Contains(prompt, item) {
 			t.Fatalf("expected system prompt to contain %q, got %q", item, prompt)
 		}
+	}
+}
+
+func TestBuildSystemPromptPlacesInteractionFrameBeforeSceneState(t *testing.T) {
+	sections := BuildPromptSections([]string{"get_state"})
+	prompt := sections.String()
+
+	characterIndex := strings.Index(prompt, sections.CharacterIdentity)
+	frameIndex := strings.Index(prompt, "【Interaction Frame】")
+	sceneIndex := strings.Index(prompt, "【Scene / Relationship State】")
+
+	if characterIndex < 0 || frameIndex < 0 || sceneIndex < 0 {
+		t.Fatalf("expected character identity, interaction frame, and scene state in prompt: %q", prompt)
+	}
+	if !(characterIndex < frameIndex && frameIndex < sceneIndex) {
+		t.Fatalf("expected interaction frame between character identity and scene state")
 	}
 }
 

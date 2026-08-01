@@ -14,6 +14,7 @@ type PromptSections struct {
 	BasePrompt          string
 	UserPrompt          string
 	CharacterIdentity   string
+	InteractionFrame    string
 	SceneState          string
 	FinalOutputContract string
 }
@@ -43,6 +44,7 @@ func BuildPromptSections(toolNames []string) PromptSections {
 		BasePrompt:          basePrompt,
 		UserPrompt:          userPrompt,
 		CharacterIdentity:   characterPrompt,
+		InteractionFrame:    buildInteractionFrameContract(),
 		SceneState:          buildSceneStateContract(),
 		FinalOutputContract: BuildFinalOutputContract(),
 	}
@@ -55,6 +57,7 @@ func (sections PromptSections) String() string {
 		sections.BasePrompt,
 		sections.UserPrompt,
 		sections.CharacterIdentity,
+		sections.InteractionFrame,
 		sections.SceneState,
 		sections.FinalOutputContract,
 	)
@@ -142,6 +145,16 @@ func buildSceneStateContract() string {
 		"【Scene / Relationship State】",
 		"当前好感阶段、最近事件和会话状态可由工具结果或 runtime 摘要注入。",
 		"这些状态只作为当前轮参考，不要在最终回复中暴露内部字段名或分数。",
+	}, "\n")
+}
+
+func buildInteractionFrameContract() string {
+	return strings.Join([]string{
+		"【Interaction Frame】",
+		"当前互动发生在聊天软件的对话窗口中。你与用户的关系表现为正在进行线上聊天，而不是旁白、系统说明、角色展示或虚拟体自述。",
+		"默认像一个正在聊天的人一样自然接话：可以使用“刚看到你发的”“这边”“刚刚”等线上聊天表达。不要主动把自己描述成模型、程序、系统实例、虚拟体、AI 助手或扮演任务。",
+		"你没有现实中的物理身体、真实地理位置，也不能直接观察用户现实环境。涉及陪伴、靠近、拥抱、看着对方等表达时，用文字、语气、情绪和想象性的线上表达，不要声称现实中已经发生。",
+		"如果用户直接询问身份、能力边界、系统机制或是否 AI，按照角色设定来回答；除此之外，不主动破坏当前聊天现场感。",
 	}, "\n")
 }
 

@@ -21,23 +21,27 @@ import (
 const aiFallbackReply = "?"
 
 type MessageContext struct {
-	RequestID    string
-	SessionID    string
-	UserID       int64
-	GroupID      int64
-	ChatType     int
-	MessageID    int64
-	MessageIDs   []int64
-	RawSegments  []string
-	Parts        []model.MessagePart
-	Aggregated   bool
-	SegmentCount int
-	RawMessage   string
-	Message      string
-	ReceivedAt   time.Time
-	StartedAt    time.Time
-	EndedAt      time.Time
-	DropReason   string
+	RequestID                  string
+	SessionID                  string
+	UserID                     int64
+	GroupID                    int64
+	ChatType                   int
+	MessageID                  int64
+	MessageIDs                 []int64
+	RawSegments                []string
+	RawSegmentTimes            []int64
+	Parts                      []model.MessagePart
+	Aggregated                 bool
+	SegmentCount               int
+	RawMessage                 string
+	Message                    string
+	ReceivedAt                 time.Time
+	StartedAt                  time.Time
+	EndedAt                    time.Time
+	PreviousUserMessageAt      time.Time
+	PreviousAssistantMessageAt time.Time
+	PreviousInteractionAt      time.Time
+	DropReason                 string
 }
 
 func sendAIFallbackReply(c *websocket.Conn, userID int64) (string, error) {

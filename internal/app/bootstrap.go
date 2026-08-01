@@ -20,6 +20,7 @@ import (
 	"project-yume/internal/tools"
 	"project-yume/internal/tools/catalog"
 	"project-yume/internal/utils"
+	"project-yume/internal/webaccess"
 
 	"github.com/gorilla/websocket"
 )
@@ -137,9 +138,8 @@ func StartWorkers(ctx context.Context, conn *websocket.Conn, components *Compone
 }
 
 func NewAgentRuntime() *agent.Runtime {
-	registry := catalog.NewRegistry()
-
 	cfg := config.GetConfig()
+	registry := catalog.NewRegistry(webCatalogOptions(cfg))
 	toolTimeout := time.Duration(cfg.ReactToolTimeoutMs) * time.Millisecond
 	executor := tools.NewExecutor(
 		registry,
@@ -147,4 +147,24 @@ func NewAgentRuntime() *agent.Runtime {
 		toolTimeout,
 	)
 	return agent.NewRuntime(registry, executor, agent.BudgetFromConfig())
+}
+
+func webCatalogOptions(cfg *config.Config) catalog.Options {
+	if cfg == nil || !cfg.EnableWebTools {
+		return catalog.Options{}
+	}
+
+	searchClient, err := webaccess.NewSearchClientFromConfig(cfg)
+	if err != nil {
+		utils.Warn("web search tools disabled: %v", err)
+		return catalog.Options{}
+	}
+
+	return catalog.Options{
+		EnableWebTools:   true,
+		SearchClient:     searchClient,
+		FetchClient:      webaccess.NewFetchClientFromConfig(cfg),
+		SearchMaxResults: cfg.WebSearchMaxResults,
+		FetchMaxChars:    cfg.WebFetchMaxChars,
+	}
 }

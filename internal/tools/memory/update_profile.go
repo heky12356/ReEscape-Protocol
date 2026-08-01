@@ -32,7 +32,7 @@ func (t *UpdateProfileTool) Name() string {
 }
 
 func (t *UpdateProfileTool) Description() string {
-	return "写入当前用户画像偏好，例如回复语气、关系风格、喜欢/不喜欢/禁忌。"
+	return "更新用户明确表达的长期画像偏好，例如希望的回复语气、关系风格、喜欢/不喜欢、禁忌和以后如何互动。"
 }
 
 func (t *UpdateProfileTool) Schema() tools.Schema {

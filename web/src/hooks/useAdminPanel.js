@@ -45,6 +45,16 @@ const defaultConfig = {
   reactAllowWriteTools: false,
   reactTraceMode: "basic",
   reactTotalTimeoutMs: 30000,
+  enableWebTools: false,
+  webSearchProvider: "searxng",
+  webSearchEndpoint: "",
+  webSearchApiKey: "",
+  webSearchApiKeySet: false,
+  webSearchMaxResults: 5,
+  webToolTimeoutMs: 8000,
+  webFetchMaxBytes: 1048576,
+  webFetchMaxChars: 6000,
+  webFetchUserAgent: "ReEscapeProtocolBot/1.0",
   environmentConfig: ".env"
 };
 
@@ -130,7 +140,8 @@ export function useAdminPanel() {
         ...prev,
         ...data,
         promptPreview: { ...defaultConfig.promptPreview, ...(data.promptPreview || {}) },
-        aiKey: ""
+        aiKey: "",
+        webSearchApiKey: ""
       }));
     } catch (err) {
       setError(getErrMsg(err));
@@ -175,7 +186,7 @@ export function useAdminPanel() {
       resetMsg();
       try {
         const data = await adminApi.updateConfig(payload);
-        setConfig((prev) => ({ ...prev, ...nextConfig, ...data, aiKey: "" }));
+        setConfig((prev) => ({ ...prev, ...nextConfig, ...data, aiKey: "", webSearchApiKey: "" }));
         setStatus("配置已保存并热重载");
         void loadSystemStatus();
       } catch (err) {
@@ -569,7 +580,16 @@ function buildConfigPayload(config) {
     reactToolTimeoutMs: Number(config.reactToolTimeoutMs),
     reactAllowWriteTools: Boolean(config.reactAllowWriteTools),
     reactTraceMode: String(config.reactTraceMode || "basic").trim(),
-    reactTotalTimeoutMs: Number(config.reactTotalTimeoutMs)
+    reactTotalTimeoutMs: Number(config.reactTotalTimeoutMs),
+    enableWebTools: Boolean(config.enableWebTools),
+    webSearchProvider: String(config.webSearchProvider || "searxng").trim(),
+    webSearchEndpoint: String(config.webSearchEndpoint || "").trim(),
+    webSearchApiKey: String(config.webSearchApiKey || "").trim(),
+    webSearchMaxResults: Number(config.webSearchMaxResults),
+    webToolTimeoutMs: Number(config.webToolTimeoutMs),
+    webFetchMaxBytes: Number(config.webFetchMaxBytes),
+    webFetchMaxChars: Number(config.webFetchMaxChars),
+    webFetchUserAgent: String(config.webFetchUserAgent || "").trim()
   };
 }
 

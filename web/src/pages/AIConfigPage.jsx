@@ -5,6 +5,7 @@ import { InputField, SelectField } from "../components/common/FormField";
 const BOOLEAN_OPTIONS = ["true", "false"];
 const VISION_DETAIL_OPTIONS = ["auto", "low", "high"];
 const REACT_TRACE_OPTIONS = ["off", "basic", "full"];
+const WEB_PROVIDER_OPTIONS = ["searxng", "brave", "serper", "tavily"];
 
 export function AIConfigPage({ panel }) {
   const cfg = panel.config;
@@ -259,6 +260,87 @@ export function AIConfigPage({ panel }) {
             hint="关闭时写工具会被策略层拦截。"
             onChange={(v) => updateField(panel, "reactAllowWriteTools", v === "true")}
           />
+        </div>
+      </Panel>
+
+      <Panel
+        eyebrow="Web tools"
+        title="外部搜索与网页读取"
+        subtitle="这层给 ReAct agent 注册只读 web_search / web_fetch 工具；开关类配置修改后需要重启机器人。"
+      >
+        <div className="split-layout">
+          <div className="form-grid">
+            <SelectField
+              label="Enable web tools"
+              value={String(cfg.enableWebTools)}
+              options={BOOLEAN_OPTIONS}
+              hint="默认关闭；开启后需要可用 provider。"
+              onChange={(v) => updateField(panel, "enableWebTools", v === "true")}
+            />
+            <SelectField
+              label="Search provider"
+              value={cfg.webSearchProvider}
+              options={WEB_PROVIDER_OPTIONS}
+              hint="第一版已实现 searxng，其它 provider 预留。"
+              onChange={(v) => updateField(panel, "webSearchProvider", v)}
+            />
+            <InputField
+              label="Search endpoint"
+              value={cfg.webSearchEndpoint}
+              placeholder="http://127.0.0.1:8888/search"
+              hint="SearXNG 需要启用 JSON format，并配置到 /search。"
+              onChange={(v) => updateField(panel, "webSearchEndpoint", v)}
+            />
+            <InputField
+              label="Search API key"
+              placeholder={cfg.webSearchApiKeySet ? "currently set" : "not set"}
+              hint="留空则保留当前 WEB_SEARCH_API_KEY。"
+              value={cfg.webSearchApiKey}
+              onChange={(v) => updateField(panel, "webSearchApiKey", v)}
+            />
+            <InputField
+              label="Max results"
+              type="number"
+              value={cfg.webSearchMaxResults}
+              hint="范围 1-10。"
+              onChange={(v) => updateField(panel, "webSearchMaxResults", v)}
+            />
+            <InputField
+              label="Tool timeout (ms)"
+              type="number"
+              value={cfg.webToolTimeoutMs}
+              onChange={(v) => updateField(panel, "webToolTimeoutMs", v)}
+            />
+            <InputField
+              label="Fetch max bytes"
+              type="number"
+              value={cfg.webFetchMaxBytes}
+              onChange={(v) => updateField(panel, "webFetchMaxBytes", v)}
+            />
+            <InputField
+              label="Fetch max chars"
+              type="number"
+              value={cfg.webFetchMaxChars}
+              hint="返回给模型的正文字符上限。"
+              onChange={(v) => updateField(panel, "webFetchMaxChars", v)}
+            />
+            <InputField
+              label="Fetch User-Agent"
+              value={cfg.webFetchUserAgent}
+              onChange={(v) => updateField(panel, "webFetchUserAgent", v)}
+            />
+          </div>
+
+          <div className="insight-card alternate">
+            <div className="insight-kicker">Safety note</div>
+            <div className="insight-title">网页读取只允许文本内容，并会拒绝本机、内网和 metadata 地址。</div>
+            <p className="insight-copy">
+              web_fetch 不执行 JS、不带登录态，也不下载二进制文件；搜索与抓取失败只会作为工具错误返回。
+            </p>
+            <div className="insight-meta mono">
+              {cfg.enableWebTools ? `${cfg.webSearchProvider || "searxng"} enabled` : "web tools disabled"}
+            </div>
+          </div>
         </div>
       </Panel>
 

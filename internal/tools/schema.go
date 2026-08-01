@@ -29,7 +29,18 @@ func ToOpenAITools(registry *Registry) []openai.Tool {
 		return nil
 	}
 
-	entries := registry.List()
+	return toOpenAITools(registry.List())
+}
+
+func ToOpenAIToolsWithPolicy(registry *Registry, policy Policy) []openai.Tool {
+	if registry == nil {
+		return nil
+	}
+
+	return toOpenAITools(registry.ListAvailable(policy))
+}
+
+func toOpenAITools(entries []Tool) []openai.Tool {
 	result := make([]openai.Tool, 0, len(entries))
 	for _, tool := range entries {
 		schema := tool.Schema()

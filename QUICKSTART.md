@@ -152,9 +152,28 @@ ENABLE_REACT_AGENT=true
 REACT_ALLOW_WRITE_TOOLS=true
 ```
 
-只读工具不需要这个开关。写工具会产生业务状态变化，建议先在测试会话中验证。
+只读工具不需要这个开关。关闭时，`remember_fact`、`update_profile`、`update_affection` 这类写工具不会暴露给模型，也不会出现在 ReAct system prompt 的可用工具列表里。
 
-## 8. 开发模式启动前端
+开启后，模型会根据 Memory Tool Rules 自主判断是否写入记忆。用户明确说“记住”“以后”“我喜欢”“我叫”“不要再”这类表达时，更容易触发 `remember_fact` 或 `update_profile`。写工具会产生业务状态变化，建议先在测试会话中验证。
+
+## 8. 可选：开启 Web Tools
+
+`web_search` 和 `web_fetch` 是 ReAct 只读工具，默认关闭。第一版推荐使用 SearXNG：
+
+```env
+ENABLE_WEB_TOOLS=true
+WEB_SEARCH_PROVIDER=searxng
+WEB_SEARCH_ENDPOINT=http://127.0.0.1:8888/search
+WEB_SEARCH_MAX_RESULTS=5
+WEB_TOOL_TIMEOUT_MS=8000
+WEB_FETCH_MAX_BYTES=1048576
+WEB_FETCH_MAX_CHARS=6000
+WEB_FETCH_USER_AGENT=ReEscapeProtocolBot/1.0
+```
+
+SearXNG 需要启用 JSON search API，并把 endpoint 配到 `/search`。工具注册类配置修改后建议重启机器人。
+
+## 9. 开发模式启动前端
 
 如果需要单独调试前端：
 
@@ -169,7 +188,7 @@ npm run dev
 
 前端会把 `/api` 代理到后端管理服务。
 
-## 9. 生产构建前端
+## 10. 生产构建前端
 
 ```powershell
 Set-Location web
@@ -183,7 +202,7 @@ Set-Location ..
 
 Go 管理后台会直接托管这批静态文件。
 
-## 10. 核验启动是否正常
+## 11. 核验启动是否正常
 
 浏览器或命令行检查：
 
@@ -199,7 +218,7 @@ Invoke-WebRequest http://127.0.0.1:8088/readyz
 Invoke-WebRequest http://127.0.0.1:8088/metrics
 ```
 
-## 11. 建议先关注的配置项
+## 12. 建议先关注的配置项
 
 ### 连接和身份
 
@@ -227,6 +246,13 @@ Invoke-WebRequest http://127.0.0.1:8088/metrics
 - `REACT_ALLOW_WRITE_TOOLS`
 - `REACT_TRACE_MODE`
 
+### Web Tools
+
+- `ENABLE_WEB_TOOLS`
+- `WEB_SEARCH_PROVIDER`
+- `WEB_SEARCH_ENDPOINT`
+- `WEB_FETCH_MAX_CHARS`
+
 ### 行为开关
 
 - `ENABLE_EMOTIONAL_MEMORY`
@@ -239,13 +265,14 @@ Invoke-WebRequest http://127.0.0.1:8088/metrics
 - `MESSAGE_AGGREGATE_MAX_WINDOW_MS`
 - `MESSAGE_AGGREGATE_MAX_MESSAGES`
 
-## 12. 常见第一次启动问题
+## 13. 常见第一次启动问题
 
 - 后端能启动但不回复：先确认 `TARGETID` 是否正确，并检查消息来源是否符合当前过滤规则。
 - 启动时报 character config not found：确认 `CHARACTER` 对应的 `config/character/<name>.json` 存在。
 - AI 不回复：先确认 `config/ai_profiles.json` 的 active profile、`aiKey`、`aiBaseUrl` 和 `aiModel`。
 - `/readyz` 返回失败：通常是 `DATA_DIR` 或 `LOG_DIR` 不可写。
 - 前端空白或接口报错：先确认后端已启动，并检查 `HttpPort`。
-- ReAct 工具没有写入状态：确认 `ENABLE_REACT_AGENT=true`，并在需要副作用时设置 `REACT_ALLOW_WRITE_TOOLS=true`。
+- ReAct 工具没有写入状态：确认 `ENABLE_REACT_AGENT=true`，并在需要副作用时设置 `REACT_ALLOW_WRITE_TOOLS=true`；关闭时写工具对模型不可见。
+- ReAct 看不到 web tools：确认 `ENABLE_WEB_TOOLS=true`、SearXNG endpoint 可用，并重启机器人。
 
 更详细的排查说明见 [HELP.md](./HELP.md)。

@@ -61,22 +61,27 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 			if len(rawSegments) == 0 && msg.Message != "" {
 				rawSegments = []string{msg.Message}
 			}
+			rawSegmentTimes := msg.RawSegmentTimes
+			if len(rawSegmentTimes) == 0 && msg.Time != 0 {
+				rawSegmentTimes = []int64{msg.Time}
+			}
 			messageCtx := handler.MessageContext{
-				RequestID:    buildMessageRequestID(msg.MessageID),
-				SessionID:    sessionID,
-				UserID:       msg.User_id,
-				GroupID:      msg.Group_id,
-				ChatType:     msg.Type,
-				MessageID:    msg.MessageID,
-				MessageIDs:   messageIDs,
-				RawSegments:  rawSegments,
-				Parts:        enrichedParts,
-				Aggregated:   msg.Aggregated,
-				SegmentCount: len(rawSegments),
-				RawMessage:   msg.Message,
-				ReceivedAt:   endedAt,
-				StartedAt:    startedAt,
-				EndedAt:      endedAt,
+				RequestID:       buildMessageRequestID(msg.MessageID),
+				SessionID:       sessionID,
+				UserID:          msg.User_id,
+				GroupID:         msg.Group_id,
+				ChatType:        msg.Type,
+				MessageID:       msg.MessageID,
+				MessageIDs:      messageIDs,
+				RawSegments:     rawSegments,
+				RawSegmentTimes: rawSegmentTimes,
+				Parts:           enrichedParts,
+				Aggregated:      msg.Aggregated,
+				SegmentCount:    len(rawSegments),
+				RawMessage:      msg.Message,
+				ReceivedAt:      endedAt,
+				StartedAt:       startedAt,
+				EndedAt:         endedAt,
 			}
 
 			if err := pipeline.Run(&messageCtx); err != nil {
@@ -120,6 +125,10 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 			}
 
 			state.GetManager().EnsureSession(sessionID, msg.User_id, msg.Group_id, msg.Type)
+			timing := state.GetManager().GetTimingSnapshot(sessionID)
+			messageCtx.PreviousUserMessageAt = timing.LastUserMessageAt
+			messageCtx.PreviousAssistantMessageAt = timing.LastAssistantMessageAt
+			messageCtx.PreviousInteractionAt = timing.LastInteractionAt
 			recordIncomingConversationTurn(messageCtx)
 			if naturalScheduler != nil {
 				naturalScheduler.RescheduleFrom(sessionID, endedAt)
@@ -208,16 +217,25 @@ func processMessageTurn(ctx context.Context, c *websocket.Conn, messageCtx handl
 	cfg := config.GetConfig()
 	if cfg.EnableReactAgent && agentRuntime != nil {
 		turn := agent.NewTurnContext(agent.TurnInput{
-			RequestID:     messageCtx.RequestID,
-			SessionID:     messageCtx.SessionID,
-			UserID:        messageCtx.UserID,
-			GroupID:       messageCtx.GroupID,
-			ChatType:      messageCtx.ChatType,
-			Message:       messageCtx.Message,
-			Parts:         messageCtx.Parts,
-			ReferenceTime: messageCtx.ReceivedAt,
-			Trigger:       agent.TriggerMessage,
-			Actor:         agent.ActorUser,
+			RequestID:                  messageCtx.RequestID,
+			SessionID:                  messageCtx.SessionID,
+			UserID:                     messageCtx.UserID,
+			GroupID:                    messageCtx.GroupID,
+			ChatType:                   messageCtx.ChatType,
+			Message:                    messageCtx.Message,
+			Parts:                      messageCtx.Parts,
+			ReferenceTime:              messageCtx.ReceivedAt,
+			StartedAt:                  messageCtx.StartedAt,
+			EndedAt:                    messageCtx.EndedAt,
+			Aggregated:                 messageCtx.Aggregated,
+			SegmentCount:               messageCtx.SegmentCount,
+			RawSegments:                messageCtx.RawSegments,
+			RawSegmentTimes:            messageCtx.RawSegmentTimes,
+			PreviousUserMessageAt:      messageCtx.PreviousUserMessageAt,
+			PreviousAssistantMessageAt: messageCtx.PreviousAssistantMessageAt,
+			PreviousInteractionAt:      messageCtx.PreviousInteractionAt,
+			Trigger:                    agent.TriggerMessage,
+			Actor:                      agent.ActorUser,
 		})
 
 		agentResult, err := agentRuntime.RunTurn(ctx, turn)

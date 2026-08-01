@@ -44,6 +44,8 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 
 	state.GetManager().EnsureSession(turn.SessionID(), turn.UserID(), turn.GroupID(), turn.ChatType())
 	messages := r.buildMessages(turn)
+	toolPolicy := r.toolPolicy()
+	openAITools := tools.ToOpenAIToolsWithPolicy(r.registry, toolPolicy)
 	trace := Trace{RequestID: turn.RequestID(), SessionID: turn.SessionID()}
 	events := make([]eventlog.Event, 0)
 
@@ -51,7 +53,7 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 		req := openai.ChatCompletionRequest{
 			Model:             config.GetConfig().AiModel,
 			Messages:          messages,
-			Tools:             tools.ToOpenAITools(r.registry),
+			Tools:             openAITools,
 			ToolChoice:        "auto",
 			ParallelToolCalls: false,
 			Stream:            false,
@@ -112,18 +114,20 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 }
 
 func (r *Runtime) buildMessages(turn *TurnContext) []openai.ChatCompletionMessage {
-	toolsList := r.registry.List()
-	toolNames := make([]string, 0, len(toolsList))
-	for _, tool := range toolsList {
-		toolNames = append(toolNames, tool.Name())
-	}
+	toolNames := r.availableToolNames()
 
 	conversation := selectRecentMessages(state.GetManager().GetConversation(turn.SessionID()), config.GetConfig().ContextRecentTurns)
-	messages := make([]openai.ChatCompletionMessage, 0, len(conversation)+2)
+	messages := make([]openai.ChatCompletionMessage, 0, len(conversation)+3)
 	messages = append(messages, openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleSystem,
 		Content: BuildSystemPrompt(toolNames),
 	})
+	if temporalContext := buildTemporalContext(turn); temporalContext != "" {
+		messages = append(messages, openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleSystem,
+			Content: temporalContext,
+		})
+	}
 	messages = append(messages, conversation...)
 
 	if turn.trigger == TriggerProactive {
@@ -133,6 +137,25 @@ func (r *Runtime) buildMessages(turn *TurnContext) []openai.ChatCompletionMessag
 		})
 	}
 	return messages
+}
+
+func (r *Runtime) availableToolNames() []string {
+	if r == nil || r.registry == nil {
+		return nil
+	}
+	toolsList := r.registry.ListAvailable(r.toolPolicy())
+	toolNames := make([]string, 0, len(toolsList))
+	for _, tool := range toolsList {
+		toolNames = append(toolNames, tool.Name())
+	}
+	return toolNames
+}
+
+func (r *Runtime) toolPolicy() tools.Policy {
+	if r == nil || r.executor == nil {
+		return tools.Policy{}
+	}
+	return r.executor.Policy()
 }
 
 func selectRecentMessages(conversation []openai.ChatCompletionMessage, recentTurns int) []openai.ChatCompletionMessage {

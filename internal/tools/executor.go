@@ -27,6 +27,13 @@ func NewExecutor(registry *Registry, policy Policy, timeout time.Duration) *Exec
 	}
 }
 
+func (e *Executor) Policy() Policy {
+	if e == nil {
+		return Policy{}
+	}
+	return e.policy
+}
+
 func (e *Executor) Execute(ctx context.Context, turn TurnView, call openai.ToolCall) ExecutionResult {
 	startedAt := time.Now()
 	name := strings.TrimSpace(call.Function.Name)

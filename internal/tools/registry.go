@@ -64,6 +64,18 @@ func (r *Registry) List() []Tool {
 	return result
 }
 
+func (r *Registry) ListAvailable(policy Policy) []Tool {
+	entries := r.List()
+	result := make([]Tool, 0, len(entries))
+	for _, tool := range entries {
+		if !policy.IsAvailable(tool) {
+			continue
+		}
+		result = append(result, tool)
+	}
+	return result
+}
+
 func normalizeToolName(name string) string {
 	return strings.TrimSpace(name)
 }

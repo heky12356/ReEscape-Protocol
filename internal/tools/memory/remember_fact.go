@@ -33,7 +33,7 @@ func (t *RememberFactTool) Name() string {
 }
 
 func (t *RememberFactTool) Description() string {
-	return "写入或确认当前用户的长期事实记忆，例如身份、偏好、地点、计划。"
+	return "写入或确认当前用户明确表达的长期事实记忆，例如名字、身份、地点、重要关系、稳定偏好、计划；不要用于一次性情绪或推测。"
 }
 
 func (t *RememberFactTool) Schema() tools.Schema {
@@ -61,7 +61,7 @@ func (t *RememberFactTool) Schema() tools.Schema {
 			},
 			"confidence": {
 				Type:        "number",
-				Description: "0 到 1 的置信度；为空时使用默认值。",
+				Description: "0 到 1 的置信度；不确定时不要写入，或使用较低置信度。",
 			},
 			"source_message": {
 				Type:        "string",
@@ -69,7 +69,7 @@ func (t *RememberFactTool) Schema() tools.Schema {
 			},
 			"expires_at": {
 				Type:        "string",
-				Description: "可选 RFC3339 过期时间，适合短期计划类事实。",
+				Description: "可选 RFC3339 过期时间，适合今天、明天或近期计划类事实。",
 			},
 		},
 		Required:             []string{"predicate", "object", "summary"},

@@ -23,8 +23,10 @@ import (
 	"project-yume/internal/domain/affection"
 	"project-yume/internal/eventlog"
 	"project-yume/internal/metrics"
+	"project-yume/internal/tools"
 	"project-yume/internal/tools/catalog"
 	"project-yume/internal/utils"
+	"project-yume/internal/webaccess"
 
 	"github.com/gin-gonic/gin"
 )
@@ -73,6 +75,15 @@ type configResponse struct {
 	ReactAllowWriteTools              bool          `json:"reactAllowWriteTools"`
 	ReactTraceMode                    string        `json:"reactTraceMode"`
 	ReactTotalTimeoutMs               int           `json:"reactTotalTimeoutMs"`
+	EnableWebTools                    bool          `json:"enableWebTools"`
+	WebSearchProvider                 string        `json:"webSearchProvider"`
+	WebSearchEndpoint                 string        `json:"webSearchEndpoint"`
+	WebSearchAPIKeySet                bool          `json:"webSearchApiKeySet"`
+	WebSearchMaxResults               int           `json:"webSearchMaxResults"`
+	WebToolTimeoutMs                  int           `json:"webToolTimeoutMs"`
+	WebFetchMaxBytes                  int           `json:"webFetchMaxBytes"`
+	WebFetchMaxChars                  int           `json:"webFetchMaxChars"`
+	WebFetchUserAgent                 string        `json:"webFetchUserAgent"`
 }
 
 type PromptPreview struct {
@@ -127,6 +138,15 @@ type updateConfigRequest struct {
 	ReactAllowWriteTools              bool    `json:"reactAllowWriteTools"`
 	ReactTraceMode                    string  `json:"reactTraceMode"`
 	ReactTotalTimeoutMs               int     `json:"reactTotalTimeoutMs"`
+	EnableWebTools                    bool    `json:"enableWebTools"`
+	WebSearchProvider                 string  `json:"webSearchProvider"`
+	WebSearchEndpoint                 string  `json:"webSearchEndpoint"`
+	WebSearchAPIKey                   string  `json:"webSearchApiKey"`
+	WebSearchMaxResults               int     `json:"webSearchMaxResults"`
+	WebToolTimeoutMs                  int     `json:"webToolTimeoutMs"`
+	WebFetchMaxBytes                  int     `json:"webFetchMaxBytes"`
+	WebFetchMaxChars                  int     `json:"webFetchMaxChars"`
+	WebFetchUserAgent                 string  `json:"webFetchUserAgent"`
 }
 
 type imageAssetsResponse struct {
@@ -398,6 +418,17 @@ func (s *server) handlePutConfig(c *gin.Context) {
 		"REACT_ALLOW_WRITE_TOOLS":              strconv.FormatBool(req.ReactAllowWriteTools),
 		"REACT_TRACE_MODE":                     strings.TrimSpace(req.ReactTraceMode),
 		"REACT_TOTAL_TIMEOUT_MS":               strconv.Itoa(req.ReactTotalTimeoutMs),
+		"ENABLE_WEB_TOOLS":                     strconv.FormatBool(req.EnableWebTools),
+		"WEB_SEARCH_PROVIDER":                  strings.ToLower(strings.TrimSpace(req.WebSearchProvider)),
+		"WEB_SEARCH_ENDPOINT":                  strings.TrimSpace(req.WebSearchEndpoint),
+		"WEB_SEARCH_MAX_RESULTS":               strconv.Itoa(req.WebSearchMaxResults),
+		"WEB_TOOL_TIMEOUT_MS":                  strconv.Itoa(req.WebToolTimeoutMs),
+		"WEB_FETCH_MAX_BYTES":                  strconv.Itoa(req.WebFetchMaxBytes),
+		"WEB_FETCH_MAX_CHARS":                  strconv.Itoa(req.WebFetchMaxChars),
+		"WEB_FETCH_USER_AGENT":                 strings.TrimSpace(req.WebFetchUserAgent),
+	}
+	if strings.TrimSpace(req.WebSearchAPIKey) != "" {
+		updates["WEB_SEARCH_API_KEY"] = strings.TrimSpace(req.WebSearchAPIKey)
 	}
 
 	envFile := resolveEnvFilePath(config.GetEnvFilePath())
@@ -484,7 +515,7 @@ func (s *server) handleImageAssets(c *gin.Context) {
 }
 
 func (s *server) handleTools(c *gin.Context) {
-	c.JSON(http.StatusOK, toolsResponse{Tools: catalog.ListDefinitions()})
+	c.JSON(http.StatusOK, toolsResponse{Tools: catalog.ListDefinitionsWithPolicy(currentToolPolicy(), currentCatalogOptions())})
 }
 
 func (s *server) handleEvents(c *gin.Context) {
@@ -899,17 +930,52 @@ func (s *server) buildConfigResponse() (configResponse, error) {
 		ReactAllowWriteTools:              cfg.ReactAllowWriteTools,
 		ReactTraceMode:                    cfg.ReactTraceMode,
 		ReactTotalTimeoutMs:               cfg.ReactTotalTimeoutMs,
+		EnableWebTools:                    cfg.EnableWebTools,
+		WebSearchProvider:                 cfg.WebSearchProvider,
+		WebSearchEndpoint:                 cfg.WebSearchEndpoint,
+		WebSearchAPIKeySet:                strings.TrimSpace(cfg.WebSearchAPIKey) != "",
+		WebSearchMaxResults:               cfg.WebSearchMaxResults,
+		WebToolTimeoutMs:                  cfg.WebToolTimeoutMs,
+		WebFetchMaxBytes:                  cfg.WebFetchMaxBytes,
+		WebFetchMaxChars:                  cfg.WebFetchMaxChars,
+		WebFetchUserAgent:                 cfg.WebFetchUserAgent,
 	}, nil
 }
 
 func listToolNames() []string {
-	definitions := catalog.ListDefinitions()
+	definitions := catalog.ListDefinitionsWithPolicy(currentToolPolicy(), currentCatalogOptions())
 	names := make([]string, 0, len(definitions))
 	for _, definition := range definitions {
 		names = append(names, definition.Name)
 	}
 	sort.Strings(names)
 	return names
+}
+
+func currentToolPolicy() tools.Policy {
+	cfg := config.GetConfig()
+	if cfg == nil {
+		return tools.Policy{}
+	}
+	return tools.Policy{AllowWriteTools: cfg.ReactAllowWriteTools}
+}
+
+func currentCatalogOptions() catalog.Options {
+	cfg := config.GetConfig()
+	if cfg == nil || !cfg.EnableWebTools {
+		return catalog.Options{}
+	}
+	searchClient, err := webaccess.NewSearchClientFromConfig(cfg)
+	if err != nil {
+		return catalog.Options{}
+	}
+	return catalog.Options{
+		EnableWebTools:   true,
+		SearchClient:     searchClient,
+		FetchClient:      webaccess.NewFetchClientFromConfig(cfg),
+		SearchMaxResults: cfg.WebSearchMaxResults,
+		FetchMaxChars:    cfg.WebFetchMaxChars,
+	}
 }
 
 func readEnvMap(path string) (map[string]string, error) {
@@ -1083,6 +1149,30 @@ func validateUpdateRequest(req updateConfigRequest) error {
 	case "off", "basic", "full":
 	default:
 		return fmt.Errorf("reactTraceMode must be one of off/basic/full")
+	}
+	provider := strings.ToLower(strings.TrimSpace(req.WebSearchProvider))
+	switch provider {
+	case "searxng", "brave", "serper", "tavily":
+	default:
+		return fmt.Errorf("webSearchProvider must be one of searxng/brave/serper/tavily")
+	}
+	if req.EnableWebTools && provider == "searxng" && strings.TrimSpace(req.WebSearchEndpoint) == "" {
+		return fmt.Errorf("webSearchEndpoint is required when searxng web tools are enabled")
+	}
+	if req.WebSearchMaxResults <= 0 || req.WebSearchMaxResults > 10 {
+		return fmt.Errorf("webSearchMaxResults must be in [1,10]")
+	}
+	if req.WebToolTimeoutMs <= 0 {
+		return fmt.Errorf("webToolTimeoutMs must be > 0")
+	}
+	if req.WebFetchMaxBytes <= 0 {
+		return fmt.Errorf("webFetchMaxBytes must be > 0")
+	}
+	if req.WebFetchMaxChars <= 0 || req.WebFetchMaxChars > 20000 {
+		return fmt.Errorf("webFetchMaxChars must be in [1,20000]")
+	}
+	if strings.TrimSpace(req.WebFetchUserAgent) == "" {
+		return fmt.Errorf("webFetchUserAgent is required")
 	}
 	return nil
 }

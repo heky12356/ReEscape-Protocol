@@ -58,6 +58,7 @@ AI 参数的优先级：
 - AI fallback：`AI_KEY`、`AI_BASEURL`、`AI_MODEL`
 - 角色：`CHARACTER`、`CHARACTER_IDENTITY_MODE`、`ALLOW_CHARACTER_IDENTITY_EXPLANATION`
 - ReAct：`ENABLE_REACT_AGENT`、`REACT_MAX_STEPS`、`REACT_TOOL_TIMEOUT_MS`、`REACT_ALLOW_WRITE_TOOLS`、`REACT_TRACE_MODE`
+- ReAct web tools：`ENABLE_WEB_TOOLS`、`WEB_SEARCH_PROVIDER`、`WEB_SEARCH_ENDPOINT`、`WEB_SEARCH_MAX_RESULTS`、`WEB_TOOL_TIMEOUT_MS`
 - 回复策略：`LIGHT_ACK_MODE`、`SHORT_REPLY_STRICTNESS`、`ENABLE_SPACE_SEGMENT_DELIMITER`
 - 聚合：`MESSAGE_AGGREGATE_IDLE_WINDOW_MS`、`MESSAGE_AGGREGATE_MAX_WINDOW_MS`、`MESSAGE_AGGREGATE_MAX_MESSAGES`
 - 上下文：`CONTEXT_RECENT_TURNS`、`CONTEXT_SUMMARY_MAX_TURNS`、`CONTEXT_OPEN_LOOP_LIMIT`
@@ -93,6 +94,29 @@ OneBot event
 ```
 
 当 `ENABLE_REACT_AGENT=false` 时，系统仍可走旧的 handler/service 回复路径。该路径主要用于兼容和回退，新的能力应优先落在 `internal/agent`、`internal/tools` 或 `internal/domain`。
+
+## ReAct Web Tools
+
+`web_search` / `web_fetch` 是 ReAct 只读工具，默认通过 `ENABLE_WEB_TOOLS=false` 关闭。第一版实现了 `searxng` 搜索 provider，抓取使用本地 Go HTTP client，并带有 SSRF 防护、文本 content-type 限制、大小限制和超时。
+
+启用时建议先配置：
+
+```env
+ENABLE_REACT_AGENT=true
+ENABLE_WEB_TOOLS=true
+WEB_SEARCH_PROVIDER=searxng
+WEB_SEARCH_ENDPOINT=http://127.0.0.1:8888/search
+```
+
+SearXNG 实例需要启用 JSON search API。`ENABLE_WEB_TOOLS`、provider、endpoint 这类工具注册配置修改后建议重启机器人；运行时保存后会热重载配置值，但已构建的 registry 不会自动重建。
+
+## ReAct 记忆写入
+
+`get_memory_context` 是只读工具，用于读取短期上下文、用户画像、事实记忆和情绪模式。`remember_fact`、`update_profile` 和 `update_affection` 是写工具，默认由 `REACT_ALLOW_WRITE_TOOLS=false` 关闭。
+
+关闭写工具时，它们不会暴露给模型，也不会出现在 ReAct system prompt 的可用工具列表里。开启 `REACT_ALLOW_WRITE_TOOLS=true` 后，prompt 会注入 Memory Tool Rules，引导模型在用户明确说“记住”“以后”“我喜欢”“我叫”“不要再”等长期偏好或事实表达时调用写入工具。
+
+写入规则保持保守：只记录用户明确表达的身份、地点、计划、重要关系、长期偏好或互动禁忌；不要记录一次性情绪、临时吐槽、普通寒暄、含糊猜测或模型推断。
 
 ## 上下文记忆
 

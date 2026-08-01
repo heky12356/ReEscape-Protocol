@@ -92,6 +92,17 @@ type Config struct {
 	ReactAllowWriteTools bool   // 是否允许写工具产生副作用
 	ReactTraceMode       string // trace 记录模式: off/basic/full
 	ReactTotalTimeoutMs  int    // 单轮总超时(毫秒)
+
+	// ReAct Web Tool 配置
+	EnableWebTools      bool
+	WebSearchProvider   string
+	WebSearchEndpoint   string
+	WebSearchAPIKey     string
+	WebSearchMaxResults int
+	WebToolTimeoutMs    int
+	WebFetchMaxBytes    int
+	WebFetchMaxChars    int
+	WebFetchUserAgent   string
 }
 
 var config = &Config{}
@@ -189,6 +200,15 @@ func init() {
 	config.ReactAllowWriteTools = getBoolEnv("REACT_ALLOW_WRITE_TOOLS", false)
 	config.ReactTraceMode = normalizeReactTraceMode(getStringEnv("REACT_TRACE_MODE", "basic"))
 	config.ReactTotalTimeoutMs = getIntEnv("REACT_TOTAL_TIMEOUT_MS", 30000)
+	config.EnableWebTools = getBoolEnv("ENABLE_WEB_TOOLS", false)
+	config.WebSearchProvider = getStringEnv("WEB_SEARCH_PROVIDER", "searxng")
+	config.WebSearchEndpoint = getStringEnv("WEB_SEARCH_ENDPOINT", "")
+	config.WebSearchAPIKey = os.Getenv("WEB_SEARCH_API_KEY")
+	config.WebSearchMaxResults = getIntEnv("WEB_SEARCH_MAX_RESULTS", 5)
+	config.WebToolTimeoutMs = getIntEnv("WEB_TOOL_TIMEOUT_MS", 8000)
+	config.WebFetchMaxBytes = getIntEnv("WEB_FETCH_MAX_BYTES", 1048576)
+	config.WebFetchMaxChars = getIntEnv("WEB_FETCH_MAX_CHARS", 6000)
+	config.WebFetchUserAgent = getStringEnv("WEB_FETCH_USER_AGENT", "ReEscapeProtocolBot/1.0")
 
 	characterManager, err := character.NewCharacterManager(getCharacterConfigDir(), config.Character)
 	if err != nil {
@@ -319,9 +339,9 @@ func buildBasePrompt(enableSpaceSegmentDelimiter bool) string {
 	【技术指令】
 	0. 注意将无意义的乱码去掉
 	` + segmentInstruction + `
-	2. 每段长度控制在10-20字以内
+	2. 每段长度控制在50字以内
 	3. 分段应该符合语义完整性
-	4. 避免在一个完整的句子中间分段
+	4. 避免在一个完整的句子中间分段，例如逗号 \,\ 处。尽量在句号之后分段 
 	5. 不要使用表情
 
 	【回复格式示例】

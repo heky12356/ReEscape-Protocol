@@ -32,12 +32,16 @@ func startScheduler(c *websocket.Conn, scheduler *scheduler.NaturalScheduler, ag
 			return
 		case <-ticker.C:
 			now := time.Now()
-			shouldSend, nextAt := scheduler.ShouldSendNow(sessionID, now)
-			utils.Info("自然调度检查: next=%s due=%t", nextAt.Format(time.RFC3339), shouldSend)
-			if !shouldSend {
+			claimed, nextAt := scheduler.TryClaimDue(sessionID, now)
+			due := !nextAt.IsZero() && !now.Before(nextAt)
+			utils.Info("自然调度检查: next=%s due=%t claimed=%t", nextAt.Format(time.RFC3339), due, claimed)
+			if !claimed {
 				continue
 			}
 
+			appendTurnGateEvent(ctx, eventStore, "proactive_claimed", sessionID, targetUserID, map[string]any{
+				"next_at": nextAt.Format(time.RFC3339),
+			})
 			utils.Info("定时器触发")
 			err := sendScheduledTurn(ctx, c, scheduler, agentRuntime, eventStore, sessionID, targetUserID)
 			if err != nil {
@@ -53,22 +57,60 @@ func sendScheduledTurn(ctx context.Context, c *websocket.Conn, scheduler *schedu
 	agentRuntime *agent.Runtime, eventStore eventlog.Store, sessionID string, targetUserID int64,
 ) error {
 	if config.GetConfig().EnableReactAgent && agentRuntime != nil {
-		if err := sendScheduledAgentMessage(ctx, c, scheduler, agentRuntime, eventStore, sessionID, targetUserID); err != nil {
-			utils.Warn("React proactive agent failed, fallback to legacy scheduler: %v", err)
-		} else {
+		sentAt, sent, err := sendScheduledAgentMessage(ctx, c, scheduler, agentRuntime, eventStore, sessionID, targetUserID)
+		if err == nil {
+			if sent {
+				scheduler.CompleteClaim(sessionID, sentAt)
+			} else {
+				scheduler.ReleaseClaim(sessionID)
+			}
 			return nil
 		}
+
+		if !scheduler.IsIdleForProactive(sessionID, time.Now()) {
+			scheduler.ReleaseClaim(sessionID)
+			appendTurnGateEvent(ctx, eventStore, "proactive_skipped", sessionID, targetUserID, map[string]any{
+				"reason": "user_turn_pending_after_agent_error",
+				"error":  err.Error(),
+			})
+			utils.Info("主动消息 fallback 前发现用户 turn pending，跳过 legacy 主动回复")
+			return nil
+		}
+
+		utils.Warn("React proactive agent failed, fallback to legacy scheduler: %v", err)
 	}
-	return legacyscheduler.SendScheduledMessage(c, scheduler, sessionID, targetUserID)
+	if !scheduler.IsIdleForProactive(sessionID, time.Now()) {
+		scheduler.ReleaseClaim(sessionID)
+		appendTurnGateEvent(ctx, eventStore, "proactive_skipped", sessionID, targetUserID, map[string]any{
+			"reason": "user_turn_pending_before_legacy_send",
+		})
+		utils.Info("主动消息发送前发现用户 turn pending，跳过 proactive")
+		return nil
+	}
+	err := legacyscheduler.SendScheduledMessage(c, scheduler, sessionID, targetUserID)
+	if err != nil {
+		scheduler.ReleaseClaim(sessionID)
+		return err
+	}
+	scheduler.CompleteClaim(sessionID, time.Now())
+	return nil
 }
 
 func sendScheduledAgentMessage(ctx context.Context, c *websocket.Conn, scheduler *scheduler.NaturalScheduler,
 	agentRuntime *agent.Runtime, eventStore eventlog.Store, sessionID string, targetUserID int64,
-) error {
+) (time.Time, bool, error) {
 	state.GetManager().EnsureSession(sessionID, targetUserID, 0, 1)
-	if shouldSend, nextAt := scheduler.ShouldSendNow(sessionID, time.Now()); !shouldSend {
-		utils.Info("主动消息发送前检查未到时间, next=%s", nextAt.Format(time.RFC3339))
-		return nil
+	now := time.Now()
+	if !state.GetManager().HasActiveProactiveClaim(sessionID, now) {
+		utils.Info("主动消息发送前检查 claim 已失效")
+		return time.Time{}, false, nil
+	}
+	if !scheduler.IsIdleForProactive(sessionID, now) {
+		appendTurnGateEvent(ctx, eventStore, "proactive_skipped", sessionID, targetUserID, map[string]any{
+			"reason": "user_turn_pending_before_agent_run",
+		})
+		utils.Info("主动消息运行前发现用户 turn pending，跳过 proactive")
+		return time.Time{}, false, nil
 	}
 
 	turn := agent.NewTurnContext(agent.TurnInput{
@@ -82,15 +124,39 @@ func sendScheduledAgentMessage(ctx context.Context, c *websocket.Conn, scheduler
 	})
 	result, err := agentRuntime.RunTurn(ctx, turn)
 	if err != nil {
-		return err
+		return time.Time{}, false, err
 	}
 
 	reply := strings.TrimSpace(result.FinalReply.Content)
 	if !result.ShouldSend || reply == "" {
-		return fmt.Errorf("agent proactive reply is empty")
+		if eventStore != nil {
+			if err := eventStore.Append(ctx, result.Events...); err != nil {
+				utils.Warn("append proactive agent events failed: %v", err)
+			}
+		}
+		return time.Time{}, false, fmt.Errorf("agent proactive reply is empty")
+	}
+	if !scheduler.IsIdleForProactive(sessionID, time.Now()) {
+		result.Events = append(result.Events, eventlog.Event{
+			Type:      "proactive_skipped",
+			SessionID: sessionID,
+			UserID:    targetUserID,
+			Actor:     "runtime",
+			CreatedAt: time.Now(),
+			Data: map[string]any{
+				"reason": "user_turn_pending_before_send",
+			},
+		})
+		if eventStore != nil {
+			if err := eventStore.Append(ctx, result.Events...); err != nil {
+				utils.Warn("append proactive agent events failed: %v", err)
+			}
+		}
+		utils.Info("主动消息发送前发现用户 turn pending，跳过 proactive")
+		return time.Time{}, false, nil
 	}
 	if err := service.SendMsg(c, targetUserID, reply); err != nil {
-		return err
+		return time.Time{}, false, err
 	}
 
 	sentAt := time.Now()
@@ -125,7 +191,7 @@ func sendScheduledAgentMessage(ctx context.Context, c *websocket.Conn, scheduler
 		}
 	}
 	utils.Info("Agent 主动消息已发送，下一次主动触达时间: %s", nextAt)
-	return nil
+	return sentAt, true, nil
 }
 
 func StartStatusMonitor(ctx context.Context, sessionID string) {

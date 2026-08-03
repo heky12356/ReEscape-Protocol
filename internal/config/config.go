@@ -32,12 +32,15 @@ type Config struct {
 	Token                             string
 
 	// 调度器配置
-	EnableNaturalScheduler bool    // 启用自然定时器
-	EnableEmotionalMemory  bool    // 启用情感记忆
-	ActiveHours            []int   // 活跃时间段
-	SleepHours             []int   // 休息时间段
-	BaseInterval           int     // 基础发送间隔(分钟)
-	RandomFactor           float64 // 随机因子
+	EnableNaturalScheduler      bool    // 启用自然定时器
+	EnableEmotionalMemory       bool    // 启用情感记忆
+	ActiveHours                 []int   // 活跃时间段
+	SleepHours                  []int   // 休息时间段
+	BaseInterval                int     // 基础发送间隔(分钟)
+	RandomFactor                float64 // 随机因子
+	ProactiveClaimLeaseMs       int     // 主动 turn claim 租约(毫秒)
+	ProactiveSkipOnPendingUser  bool    // 用户 turn pending/running 时跳过主动触达
+	ProactiveUserMessageGraceMs int     // 用户消息保护窗口(毫秒)
 
 	// AI配置增强
 	AiTemperature float32 // AI温度参数
@@ -153,6 +156,9 @@ func init() {
 	config.SleepHours = getIntArrayEnv("SLEEP_HOURS", []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 22, 23})
 	config.BaseInterval = getIntEnv("BASE_INTERVAL", 45)
 	config.RandomFactor = getFloatEnv("RANDOM_FACTOR", 0.5)
+	config.ProactiveClaimLeaseMs = getIntEnv("PROACTIVE_CLAIM_LEASE_MS", 120000)
+	config.ProactiveSkipOnPendingUser = getBoolEnv("PROACTIVE_SKIP_ON_PENDING_USER", true)
+	config.ProactiveUserMessageGraceMs = getIntEnv("PROACTIVE_USER_MESSAGE_GRACE_MS", 30000)
 
 	// AI配置增强
 	config.AiTemperature = float32(getFloatEnv("AI_TEMPERATURE", 1.0))

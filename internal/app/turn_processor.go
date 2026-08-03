@@ -87,6 +87,7 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 			if err := pipeline.Run(&messageCtx); err != nil {
 				var skipErr *inbound.SkipError
 				if errors.As(err, &skipErr) {
+					clearPendingUserTurnIfMarked(sessionID)
 					utils.Infow("message skipped",
 						utils.String("request_id", messageCtx.RequestID),
 						utils.String("session_id", sessionID),
@@ -108,6 +109,7 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 					}
 					continue
 				}
+				clearPendingUserTurnIfMarked(sessionID)
 				utils.Errorw("message pipeline failed",
 					utils.String("request_id", messageCtx.RequestID),
 					utils.String("session_id", sessionID),
@@ -125,6 +127,19 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 			}
 
 			state.GetManager().EnsureSession(sessionID, msg.User_id, msg.Group_id, msg.Type)
+			state.GetManager().BeginUserTurn(sessionID, startedAt)
+			userTurnEnded := false
+			endUserTurn := func() {
+				if userTurnEnded {
+					return
+				}
+				state.GetManager().EndUserTurn(sessionID, time.Now())
+				userTurnEnded = true
+			}
+			appendTurnGateEvent(ctx, eventStore, "user_turn_started", sessionID, msg.User_id, map[string]any{
+				"request_id": messageCtx.RequestID,
+				"message_id": msg.MessageID,
+			})
 			timing := state.GetManager().GetTimingSnapshot(sessionID)
 			messageCtx.PreviousUserMessageAt = timing.LastUserMessageAt
 			messageCtx.PreviousAssistantMessageAt = timing.LastAssistantMessageAt
@@ -161,6 +176,11 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 					"Total WebSocket messages by lifecycle result.",
 					map[string]string{"result": "handler_error"},
 				)
+				endUserTurn()
+				appendTurnGateEvent(ctx, eventStore, "user_turn_completed", sessionID, msg.User_id, map[string]any{
+					"request_id": messageCtx.RequestID,
+					"result":     "handler_error",
+				})
 				continue
 			}
 
@@ -207,6 +227,12 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 				"Total WebSocket messages by lifecycle result.",
 				map[string]string{"result": "processed"},
 			)
+			endUserTurn()
+			appendTurnGateEvent(ctx, eventStore, "user_turn_completed", sessionID, msg.User_id, map[string]any{
+				"request_id": messageCtx.RequestID,
+				"result":     "processed",
+				"replied":    result.Replied,
+			})
 		}
 	}
 }
@@ -293,6 +319,28 @@ func recordAssistantConversationTurn(sessionID, reply string, proactive bool, re
 		return
 	}
 	state.GetManager().RecordAssistantTurn(sessionID, trimmed, recordedAt, proactive)
+}
+
+func clearPendingUserTurnIfMarked(sessionID string) {
+	if state.GetManager().HasPendingOrRunningUserTurn(sessionID) {
+		state.GetManager().EndUserTurn(sessionID, time.Now())
+	}
+}
+
+func appendTurnGateEvent(ctx context.Context, store eventlog.Store, eventType string, sessionID string, userID int64, data map[string]any) {
+	if store == nil {
+		return
+	}
+	if err := store.Append(ctx, eventlog.Event{
+		Type:      eventType,
+		SessionID: sessionID,
+		UserID:    userID,
+		Actor:     "runtime",
+		Data:      data,
+		CreatedAt: time.Now(),
+	}); err != nil {
+		utils.Warn("append turn gate event failed: %v", err)
+	}
 }
 
 func buildMessageRequestID(messageID int64) string {

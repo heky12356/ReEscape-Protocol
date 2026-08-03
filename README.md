@@ -63,6 +63,7 @@ AI 参数的优先级：
 - ReAct web tools：`ENABLE_WEB_TOOLS`、`WEB_SEARCH_PROVIDER`、`WEB_SEARCH_ENDPOINT`、`WEB_SEARCH_MAX_RESULTS`、`WEB_TOOL_TIMEOUT_MS`
 - 回复策略：`LIGHT_ACK_MODE`、`SHORT_REPLY_STRICTNESS`、`ENABLE_SPACE_SEGMENT_DELIMITER`
 - 聚合：`MESSAGE_AGGREGATE_IDLE_WINDOW_MS`、`MESSAGE_AGGREGATE_MAX_WINDOW_MS`、`MESSAGE_AGGREGATE_MAX_MESSAGES`
+- 主动触达保护：`PROACTIVE_CLAIM_LEASE_MS`、`PROACTIVE_SKIP_ON_PENDING_USER`、`PROACTIVE_USER_MESSAGE_GRACE_MS`
 - 上下文：`CONTEXT_RECENT_TURNS`、`CONTEXT_SUMMARY_MAX_TURNS`、`CONTEXT_OPEN_LOOP_LIMIT`
 - 图片：`ENABLE_VISION_INPUT`、`ENABLE_IMAGE_ASSET_REPLY`、`IMAGE_ASSET_DIR`、`IMAGE_ASSET_INDEX_FILE`
 - 运行：`DATA_DIR`、`LOG_DIR`、`LOG_LEVEL`、`LOG_FORMAT`
@@ -165,6 +166,20 @@ SearXNG 实例需要启用 JSON search API。`ENABLE_WEB_TOOLS`、provider、end
 ReAct 模式下，agent 可以通过 `get_proactive_schedule` 查询当前 session 的下一次主动触达时间、手动计划摘要和 meta。开启 `REACT_ALLOW_WRITE_TOOLS=true` 后，agent 还可以通过 `update_proactive_schedule` 根据用户明确约定设置、推迟或取消下一次主动触达。
 
 主动触达计划只写入 session state，不直接持有调度器实例。自然调度器仍负责 sweep 和到点触发；当 ReAct 已显式管理 schedule 时，普通自动重排不会覆盖手动计划。
+
+为避免“旧主动计划过期后，用户刚发消息又同时触发 proactive 回复”的竞态，可以配置主动触达保护：
+
+```env
+PROACTIVE_CLAIM_LEASE_MS=120000
+PROACTIVE_SKIP_ON_PENDING_USER=true
+PROACTIVE_USER_MESSAGE_GRACE_MS=30000
+```
+
+- `PROACTIVE_CLAIM_LEASE_MS`：主动触达 turn 的 claim 租约时长，避免 ReAct 调用失败后永久占用。
+- `PROACTIVE_SKIP_ON_PENDING_USER`：当同一 session 已有用户消息 pending 或正在处理时，跳过本次 proactive 发送。
+- `PROACTIVE_USER_MESSAGE_GRACE_MS`：用户消息进入系统后的保护窗口，用于覆盖消息聚合和刚结束处理的短暂竞态。
+
+推荐保持 `PROACTIVE_SKIP_ON_PENDING_USER=true`。用户消息触发的 ReAct 回复完成后，会按当前逻辑重新安排下一次自动主动触达；如果本轮 ReAct 调用了 `update_proactive_schedule`，则以工具设置的计划为准。
 
 ## 上下文记忆
 

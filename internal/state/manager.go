@@ -45,6 +45,11 @@ type Session struct {
 	LastInteractionAt          time.Time                      `json:"last_interaction_at,omitempty"`
 	LastProactiveAt            time.Time                      `json:"last_proactive_at,omitempty"`
 	NextScheduledAt            time.Time                      `json:"next_scheduled_at,omitempty"`
+	PendingUserTurnAt          time.Time                      `json:"pending_user_turn_at,omitempty"`
+	UserTurnInFlight           bool                           `json:"user_turn_in_flight,omitempty"`
+	ProactiveTurnInFlight      bool                           `json:"proactive_turn_in_flight,omitempty"`
+	ProactiveClaimedAt         time.Time                      `json:"proactive_claimed_at,omitempty"`
+	ProactiveClaimedUntil      time.Time                      `json:"proactive_claimed_until,omitempty"`
 	ProactiveScheduleSummary   string                         `json:"proactive_schedule_summary,omitempty"`
 	ProactiveScheduleReason    string                         `json:"proactive_schedule_reason,omitempty"`
 	ProactiveScheduleMeta      map[string]any                 `json:"proactive_schedule_meta,omitempty"`
@@ -235,6 +240,152 @@ func (sm *StateManager) RecordAssistantTurn(sessionID, content string, at time.T
 	sm.mu.Unlock()
 
 	sm.markDirty()
+}
+
+func (sm *StateManager) MarkPendingUserTurn(sessionID string, at time.Time) {
+	if at.IsZero() {
+		at = time.Now()
+	}
+
+	sm.mu.Lock()
+	session := sm.ensureSessionLocked(sessionID, 0, 0, 0)
+	session.PendingUserTurnAt = at
+	session.LastUpdated = at
+	sm.mu.Unlock()
+
+	sm.markDirty()
+}
+
+func (sm *StateManager) BeginUserTurn(sessionID string, at time.Time) {
+	if at.IsZero() {
+		at = time.Now()
+	}
+
+	sm.mu.Lock()
+	session := sm.ensureSessionLocked(sessionID, 0, 0, 0)
+	session.PendingUserTurnAt = time.Time{}
+	session.UserTurnInFlight = true
+	session.LastUpdated = at
+	sm.mu.Unlock()
+
+	sm.markDirty()
+}
+
+func (sm *StateManager) EndUserTurn(sessionID string, at time.Time) {
+	if at.IsZero() {
+		at = time.Now()
+	}
+
+	sm.mu.Lock()
+	session := sm.ensureSessionLocked(sessionID, 0, 0, 0)
+	session.PendingUserTurnAt = time.Time{}
+	session.UserTurnInFlight = false
+	session.LastUpdated = at
+	sm.mu.Unlock()
+
+	sm.markDirty()
+}
+
+func (sm *StateManager) HasPendingOrRunningUserTurn(sessionID string) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session := sm.sessions[sessionID]
+	return hasPendingOrRunningUserTurnLocked(session)
+}
+
+func (sm *StateManager) TryClaimProactiveTurn(sessionID string, now time.Time, lease time.Duration) (bool, time.Time) {
+	return sm.TryClaimProactiveTurnWithUserGate(sessionID, now, lease, true, 0)
+}
+
+func (sm *StateManager) TryClaimProactiveTurnWithUserGate(sessionID string, now time.Time, lease time.Duration, skipOnUserTurn bool, userGrace time.Duration) (bool, time.Time) {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if lease <= 0 {
+		lease = 2 * time.Minute
+	}
+
+	sm.mu.Lock()
+	session := sm.ensureSessionLocked(sessionID, 0, 0, 0)
+	next := session.NextScheduledAt
+	if next.IsZero() || now.Before(next) {
+		sm.mu.Unlock()
+		return false, next
+	}
+	if skipOnUserTurn && !isSessionIdleForProactiveLocked(session, now, userGrace) {
+		sm.mu.Unlock()
+		return false, next
+	}
+	if session.ProactiveTurnInFlight && (session.ProactiveClaimedUntil.IsZero() || now.Before(session.ProactiveClaimedUntil)) {
+		sm.mu.Unlock()
+		return false, next
+	}
+
+	session.ProactiveTurnInFlight = true
+	session.ProactiveClaimedAt = now
+	session.ProactiveClaimedUntil = now.Add(lease)
+	session.LastUpdated = now
+	sm.mu.Unlock()
+
+	sm.markDirty()
+	return true, next
+}
+
+func (sm *StateManager) HasActiveProactiveClaim(sessionID string, now time.Time) bool {
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session := sm.sessions[sessionID]
+	if session == nil || !session.ProactiveTurnInFlight {
+		return false
+	}
+	return session.ProactiveClaimedUntil.IsZero() || now.Before(session.ProactiveClaimedUntil)
+}
+
+func (sm *StateManager) ReleaseProactiveClaim(sessionID string) {
+	sm.mu.Lock()
+	session := sm.ensureSessionLocked(sessionID, 0, 0, 0)
+	clearProactiveClaimLocked(session)
+	session.LastUpdated = time.Now()
+	sm.mu.Unlock()
+
+	sm.markDirty()
+}
+
+func (sm *StateManager) CompleteProactiveTurn(sessionID string, sentAt time.Time) {
+	if sentAt.IsZero() {
+		sentAt = time.Now()
+	}
+
+	sm.mu.Lock()
+	session := sm.ensureSessionLocked(sessionID, 0, 0, 0)
+	clearProactiveClaimLocked(session)
+	session.LastProactiveAt = sentAt
+	session.LastUpdated = sentAt
+	sm.mu.Unlock()
+
+	sm.markDirty()
+}
+
+func (sm *StateManager) IsSessionIdleForProactive(sessionID string, now time.Time) bool {
+	return sm.IsSessionIdleForProactiveWithGrace(sessionID, now, 0)
+}
+
+func (sm *StateManager) IsSessionIdleForProactiveWithGrace(sessionID string, now time.Time, userGrace time.Duration) bool {
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session := sm.sessions[sessionID]
+	return isSessionIdleForProactiveLocked(session, now, userGrace)
 }
 
 func (sm *StateManager) SetNextScheduledAt(sessionID string, at time.Time) {
@@ -501,6 +652,11 @@ func (sm *StateManager) ResetSession(sessionID string) {
 		session.LastInteractionAt = now
 		session.LastProactiveAt = time.Time{}
 		session.NextScheduledAt = time.Time{}
+		session.PendingUserTurnAt = time.Time{}
+		session.UserTurnInFlight = false
+		session.ProactiveTurnInFlight = false
+		session.ProactiveClaimedAt = time.Time{}
+		session.ProactiveClaimedUntil = time.Time{}
 		session.ProactiveScheduleSummary = ""
 		session.ProactiveScheduleReason = ""
 		session.ProactiveScheduleMeta = nil
@@ -727,6 +883,10 @@ func (sm *StateManager) normalizeSession(sessionID string, session *Session) {
 	if session.LastUpdated.IsZero() {
 		session.LastUpdated = session.LastReply
 	}
+	session.UserTurnInFlight = false
+	session.ProactiveTurnInFlight = false
+	session.ProactiveClaimedAt = time.Time{}
+	session.ProactiveClaimedUntil = time.Time{}
 	if session.Summary == "" && len(session.Conversation) > 0 {
 		refreshSessionDerivedMemory(session)
 	}
@@ -798,6 +958,11 @@ func (sm *StateManager) snapshotLocked() map[string]*Session {
 			LastInteractionAt:          session.LastInteractionAt,
 			LastProactiveAt:            session.LastProactiveAt,
 			NextScheduledAt:            session.NextScheduledAt,
+			PendingUserTurnAt:          session.PendingUserTurnAt,
+			UserTurnInFlight:           session.UserTurnInFlight,
+			ProactiveTurnInFlight:      session.ProactiveTurnInFlight,
+			ProactiveClaimedAt:         session.ProactiveClaimedAt,
+			ProactiveClaimedUntil:      session.ProactiveClaimedUntil,
 			ProactiveScheduleSummary:   session.ProactiveScheduleSummary,
 			ProactiveScheduleReason:    session.ProactiveScheduleReason,
 			ProactiveScheduleMeta:      cloneScheduleMeta(session.ProactiveScheduleMeta),
@@ -813,6 +978,32 @@ func (sm *StateManager) snapshotLocked() map[string]*Session {
 	}
 
 	return result
+}
+
+func hasPendingOrRunningUserTurnLocked(session *Session) bool {
+	if session == nil {
+		return false
+	}
+	return !session.PendingUserTurnAt.IsZero() || session.UserTurnInFlight
+}
+
+func isSessionIdleForProactiveLocked(session *Session, now time.Time, userGrace time.Duration) bool {
+	if session == nil {
+		return true
+	}
+	if hasPendingOrRunningUserTurnLocked(session) {
+		return false
+	}
+	if userGrace > 0 && !session.LastUserMessageAt.IsZero() && now.Sub(session.LastUserMessageAt) < userGrace {
+		return false
+	}
+	return true
+}
+
+func clearProactiveClaimLocked(session *Session) {
+	session.ProactiveTurnInFlight = false
+	session.ProactiveClaimedAt = time.Time{}
+	session.ProactiveClaimedUntil = time.Time{}
 }
 
 func cloneBoolMap(source map[string]bool) map[string]bool {

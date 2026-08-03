@@ -55,6 +55,9 @@ func (a *MessageAggregator) Run(ctx context.Context, in <-chan model.Msg, out ch
 
 func (a *MessageAggregator) handleMessage(ctx context.Context, msg model.Msg, out chan<- model.Msg) {
 	sessionID := state.BuildSessionID(msg.User_id, msg.Group_id, msg.Type)
+	if isTargetUserMessage(msg) {
+		state.GetManager().MarkPendingUserTurn(sessionID, messageTime(msg))
+	}
 
 	if !shouldAggregate(msg) {
 		if strings.TrimSpace(msg.Message) == "exit();" {
@@ -156,11 +159,7 @@ func currentAggregationLimits() (time.Duration, time.Duration, int) {
 }
 
 func shouldAggregate(msg model.Msg) bool {
-	cfg := config.GetConfig()
-	if msg.Type != 1 {
-		return false
-	}
-	if msg.User_id != cfg.TargetId {
+	if !isTargetUserMessage(msg) {
 		return false
 	}
 	if strings.TrimSpace(msg.Message) == "" {
@@ -170,6 +169,31 @@ func shouldAggregate(msg model.Msg) bool {
 		return false
 	}
 	return true
+}
+
+func isTargetUserMessage(msg model.Msg) bool {
+	cfg := config.GetConfig()
+	if msg.Type != 1 {
+		return false
+	}
+	if msg.User_id != cfg.TargetId {
+		return false
+	}
+	if strings.TrimSpace(msg.Message) == "" && len(msg.Parts) == 0 {
+		return false
+	}
+	return true
+}
+
+func messageTime(msg model.Msg) time.Time {
+	switch {
+	case msg.StartTime != 0:
+		return time.Unix(msg.StartTime, 0)
+	case msg.Time != 0:
+		return time.Unix(msg.Time, 0)
+	default:
+		return time.Now()
+	}
 }
 
 func (b *aggregationBucket) add(msg model.Msg) bool {

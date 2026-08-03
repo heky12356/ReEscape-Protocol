@@ -3,6 +3,7 @@ package scheduler
 import (
 	"time"
 
+	"project-yume/internal/config"
 	"project-yume/internal/state"
 )
 
@@ -47,6 +48,62 @@ func (ns *NaturalScheduler) ShouldSendNow(sessionID string, now time.Time) (bool
 	return !now.Before(next), next
 }
 
+func (ns *NaturalScheduler) TryClaimDue(sessionID string, now time.Time) (bool, time.Time) {
+	next := ns.EnsureScheduled(sessionID, now)
+	if now.Before(next) {
+		return false, next
+	}
+
+	claimLease := ns.claimLease()
+	userGrace := ns.userMessageGrace()
+	cfg := config.GetConfig()
+	return state.GetManager().TryClaimProactiveTurnWithUserGate(
+		sessionID,
+		now,
+		claimLease,
+		cfg.ProactiveSkipOnPendingUser,
+		userGrace,
+	)
+}
+
+func (ns *NaturalScheduler) ReleaseClaim(sessionID string) {
+	state.GetManager().ReleaseProactiveClaim(sessionID)
+}
+
+func (ns *NaturalScheduler) CompleteClaim(sessionID string, sentAt time.Time) {
+	state.GetManager().CompleteProactiveTurn(sessionID, sentAt)
+}
+
+func (ns *NaturalScheduler) IsIdleForProactive(sessionID string, now time.Time) bool {
+	cfg := config.GetConfig()
+	if !cfg.ProactiveSkipOnPendingUser {
+		return true
+	}
+	return state.GetManager().IsSessionIdleForProactiveWithGrace(sessionID, now, ns.userMessageGrace())
+}
+
 func (ns *NaturalScheduler) SweepInterval() time.Duration {
 	return defaultSchedulerSweepInterval
+}
+
+func (ns *NaturalScheduler) claimLease() time.Duration {
+	lease := time.Duration(config.GetConfig().ProactiveClaimLeaseMs) * time.Millisecond
+	if lease <= 0 {
+		return 2 * time.Minute
+	}
+	return lease
+}
+
+func (ns *NaturalScheduler) userMessageGrace() time.Duration {
+	cfg := config.GetConfig()
+	grace := time.Duration(cfg.ProactiveUserMessageGraceMs) * time.Millisecond
+	if grace <= 0 {
+		grace = 30 * time.Second
+	}
+
+	aggregateMaxWindow := time.Duration(cfg.MessageAggregateMaxWindowMs) * time.Millisecond
+	if aggregateMaxWindow > grace {
+		return aggregateMaxWindow
+	}
+	return grace
 }

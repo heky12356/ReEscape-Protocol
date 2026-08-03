@@ -1,11 +1,14 @@
 package agent
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"project-yume/internal/config"
+	"project-yume/internal/skill"
 	"project-yume/internal/state"
 	"project-yume/internal/tools"
 
@@ -96,6 +99,39 @@ func TestBuildRuntimeContextIncludesProactiveTriggerTiming(t *testing.T) {
 	}
 }
 
+func TestBuildRuntimeContextIncludesSkillHints(t *testing.T) {
+	restoreTemporalConfig(t, false, "Asia/Shanghai", "2006-01-02 15:04:05")
+	restoreSkillConfig(t, true, 2)
+	loadAgentTestSkill(t, "comfort", "Use when the user feels sad or overwhelmed.", "# Comfort")
+
+	turn := NewTurnContext(TurnInput{
+		SessionID: "private:42",
+		Message:   "I feel sad",
+	})
+
+	context := buildRuntimeContext(turn)
+	assertTemporalContains(t, context, "【Runtime Context】")
+	assertTemporalContains(t, context, "【Skill Hints】")
+	assertTemporalContains(t, context, "- comfort: Use when the user feels sad or overwhelmed.")
+	if strings.Contains(context, "# Comfort") {
+		t.Fatalf("did not expect full skill body in runtime context: %q", context)
+	}
+}
+
+func TestBuildRuntimeContextOmitsSkillHintsWhenDisabled(t *testing.T) {
+	restoreTemporalConfig(t, false, "Asia/Shanghai", "2006-01-02 15:04:05")
+	restoreSkillConfig(t, false, 2)
+	loadAgentTestSkill(t, "comfort", "Use when the user feels sad or overwhelmed.", "# Comfort")
+
+	context := buildRuntimeContext(NewTurnContext(TurnInput{
+		SessionID: "private:42",
+		Message:   "I feel sad",
+	}))
+	if strings.Contains(context, "【Skill Hints】") {
+		t.Fatalf("did not expect skill hints when disabled: %q", context)
+	}
+}
+
 func TestRuntimeBuildMessagesInjectsRuntimeContextBeforeConversation(t *testing.T) {
 	restoreTemporalConfig(t, true, "Asia/Shanghai", "2006-01-02 15:04")
 	sm := state.GetManager()
@@ -153,6 +189,39 @@ func restoreTemporalConfig(t *testing.T, enabled bool, timezone string, format s
 	cfg.EnableTimeContext = enabled
 	cfg.TimeContextTimezone = timezone
 	cfg.TimeContextFormat = format
+}
+
+func restoreSkillConfig(t *testing.T, enabled bool, limit int) {
+	t.Helper()
+
+	cfg := config.GetConfig()
+	previousEnabled := cfg.EnableSkills
+	previousLimit := cfg.SkillAutoHintLimit
+	t.Cleanup(func() {
+		cfg.EnableSkills = previousEnabled
+		cfg.SkillAutoHintLimit = previousLimit
+		skill.GetManager().LoadDirs(nil)
+	})
+
+	cfg.EnableSkills = enabled
+	cfg.SkillAutoHintLimit = limit
+}
+
+func loadAgentTestSkill(t *testing.T, name, description, body string) {
+	t.Helper()
+
+	root := t.TempDir()
+	path := filepath.Join(root, name, "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\nname: " + name + "\ndescription: " + description + "\n---\n" + body
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if errs := skill.GetManager().LoadDirs([]string{root}); len(errs) != 0 {
+		t.Fatalf("load skill: %v", errs)
+	}
 }
 
 func assertTemporalContains(t *testing.T, content string, expected string) {

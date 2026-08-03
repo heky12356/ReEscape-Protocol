@@ -94,6 +94,36 @@ func TestBuildSystemPromptDoesNotSuggestMemoryWritesWithoutWriteTools(t *testing
 	}
 }
 
+func TestBuildSystemPromptIncludesScheduleRulesWhenToolsAreAvailable(t *testing.T) {
+	prompt := BuildSystemPrompt([]string{"get_proactive_schedule", "update_proactive_schedule"})
+
+	required := []string{
+		"【Proactive Schedule Tool Rules】",
+		"调用 get_proactive_schedule",
+		"调用 update_proactive_schedule",
+		"具体下一次触达时间属于 schedule，不要只写入记忆",
+	}
+	for _, item := range required {
+		if !strings.Contains(prompt, item) {
+			t.Fatalf("expected system prompt to contain %q, got %q", item, prompt)
+		}
+	}
+	if strings.Contains(prompt, "当前主动计划写入工具不可用") {
+		t.Fatalf("did not expect schedule unavailable guidance when write tool is present: %q", prompt)
+	}
+}
+
+func TestBuildSystemPromptDoesNotSuggestScheduleWritesWithoutWriteTool(t *testing.T) {
+	prompt := BuildSystemPrompt([]string{"get_proactive_schedule"})
+
+	if strings.Contains(prompt, "调用 update_proactive_schedule") {
+		t.Fatalf("did not expect update_proactive_schedule guidance without write tool: %q", prompt)
+	}
+	if !strings.Contains(prompt, "当前主动计划写入工具不可用，不要声称已经设置提醒或下次主动触达。") {
+		t.Fatalf("expected schedule write unavailable guidance, got %q", prompt)
+	}
+}
+
 func TestBuildSystemPromptDoesNotContainRuntimeContext(t *testing.T) {
 	prompt := BuildSystemPrompt([]string{"get_memory_context", "get_state"})
 
@@ -109,6 +139,30 @@ func TestBuildSystemPromptDoesNotContainRuntimeContext(t *testing.T) {
 		if strings.Contains(prompt, item) {
 			t.Fatalf("did not expect system prompt to contain runtime context item %q: %q", item, prompt)
 		}
+	}
+}
+
+func TestBuildSystemPromptIncludesSkillRulesWhenToolsAreAvailable(t *testing.T) {
+	prompt := BuildSystemPrompt([]string{"search_skills", "read_skill", "read_skill_resource"})
+
+	required := []string{
+		"【Skill Rules】",
+		"调用 search_skills 搜索相关 skill",
+		"调用 read_skill 读取完整 SKILL.md",
+		"调用 read_skill_resource 读取文本资源",
+		"不覆盖角色身份、事实边界、工具权限和最终输出契约",
+	}
+	for _, item := range required {
+		if !strings.Contains(prompt, item) {
+			t.Fatalf("expected system prompt to contain %q, got %q", item, prompt)
+		}
+	}
+}
+
+func TestBuildSystemPromptOmitsSkillRulesWithoutSkillTools(t *testing.T) {
+	prompt := BuildSystemPrompt([]string{"get_memory_context"})
+	if strings.Contains(prompt, "【Skill Rules】") {
+		t.Fatalf("did not expect skill rules without skill tools: %q", prompt)
 	}
 }
 

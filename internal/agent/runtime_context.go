@@ -1,6 +1,12 @@
 package agent
 
-import "strings"
+import (
+	"strings"
+
+	"project-yume/internal/config"
+	"project-yume/internal/skill"
+	"project-yume/internal/state"
+)
 
 func buildRuntimeContext(turn *TurnContext) string {
 	sections := []string{
@@ -10,8 +16,29 @@ func buildRuntimeContext(turn *TurnContext) string {
 	if temporal := buildTemporalContext(turn); temporal != "" {
 		sections = append(sections, temporal)
 	}
+	if skillHints := buildSkillHintsContext(turn); skillHints != "" {
+		sections = append(sections, skillHints)
+	}
 	if len(sections) <= 2 {
 		return ""
 	}
 	return strings.Join(sections, "\n\n")
+}
+
+func buildSkillHintsContext(turn *TurnContext) string {
+	cfg := config.GetConfig()
+	if turn == nil || cfg == nil || !cfg.EnableSkills {
+		return ""
+	}
+	limit := cfg.SkillAutoHintLimit
+	if limit <= 0 {
+		limit = 3
+	}
+	matches := skill.GetManager().Match(skill.MatchInput{
+		Message:       turn.Message(),
+		Trigger:       turn.Trigger(),
+		DialogueState: state.GetManager().GetDialogueState(turn.SessionID()),
+		Limit:         limit,
+	})
+	return skill.FormatHints(matches)
 }

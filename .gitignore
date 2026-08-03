@@ -12,6 +12,7 @@ plan.drawio
 !.env.enhanced.example
 config/ai_profiles.json
 config/character
+config/skills
 debug.env
 logs
 doce

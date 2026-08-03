@@ -11,7 +11,7 @@ ReEscape Protocol 是一个基于 OneBot WebSocket 的聊天机器人运行时�
 - `internal/connect`：OneBot WebSocket/API 连接和消息发送。
 - `internal/inbound`：入站消息管线，负责聚合、去重、过滤和标准化。
 - `internal/agent`：ReAct Agent Runtime，负责系统提示词、上下文、工具循环、预算、trace 和结果归一。
-- `internal/tools`：工具注册、执行、schema 和策略；当前包含记忆、好感、图片素材、会话状态和时间工具。
+- `internal/tools`：工具注册、执行、schema 和策略；当前包含记忆、好感、图片素材、会话状态、主动触达计划和时间工具。
 - `internal/domain`：业务领域逻辑，例如好感系统。
 - `internal/state`：按用户/会话维护状态、对话历史和上下文层。
 - `internal/memory`：长期画像、事实记忆和情绪记忆。
@@ -26,6 +26,7 @@ ReEscape Protocol 是一个基于 OneBot WebSocket 的聊天机器人运行时�
 - 连续碎片消息聚合。
 - 按用户/会话隔离上下文和状态。
 - ReAct 工具调用，可按需读取或写入业务状态。
+- ReAct Skills：兼容标准 `skill-name/SKILL.md` 包，按当前消息注入 skill hints，并可通过只读工具按需读取完整 skill。
 - 长期记忆：用户画像、事实记忆、情绪状态。
 - 好感系统：领域逻辑在 `internal/domain/affection`，工具入口在 `internal/tools/affection`。
 - 图片素材回复：素材索引在 `assets/images/index.json`。
@@ -58,6 +59,7 @@ AI 参数的优先级：
 - AI fallback：`AI_KEY`、`AI_BASEURL`、`AI_MODEL`
 - 角色：`CHARACTER`、`CHARACTER_IDENTITY_MODE`、`ALLOW_CHARACTER_IDENTITY_EXPLANATION`
 - ReAct：`ENABLE_REACT_AGENT`、`REACT_MAX_STEPS`、`REACT_TOOL_TIMEOUT_MS`、`REACT_ALLOW_WRITE_TOOLS`、`REACT_TRACE_MODE`
+- ReAct skills：`ENABLE_SKILLS`、`SKILL_DIRS`、`SKILL_AUTO_HINT_LIMIT`、`SKILL_RESOURCE_MAX_BYTES`
 - ReAct web tools：`ENABLE_WEB_TOOLS`、`WEB_SEARCH_PROVIDER`、`WEB_SEARCH_ENDPOINT`、`WEB_SEARCH_MAX_RESULTS`、`WEB_TOOL_TIMEOUT_MS`
 - 回复策略：`LIGHT_ACK_MODE`、`SHORT_REPLY_STRICTNESS`、`ENABLE_SPACE_SEGMENT_DELIMITER`
 - 聚合：`MESSAGE_AGGREGATE_IDLE_WINDOW_MS`、`MESSAGE_AGGREGATE_MAX_WINDOW_MS`、`MESSAGE_AGGREGATE_MAX_MESSAGES`
@@ -95,6 +97,46 @@ OneBot event
 
 当 `ENABLE_REACT_AGENT=false` 时，系统仍可走旧的 handler/service 回复路径。该路径主要用于兼容和回退，新的能力应优先落在 `internal/agent`、`internal/tools` 或 `internal/domain`。
 
+## ReAct Skills
+
+Skills 是 ReAct 的只读策略层，用来指导某类任务或回复场景，不替代 Character Card、记忆、状态或工具权限。项目兼容标准 Agent Skill 包格式：
+
+```text
+skill-name/
+  SKILL.md
+  references/
+  assets/
+  scripts/
+```
+
+`SKILL.md` 必须包含 YAML frontmatter，至少提供 `name` 和 `description`：
+
+```markdown
+---
+name: comfort
+description: Use when the user expresses sadness, stress, fatigue, disappointment, or emotional overwhelm.
+---
+
+# Comfort
+
+先承接用户情绪，不急着解决问题。
+```
+
+默认从 `./config/skills` 加载，当前内置了 `comfort`、`conflict-repair`、`schedule-commitment` 和 `technical-explain` 示例。运行时只会自动注入匹配到的 skill name/description 作为 `Skill Hints`；完整 `SKILL.md` 需要模型通过 `read_skill` 工具按需读取，扩展材料通过 `read_skill_resource` 读取。
+
+相关配置：
+
+```env
+ENABLE_SKILLS=true
+SKILL_DIRS=./config/skills
+SKILL_AUTO_HINT_LIMIT=3
+SKILL_RESOURCE_MAX_BYTES=65536
+SKILL_ALLOW_SCRIPTS=false
+SKILL_LOAD_SYSTEM=false
+```
+
+`search_skills`、`read_skill`、`read_skill_resource` 都是只读工具，即使 `REACT_ALLOW_WRITE_TOOLS=false` 也会保留。第一阶段不会执行 `scripts/`，只允许把其中的文本作为资源读取。
+
 ## ReAct Web Tools
 
 `web_search` / `web_fetch` 是 ReAct 只读工具，默认通过 `ENABLE_WEB_TOOLS=false` 关闭。第一版实现了 `searxng` 搜索 provider，抓取使用本地 Go HTTP client，并带有 SSRF 防护、文本 content-type 限制、大小限制和超时。
@@ -117,6 +159,12 @@ SearXNG 实例需要启用 JSON search API。`ENABLE_WEB_TOOLS`、provider、end
 关闭写工具时，它们不会暴露给模型，也不会出现在 ReAct system prompt 的可用工具列表里。开启 `REACT_ALLOW_WRITE_TOOLS=true` 后，prompt 会注入 Memory Tool Rules，引导模型在用户明确说“记住”“以后”“我喜欢”“我叫”“不要再”等长期偏好或事实表达时调用写入工具。
 
 写入规则保持保守：只记录用户明确表达的身份、地点、计划、重要关系、长期偏好或互动禁忌；不要记录一次性情绪、临时吐槽、普通寒暄、含糊猜测或模型推断。
+
+## ReAct 主动触达计划
+
+ReAct 模式下，agent 可以通过 `get_proactive_schedule` 查询当前 session 的下一次主动触达时间、手动计划摘要和 meta。开启 `REACT_ALLOW_WRITE_TOOLS=true` 后，agent 还可以通过 `update_proactive_schedule` 根据用户明确约定设置、推迟或取消下一次主动触达。
+
+主动触达计划只写入 session state，不直接持有调度器实例。自然调度器仍负责 sweep 和到点触发；当 ReAct 已显式管理 schedule 时，普通自动重排不会覆盖手动计划。
 
 ## 上下文记忆
 

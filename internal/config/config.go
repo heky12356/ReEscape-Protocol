@@ -84,6 +84,12 @@ type Config struct {
 	ContextRecentTurns           int    // prompt 中保留的最近 turn 数
 	ContextSummaryMaxTurns       int    // rolling summary 覆盖的历史 turn 上限
 	ContextOpenLoopLimit         int    // prompt 中注入的 open loop 数量
+	EnableSkills                 bool   // 启用标准 Agent Skill 包
+	SkillDirs                    []string
+	SkillAutoHintLimit           int
+	SkillResourceMaxBytes        int
+	SkillAllowScripts            bool
+	SkillLoadSystem              bool
 
 	// ReAct Agent 配置
 	EnableReactAgent     bool   // 启用 ReAct Agent Runtime
@@ -194,6 +200,12 @@ func init() {
 	config.ContextRecentTurns = getIntEnv("CONTEXT_RECENT_TURNS", 8)
 	config.ContextSummaryMaxTurns = getIntEnv("CONTEXT_SUMMARY_MAX_TURNS", 24)
 	config.ContextOpenLoopLimit = getIntEnv("CONTEXT_OPEN_LOOP_LIMIT", 4)
+	config.EnableSkills = getBoolEnv("ENABLE_SKILLS", true)
+	config.SkillDirs = getStringArrayEnv("SKILL_DIRS", []string{"./config/skills"})
+	config.SkillAutoHintLimit = getIntEnv("SKILL_AUTO_HINT_LIMIT", 3)
+	config.SkillResourceMaxBytes = getIntEnv("SKILL_RESOURCE_MAX_BYTES", 65536)
+	config.SkillAllowScripts = getBoolEnv("SKILL_ALLOW_SCRIPTS", false)
+	config.SkillLoadSystem = getBoolEnv("SKILL_LOAD_SYSTEM", false)
 	config.EnableReactAgent = getBoolEnv("ENABLE_REACT_AGENT", false)
 	config.ReactMaxSteps = getIntEnv("REACT_MAX_STEPS", 4)
 	config.ReactToolTimeoutMs = getIntEnv("REACT_TOOL_TIMEOUT_MS", 3000)
@@ -286,6 +298,26 @@ func getIntArrayEnv(key string, defaultValue []int) []int {
 		return defaultValue
 	}
 
+	return result
+}
+
+func getStringArrayEnv(key string, defaultValue []string) []string {
+	value := os.Getenv(key)
+	if value == "" {
+		return append([]string(nil), defaultValue...)
+	}
+
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			result = append(result, part)
+		}
+	}
+	if len(result) == 0 {
+		return append([]string(nil), defaultValue...)
+	}
 	return result
 }
 

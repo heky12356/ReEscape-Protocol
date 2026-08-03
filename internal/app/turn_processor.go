@@ -130,7 +130,7 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 			messageCtx.PreviousAssistantMessageAt = timing.LastAssistantMessageAt
 			messageCtx.PreviousInteractionAt = timing.LastInteractionAt
 			recordIncomingConversationTurn(messageCtx)
-			if naturalScheduler != nil {
+			if naturalScheduler != nil && !state.GetManager().GetProactiveSchedule(sessionID).Manual {
 				naturalScheduler.RescheduleFrom(sessionID, endedAt)
 			}
 
@@ -178,7 +178,7 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 			if result.Replied {
 				recordedAt := time.Now()
 				recordAssistantConversationTurn(sessionID, result.Reply, false, recordedAt)
-				if naturalScheduler != nil {
+				if naturalScheduler != nil && !result.ScheduleManaged {
 					naturalScheduler.RescheduleFrom(sessionID, recordedAt)
 				}
 			}
@@ -260,11 +260,12 @@ func processMessageTurn(ctx context.Context, c *websocket.Conn, messageCtx handl
 				}
 			}
 			return &handler.ProcessResult{
-				Handled:       agentResult.Handled,
-				Replied:       agentResult.ShouldSend && reply != "",
-				MemoryManaged: true,
-				ReplyMode:     service.ReplyModeFullReply,
-				Reply:         service.BuildAssistantTranscript(reply),
+				Handled:         agentResult.Handled,
+				Replied:         agentResult.ShouldSend && reply != "",
+				MemoryManaged:   true,
+				ScheduleManaged: agentResult.ScheduleManaged,
+				ReplyMode:       service.ReplyModeFullReply,
+				Reply:           service.BuildAssistantTranscript(reply),
 			}, nil
 		}
 

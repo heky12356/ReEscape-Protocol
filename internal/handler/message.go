@@ -568,13 +568,14 @@ func firstNonSystemMessageIndex(conversation []openai.ChatCompletionMessage) int
 
 // ProcessResult 消息处理结果
 type ProcessResult struct {
-	Handled       bool              // 是否被处理
-	Replied       bool              // 是否真正发送了回复
-	MemoryManaged bool              // 当前路径是否已经显式处理长期记忆写入
-	Emotion       string            // 检测到的情感
-	Intention     string            // 检测到的意图
-	ReplyMode     service.ReplyMode // 回复模式
-	Reply         string            // 回复内容
+	Handled         bool              // 是否被处理
+	Replied         bool              // 是否真正发送了回复
+	MemoryManaged   bool              // 当前路径是否已经显式处理长期记忆写入
+	ScheduleManaged bool              // 当前路径是否已经显式处理主动触达计划
+	Emotion         string            // 检测到的情感
+	Intention       string            // 检测到的意图
+	ReplyMode       service.ReplyMode // 回复模式
+	Reply           string            // 回复内容
 }
 
 // MessageProcessor 消息处理器管理器

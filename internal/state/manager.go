@@ -31,25 +31,31 @@ const (
 
 // Session 保存单个用户/会话的运行态。
 type Session struct {
-	ID                     string                         `json:"id"`
-	UserID                 int64                          `json:"user_id"`
-	GroupID                int64                          `json:"group_id"`
-	ChatType               int                            `json:"chat_type"`
-	CurrentState           BotState                       `json:"current_state"`
-	Flags                  map[string]bool                `json:"flags"`
-	Counters               map[string]int                 `json:"counters"`
-	LastReply              time.Time                      `json:"last_reply"`
-	LastReplyMode          string                         `json:"last_reply_mode,omitempty"`
-	LastUserMessageAt      time.Time                      `json:"last_user_message_at,omitempty"`
-	LastAssistantMessageAt time.Time                      `json:"last_assistant_message_at,omitempty"`
-	LastInteractionAt      time.Time                      `json:"last_interaction_at,omitempty"`
-	LastProactiveAt        time.Time                      `json:"last_proactive_at,omitempty"`
-	NextScheduledAt        time.Time                      `json:"next_scheduled_at,omitempty"`
-	Conversation           []openai.ChatCompletionMessage `json:"conversation"`
-	Summary                string                         `json:"summary"`
-	ActiveTopics           []string                       `json:"active_topics"`
-	DialogueState          DialogueState                  `json:"dialogue_state"`
-	LastUpdated            time.Time                      `json:"last_updated"`
+	ID                         string                         `json:"id"`
+	UserID                     int64                          `json:"user_id"`
+	GroupID                    int64                          `json:"group_id"`
+	ChatType                   int                            `json:"chat_type"`
+	CurrentState               BotState                       `json:"current_state"`
+	Flags                      map[string]bool                `json:"flags"`
+	Counters                   map[string]int                 `json:"counters"`
+	LastReply                  time.Time                      `json:"last_reply"`
+	LastReplyMode              string                         `json:"last_reply_mode,omitempty"`
+	LastUserMessageAt          time.Time                      `json:"last_user_message_at,omitempty"`
+	LastAssistantMessageAt     time.Time                      `json:"last_assistant_message_at,omitempty"`
+	LastInteractionAt          time.Time                      `json:"last_interaction_at,omitempty"`
+	LastProactiveAt            time.Time                      `json:"last_proactive_at,omitempty"`
+	NextScheduledAt            time.Time                      `json:"next_scheduled_at,omitempty"`
+	ProactiveScheduleSummary   string                         `json:"proactive_schedule_summary,omitempty"`
+	ProactiveScheduleReason    string                         `json:"proactive_schedule_reason,omitempty"`
+	ProactiveScheduleMeta      map[string]any                 `json:"proactive_schedule_meta,omitempty"`
+	ProactiveScheduleUpdatedAt time.Time                      `json:"proactive_schedule_updated_at,omitempty"`
+	ProactiveScheduleUpdatedBy string                         `json:"proactive_schedule_updated_by,omitempty"`
+	ProactiveScheduleManual    bool                           `json:"proactive_schedule_manual,omitempty"`
+	Conversation               []openai.ChatCompletionMessage `json:"conversation"`
+	Summary                    string                         `json:"summary"`
+	ActiveTopics               []string                       `json:"active_topics"`
+	DialogueState              DialogueState                  `json:"dialogue_state"`
+	LastUpdated                time.Time                      `json:"last_updated"`
 }
 
 // DialogueState 保存最近一轮结构化对话判断，用于影响后续回复。
@@ -234,8 +240,15 @@ func (sm *StateManager) RecordAssistantTurn(sessionID, content string, at time.T
 func (sm *StateManager) SetNextScheduledAt(sessionID string, at time.Time) {
 	sm.mu.Lock()
 	session := sm.ensureSessionLocked(sessionID, 0, 0, 0)
+	now := time.Now()
 	session.NextScheduledAt = at
-	session.LastUpdated = time.Now()
+	session.ProactiveScheduleSummary = ""
+	session.ProactiveScheduleReason = "automatic_reschedule"
+	session.ProactiveScheduleMeta = nil
+	session.ProactiveScheduleManual = false
+	session.ProactiveScheduleUpdatedAt = now
+	session.ProactiveScheduleUpdatedBy = "scheduler"
+	session.LastUpdated = now
 	sm.mu.Unlock()
 
 	sm.markDirty()
@@ -250,6 +263,65 @@ func (sm *StateManager) GetNextScheduledAt(sessionID string) time.Time {
 		return time.Time{}
 	}
 	return session.NextScheduledAt
+}
+
+func (sm *StateManager) GetProactiveSchedule(sessionID string) ProactiveSchedule {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session := sm.sessions[sessionID]
+	if session == nil {
+		return ProactiveSchedule{SessionID: sessionID}
+	}
+	return ProactiveSchedule{
+		SessionID:         sessionID,
+		NextScheduledAt:   session.NextScheduledAt,
+		LastProactiveAt:   session.LastProactiveAt,
+		LastInteractionAt: session.LastInteractionAt,
+		Summary:           session.ProactiveScheduleSummary,
+		Reason:            session.ProactiveScheduleReason,
+		Meta:              cloneScheduleMeta(session.ProactiveScheduleMeta),
+		Manual:            session.ProactiveScheduleManual,
+		UpdatedAt:         session.ProactiveScheduleUpdatedAt,
+		UpdatedBy:         session.ProactiveScheduleUpdatedBy,
+	}
+}
+
+func (sm *StateManager) SetProactiveSchedule(sessionID string, schedule ProactiveSchedule) {
+	sm.mu.Lock()
+	session := sm.ensureSessionLocked(sessionID, 0, 0, 0)
+	updatedAt := schedule.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = time.Now()
+	}
+	session.NextScheduledAt = schedule.NextScheduledAt
+	session.ProactiveScheduleSummary = normalizeScheduleSummary(schedule.Summary)
+	session.ProactiveScheduleReason = strings.TrimSpace(schedule.Reason)
+	session.ProactiveScheduleMeta = normalizeScheduleMeta(schedule.Meta)
+	session.ProactiveScheduleManual = schedule.Manual
+	session.ProactiveScheduleUpdatedAt = updatedAt
+	session.ProactiveScheduleUpdatedBy = strings.TrimSpace(schedule.UpdatedBy)
+	session.LastUpdated = updatedAt
+	sm.mu.Unlock()
+
+	sm.markDirty()
+}
+
+func (sm *StateManager) ClearProactiveSchedule(sessionID string, reason string, actor string) {
+	sm.mu.Lock()
+	session := sm.ensureSessionLocked(sessionID, 0, 0, 0)
+	now := time.Now()
+	session.NextScheduledAt = time.Time{}
+	session.ProactiveScheduleSummary = "用户取消近期主动触达"
+	session.ProactiveScheduleReason = strings.TrimSpace(reason)
+	session.ProactiveScheduleMeta = nil
+	session.ProactiveScheduleManual = true
+	session.ProactiveScheduleUpdatedAt = now
+	session.ProactiveScheduleUpdatedBy = strings.TrimSpace(actor)
+	session.LastUpdated = now
+	sm.mu.Unlock()
+
+	sm.markDirty()
 }
 
 func (sm *StateManager) GetLastInteractionAt(sessionID string) time.Time {
@@ -429,6 +501,12 @@ func (sm *StateManager) ResetSession(sessionID string) {
 		session.LastInteractionAt = now
 		session.LastProactiveAt = time.Time{}
 		session.NextScheduledAt = time.Time{}
+		session.ProactiveScheduleSummary = ""
+		session.ProactiveScheduleReason = ""
+		session.ProactiveScheduleMeta = nil
+		session.ProactiveScheduleUpdatedAt = time.Time{}
+		session.ProactiveScheduleUpdatedBy = ""
+		session.ProactiveScheduleManual = false
 		session.LastUpdated = now
 	}
 	sm.mu.Unlock()
@@ -481,6 +559,7 @@ func (sm *StateManager) ensureSessionLocked(sessionID string, userID, groupID in
 	if session.ActiveTopics == nil {
 		session.ActiveTopics = []string{}
 	}
+	session.ProactiveScheduleMeta = normalizeScheduleMeta(session.ProactiveScheduleMeta)
 	if session.DialogueState.UpdatedAt.IsZero() && !session.LastUpdated.IsZero() {
 		session.DialogueState.UpdatedAt = session.LastUpdated
 	}
@@ -619,6 +698,7 @@ func (sm *StateManager) normalizeSession(sessionID string, session *Session) {
 	if session.ActiveTopics == nil {
 		session.ActiveTopics = []string{}
 	}
+	session.ProactiveScheduleMeta = normalizeScheduleMeta(session.ProactiveScheduleMeta)
 	if session.DialogueState.UpdatedAt.IsZero() && !session.LastUpdated.IsZero() {
 		session.DialogueState.UpdatedAt = session.LastUpdated
 	}
@@ -704,25 +784,31 @@ func (sm *StateManager) snapshotLocked() map[string]*Session {
 			continue
 		}
 		result[sessionID] = &Session{
-			ID:                     session.ID,
-			UserID:                 session.UserID,
-			GroupID:                session.GroupID,
-			ChatType:               session.ChatType,
-			CurrentState:           session.CurrentState,
-			Flags:                  cloneBoolMap(session.Flags),
-			Counters:               cloneIntMap(session.Counters),
-			LastReply:              session.LastReply,
-			LastReplyMode:          session.LastReplyMode,
-			LastUserMessageAt:      session.LastUserMessageAt,
-			LastAssistantMessageAt: session.LastAssistantMessageAt,
-			LastInteractionAt:      session.LastInteractionAt,
-			LastProactiveAt:        session.LastProactiveAt,
-			NextScheduledAt:        session.NextScheduledAt,
-			Conversation:           append([]openai.ChatCompletionMessage(nil), session.Conversation...),
-			Summary:                session.Summary,
-			ActiveTopics:           append([]string(nil), session.ActiveTopics...),
-			DialogueState:          session.DialogueState,
-			LastUpdated:            session.LastUpdated,
+			ID:                         session.ID,
+			UserID:                     session.UserID,
+			GroupID:                    session.GroupID,
+			ChatType:                   session.ChatType,
+			CurrentState:               session.CurrentState,
+			Flags:                      cloneBoolMap(session.Flags),
+			Counters:                   cloneIntMap(session.Counters),
+			LastReply:                  session.LastReply,
+			LastReplyMode:              session.LastReplyMode,
+			LastUserMessageAt:          session.LastUserMessageAt,
+			LastAssistantMessageAt:     session.LastAssistantMessageAt,
+			LastInteractionAt:          session.LastInteractionAt,
+			LastProactiveAt:            session.LastProactiveAt,
+			NextScheduledAt:            session.NextScheduledAt,
+			ProactiveScheduleSummary:   session.ProactiveScheduleSummary,
+			ProactiveScheduleReason:    session.ProactiveScheduleReason,
+			ProactiveScheduleMeta:      cloneScheduleMeta(session.ProactiveScheduleMeta),
+			ProactiveScheduleUpdatedAt: session.ProactiveScheduleUpdatedAt,
+			ProactiveScheduleUpdatedBy: session.ProactiveScheduleUpdatedBy,
+			ProactiveScheduleManual:    session.ProactiveScheduleManual,
+			Conversation:               append([]openai.ChatCompletionMessage(nil), session.Conversation...),
+			Summary:                    session.Summary,
+			ActiveTopics:               append([]string(nil), session.ActiveTopics...),
+			DialogueState:              session.DialogueState,
+			LastUpdated:                session.LastUpdated,
 		}
 	}
 

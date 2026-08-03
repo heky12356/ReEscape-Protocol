@@ -48,6 +48,7 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 	openAITools := tools.ToOpenAIToolsWithPolicy(r.registry, toolPolicy)
 	trace := Trace{RequestID: turn.RequestID(), SessionID: turn.SessionID()}
 	events := make([]eventlog.Event, 0)
+	scheduleManaged := false
 
 	for step := 0; step < budget.MaxSteps; step++ {
 		req := openai.ChatCompletionRequest{
@@ -65,17 +66,17 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 
 		resp, err := aifunction.Chat(runCtx, req)
 		if err != nil {
-			return TurnResult{Trace: trace, Events: events}, err
+			return TurnResult{Trace: trace, Events: events, ScheduleManaged: scheduleManaged}, err
 		}
 		if len(resp.Choices) == 0 {
-			return TurnResult{Trace: trace, Events: events}, ErrEmptyModelResponse
+			return TurnResult{Trace: trace, Events: events, ScheduleManaged: scheduleManaged}, ErrEmptyModelResponse
 		}
 
 		message := resp.Choices[0].Message
 		if len(message.ToolCalls) == 0 {
 			reply := strings.TrimSpace(utils.CleanThinkTag(message.Content))
 			if reply == "" {
-				return TurnResult{Trace: trace, Events: events}, ErrEmptyModelResponse
+				return TurnResult{Trace: trace, Events: events, ScheduleManaged: scheduleManaged}, ErrEmptyModelResponse
 			}
 			events = append(events, eventlog.Event{
 				Type:      "agent_final_reply",
@@ -86,17 +87,21 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 				CreatedAt: time.Now(),
 			})
 			return TurnResult{
-				Handled:    true,
-				ShouldSend: true,
-				FinalReply: FinalReply{Content: reply},
-				Trace:      trace,
-				Events:     events,
+				Handled:         true,
+				ShouldSend:      true,
+				FinalReply:      FinalReply{Content: reply},
+				ScheduleManaged: scheduleManaged,
+				Trace:           trace,
+				Events:          events,
 			}, nil
 		}
 
 		messages = append(messages, message)
 		for _, call := range message.ToolCalls {
 			execution := r.executor.Execute(runCtx, turn, call)
+			if isScheduleManagingTool(execution) {
+				scheduleManaged = true
+			}
 			stepTrace := stepTraceFromExecution(step, call, execution)
 			trace.Steps = append(trace.Steps, stepTrace)
 			events = append(events, eventFromStepTrace(turn, stepTrace))
@@ -110,7 +115,11 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 		}
 	}
 
-	return TurnResult{Trace: trace, Events: events}, ErrMaxStepsExceeded
+	return TurnResult{Trace: trace, Events: events, ScheduleManaged: scheduleManaged}, ErrMaxStepsExceeded
+}
+
+func isScheduleManagingTool(execution tools.ExecutionResult) bool {
+	return execution.ToolName == "update_proactive_schedule" && execution.Result.Mutated
 }
 
 func (r *Runtime) buildMessages(turn *TurnContext) []openai.ChatCompletionMessage {

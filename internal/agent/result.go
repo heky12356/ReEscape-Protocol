@@ -7,9 +7,10 @@ type FinalReply struct {
 }
 
 type TurnResult struct {
-	Handled    bool             `json:"handled"`
-	ShouldSend bool             `json:"should_send"`
-	FinalReply FinalReply       `json:"final_reply"`
-	Trace      Trace            `json:"trace"`
-	Events     []eventlog.Event `json:"events"`
+	Handled         bool             `json:"handled"`
+	ShouldSend      bool             `json:"should_send"`
+	FinalReply      FinalReply       `json:"final_reply"`
+	ScheduleManaged bool             `json:"schedule_managed"`
+	Trace           Trace            `json:"trace"`
+	Events          []eventlog.Event `json:"events"`
 }

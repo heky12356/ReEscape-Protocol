@@ -97,7 +97,16 @@ func sendScheduledAgentMessage(ctx context.Context, c *websocket.Conn, scheduler
 	transcript := service.BuildAssistantTranscript(reply)
 	state.GetManager().RecordAssistantTurn(sessionID, transcript, sentAt, true)
 	state.GetManager().UpdateLastReplyMode(sessionID, "proactive")
-	next := scheduler.RescheduleFrom(sessionID, sentAt)
+	var next time.Time
+	if result.ScheduleManaged {
+		next = state.GetManager().GetNextScheduledAt(sessionID)
+	} else {
+		next = scheduler.RescheduleFrom(sessionID, sentAt)
+	}
+	nextAt := ""
+	if !next.IsZero() {
+		nextAt = next.Format(time.RFC3339)
+	}
 	result.Events = append(result.Events, eventlog.Event{
 		Type:      "reply_sent",
 		SessionID: sessionID,
@@ -107,7 +116,7 @@ func sendScheduledAgentMessage(ctx context.Context, c *websocket.Conn, scheduler
 		CreatedAt: sentAt,
 		Data: map[string]any{
 			"trigger": "proactive",
-			"next_at": next.Format(time.RFC3339),
+			"next_at": nextAt,
 		},
 	})
 	if eventStore != nil {
@@ -115,7 +124,7 @@ func sendScheduledAgentMessage(ctx context.Context, c *websocket.Conn, scheduler
 			utils.Warn("append proactive agent events failed: %v", err)
 		}
 	}
-	utils.Info("Agent 主动消息已发送，下一次主动触达时间: %s", next.Format(time.RFC3339))
+	utils.Info("Agent 主动消息已发送，下一次主动触达时间: %s", nextAt)
 	return nil
 }
 

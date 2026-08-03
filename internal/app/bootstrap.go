@@ -15,6 +15,7 @@ import (
 	"project-yume/internal/memory"
 	"project-yume/internal/model"
 	"project-yume/internal/scheduler"
+	"project-yume/internal/skill"
 	"project-yume/internal/state"
 	"project-yume/internal/storage"
 	"project-yume/internal/tools"
@@ -57,6 +58,16 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 	}
 	if cfg.EnableOnlyLongChat {
 		utils.Info("仅长聊天模式已启用")
+	}
+	if cfg.EnableSkills {
+		errs := skill.GetManager().LoadDirsWithOptions(cfg.SkillDirs, skill.LoadOptions{
+			Scope:         skill.ScopeProject,
+			IncludeHidden: cfg.SkillLoadSystem,
+		})
+		for _, err := range errs {
+			utils.Warn("load skill failed: %v", err)
+		}
+		utils.Info("Skill 系统已启用: dirs=%v", cfg.SkillDirs)
 	}
 	utils.Info("消息聚合已启用: idle=%dms max_window=%dms max_messages=%d",
 		cfg.MessageAggregateIdleWindowMs,
@@ -139,7 +150,7 @@ func StartWorkers(ctx context.Context, conn *websocket.Conn, components *Compone
 
 func NewAgentRuntime() *agent.Runtime {
 	cfg := config.GetConfig()
-	registry := catalog.NewRegistry(webCatalogOptions(cfg))
+	registry := catalog.NewRegistry(catalogOptions(cfg))
 	toolTimeout := time.Duration(cfg.ReactToolTimeoutMs) * time.Millisecond
 	executor := tools.NewExecutor(
 		registry,
@@ -149,22 +160,26 @@ func NewAgentRuntime() *agent.Runtime {
 	return agent.NewRuntime(registry, executor, agent.BudgetFromConfig())
 }
 
-func webCatalogOptions(cfg *config.Config) catalog.Options {
-	if cfg == nil || !cfg.EnableWebTools {
-		return catalog.Options{}
+func catalogOptions(cfg *config.Config) catalog.Options {
+	opts := catalog.Options{}
+	if cfg == nil {
+		return opts
+	}
+	opts.SkillResourceMaxBytes = cfg.SkillResourceMaxBytes
+	if !cfg.EnableWebTools {
+		return opts
 	}
 
 	searchClient, err := webaccess.NewSearchClientFromConfig(cfg)
 	if err != nil {
 		utils.Warn("web search tools disabled: %v", err)
-		return catalog.Options{}
+		return opts
 	}
 
-	return catalog.Options{
-		EnableWebTools:   true,
-		SearchClient:     searchClient,
-		FetchClient:      webaccess.NewFetchClientFromConfig(cfg),
-		SearchMaxResults: cfg.WebSearchMaxResults,
-		FetchMaxChars:    cfg.WebFetchMaxChars,
-	}
+	opts.EnableWebTools = true
+	opts.SearchClient = searchClient
+	opts.FetchClient = webaccess.NewFetchClientFromConfig(cfg)
+	opts.SearchMaxResults = cfg.WebSearchMaxResults
+	opts.FetchMaxChars = cfg.WebFetchMaxChars
+	return opts
 }

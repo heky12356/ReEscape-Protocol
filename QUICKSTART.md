@@ -146,17 +146,57 @@ REACT_TOTAL_TIMEOUT_MS=30000
 ENABLE_REACT_AGENT=true
 ```
 
-如果希望 ReAct 工具可以写入长期记忆、好感等状态，还需要开启：
+如果希望 ReAct 工具可以写入长期记忆、好感、主动触达计划等状态，还需要开启：
 
 ```env
 REACT_ALLOW_WRITE_TOOLS=true
 ```
 
-只读工具不需要这个开关。关闭时，`remember_fact`、`update_profile`、`update_affection` 这类写工具不会暴露给模型，也不会出现在 ReAct system prompt 的可用工具列表里。
+只读工具不需要这个开关。关闭时，`remember_fact`、`update_profile`、`update_affection`、`update_proactive_schedule` 这类写工具不会暴露给模型，也不会出现在 ReAct system prompt 的可用工具列表里。
 
 开启后，模型会根据 Memory Tool Rules 自主判断是否写入记忆。用户明确说“记住”“以后”“我喜欢”“我叫”“不要再”这类表达时，更容易触发 `remember_fact` 或 `update_profile`。写工具会产生业务状态变化，建议先在测试会话中验证。
 
-## 8. 可选：开启 Web Tools
+如需允许 agent 根据用户约定设置下一次主动触达，例如“晚上九点再来找我”“半小时后提醒我一下”或“今天先别主动找我了”，请开启 `REACT_ALLOW_WRITE_TOOLS=true`。查询当前计划的 `get_proactive_schedule` 是只读工具，不需要开启写工具。
+
+## 8. 可选：配置 ReAct Skills
+
+Skills 是 ReAct 的只读策略层，用来给特定场景提供回复流程，例如安慰、冲突修复、主动触达约定或技术解释。默认已启用，并从项目内置目录加载：
+
+```env
+ENABLE_SKILLS=true
+SKILL_DIRS=./config/skills
+SKILL_AUTO_HINT_LIMIT=3
+SKILL_RESOURCE_MAX_BYTES=65536
+SKILL_ALLOW_SCRIPTS=false
+SKILL_LOAD_SYSTEM=false
+```
+
+标准 skill 目录格式如下：
+
+```text
+config/skills/
+  comfort/
+    SKILL.md
+```
+
+`SKILL.md` 至少需要 `name` 和 `description`：
+
+```markdown
+---
+name: comfort
+description: Use when the user expresses sadness, stress, fatigue, disappointment, or emotional overwhelm.
+---
+
+# Comfort
+
+先承接用户情绪，不急着解决问题。
+```
+
+运行时只会自动注入匹配到的 skill hints，不会把所有 skill 正文塞进 prompt。模型需要完整策略时会调用只读工具 `read_skill`；需要 `references/`、`assets/` 或 `scripts/` 中的文本资源时会调用 `read_skill_resource`。第一阶段不会执行 `scripts/`。
+
+`SKILL_DIRS` 支持逗号分隔多个目录。新增或删除 skill 后，建议重启机器人；通过管理后台保存运行时配置时也会触发 skill 重新加载。
+
+## 9. 可选：开启 Web Tools
 
 `web_search` 和 `web_fetch` 是 ReAct 只读工具，默认关闭。第一版推荐使用 SearXNG：
 
@@ -173,7 +213,7 @@ WEB_FETCH_USER_AGENT=ReEscapeProtocolBot/1.0
 
 SearXNG 需要启用 JSON search API，并把 endpoint 配到 `/search`。工具注册类配置修改后建议重启机器人。
 
-## 9. 开发模式启动前端
+## 10. 开发模式启动前端
 
 如果需要单独调试前端：
 
@@ -188,7 +228,7 @@ npm run dev
 
 前端会把 `/api` 代理到后端管理服务。
 
-## 10. 生产构建前端
+## 11. 生产构建前端
 
 ```powershell
 Set-Location web
@@ -202,7 +242,7 @@ Set-Location ..
 
 Go 管理后台会直接托管这批静态文件。
 
-## 11. 核验启动是否正常
+## 12. 核验启动是否正常
 
 浏览器或命令行检查：
 
@@ -218,7 +258,7 @@ Invoke-WebRequest http://127.0.0.1:8088/readyz
 Invoke-WebRequest http://127.0.0.1:8088/metrics
 ```
 
-## 12. 建议先关注的配置项
+## 13. 建议先关注的配置项
 
 ### 连接和身份
 
@@ -246,6 +286,13 @@ Invoke-WebRequest http://127.0.0.1:8088/metrics
 - `REACT_ALLOW_WRITE_TOOLS`
 - `REACT_TRACE_MODE`
 
+### ReAct Skills
+
+- `ENABLE_SKILLS`
+- `SKILL_DIRS`
+- `SKILL_AUTO_HINT_LIMIT`
+- `SKILL_RESOURCE_MAX_BYTES`
+
 ### Web Tools
 
 - `ENABLE_WEB_TOOLS`
@@ -265,7 +312,7 @@ Invoke-WebRequest http://127.0.0.1:8088/metrics
 - `MESSAGE_AGGREGATE_MAX_WINDOW_MS`
 - `MESSAGE_AGGREGATE_MAX_MESSAGES`
 
-## 13. 常见第一次启动问题
+## 14. 常见第一次启动问题
 
 - 后端能启动但不回复：先确认 `TARGETID` 是否正确，并检查消息来源是否符合当前过滤规则。
 - 启动时报 character config not found：确认 `CHARACTER` 对应的 `config/character/<name>.json` 存在。
@@ -273,6 +320,7 @@ Invoke-WebRequest http://127.0.0.1:8088/metrics
 - `/readyz` 返回失败：通常是 `DATA_DIR` 或 `LOG_DIR` 不可写。
 - 前端空白或接口报错：先确认后端已启动，并检查 `HttpPort`。
 - ReAct 工具没有写入状态：确认 `ENABLE_REACT_AGENT=true`，并在需要副作用时设置 `REACT_ALLOW_WRITE_TOOLS=true`；关闭时写工具对模型不可见。
+- ReAct 没有注入 skill hints：确认 `ENABLE_SKILLS=true`、`SKILL_DIRS` 指向的目录存在，并且每个 skill 目录下有合法的 `SKILL.md`。
 - ReAct 看不到 web tools：确认 `ENABLE_WEB_TOOLS=true`、SearXNG endpoint 可用，并重启机器人。
 
 更详细的排查说明见 [HELP.md](./HELP.md)。

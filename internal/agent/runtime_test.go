@@ -79,3 +79,24 @@ func TestRuntimeBuildMessagesOmitsRuntimeContextWhenTimeContextDisabled(t *testi
 		t.Fatalf("expected conversation immediately after system prompt, got %#v", messages[1])
 	}
 }
+
+func TestIsScheduleManagingTool(t *testing.T) {
+	if !isScheduleManagingTool(tools.ExecutionResult{
+		ToolName: "update_proactive_schedule",
+		Result:   tools.ToolResult{Mutated: true},
+	}) {
+		t.Fatalf("expected mutated update_proactive_schedule to manage schedule")
+	}
+	if isScheduleManagingTool(tools.ExecutionResult{
+		ToolName: "update_profile",
+		Result:   tools.ToolResult{Mutated: true},
+	}) {
+		t.Fatalf("did not expect ordinary write tool to manage schedule")
+	}
+	if isScheduleManagingTool(tools.ExecutionResult{
+		ToolName: "update_proactive_schedule",
+		Result:   tools.ToolResult{Mutated: false},
+	}) {
+		t.Fatalf("did not expect non-mutating schedule tool result to manage schedule")
+	}
+}

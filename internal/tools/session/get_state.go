@@ -40,13 +40,21 @@ func (t *GetStateTool) Execute(ctx context.Context, turn tools.TurnView, input j
 	}
 
 	sm := state.GetManager()
+	schedule := sm.GetProactiveSchedule(turn.SessionID())
 	data := map[string]any{
-		"session_id":                  turn.SessionID(),
-		"bot_state":                   int(sm.GetState(turn.SessionID())),
-		"dialogue_state":              sm.GetDialogueState(turn.SessionID()),
-		"time_since_last_reply":       sm.GetTimeSinceLastReply(turn.SessionID()).String(),
-		"time_since_last_interaction": sm.GetTimeSinceLastInteraction(turn.SessionID()).String(),
-		"next_scheduled_at":           formatTime(sm.GetNextScheduledAt(turn.SessionID())),
+		"session_id":                    turn.SessionID(),
+		"bot_state":                     int(sm.GetState(turn.SessionID())),
+		"dialogue_state":                sm.GetDialogueState(turn.SessionID()),
+		"time_since_last_reply":         sm.GetTimeSinceLastReply(turn.SessionID()).String(),
+		"time_since_last_interaction":   sm.GetTimeSinceLastInteraction(turn.SessionID()).String(),
+		"next_scheduled_at":             formatTime(schedule.NextScheduledAt),
+		"last_proactive_at":             formatTime(schedule.LastProactiveAt),
+		"proactive_schedule_manual":     schedule.Manual,
+		"proactive_schedule_summary":    schedule.Summary,
+		"proactive_schedule_reason":     schedule.Reason,
+		"proactive_schedule_meta":       schedule.Meta,
+		"proactive_schedule_updated_at": formatTime(schedule.UpdatedAt),
+		"proactive_schedule_updated_by": schedule.UpdatedBy,
 	}
 
 	return tools.ToolResult{

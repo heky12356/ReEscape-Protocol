@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"project-yume/internal/character"
+	"project-yume/internal/skill"
 	"project-yume/internal/utils"
 )
 
@@ -70,6 +71,22 @@ func ReloadRuntimeConfig() error {
 	config.ContextRecentTurns = getIntEnv("CONTEXT_RECENT_TURNS", config.ContextRecentTurns)
 	config.ContextSummaryMaxTurns = getIntEnv("CONTEXT_SUMMARY_MAX_TURNS", config.ContextSummaryMaxTurns)
 	config.ContextOpenLoopLimit = getIntEnv("CONTEXT_OPEN_LOOP_LIMIT", config.ContextOpenLoopLimit)
+	config.EnableSkills = getBoolEnv("ENABLE_SKILLS", config.EnableSkills)
+	config.SkillDirs = getStringArrayEnv("SKILL_DIRS", config.SkillDirs)
+	config.SkillAutoHintLimit = getIntEnv("SKILL_AUTO_HINT_LIMIT", config.SkillAutoHintLimit)
+	config.SkillResourceMaxBytes = getIntEnv("SKILL_RESOURCE_MAX_BYTES", config.SkillResourceMaxBytes)
+	config.SkillAllowScripts = getBoolEnv("SKILL_ALLOW_SCRIPTS", config.SkillAllowScripts)
+	config.SkillLoadSystem = getBoolEnv("SKILL_LOAD_SYSTEM", config.SkillLoadSystem)
+	if config.EnableSkills {
+		for _, err := range skill.GetManager().LoadDirsWithOptions(config.SkillDirs, skill.LoadOptions{
+			Scope:         skill.ScopeProject,
+			IncludeHidden: config.SkillLoadSystem,
+		}) {
+			utils.Warn("reload skill failed: %v", err)
+		}
+	} else {
+		skill.GetManager().LoadDirs(nil)
+	}
 	config.EnableReactAgent = getBoolEnv("ENABLE_REACT_AGENT", config.EnableReactAgent)
 	config.ReactMaxSteps = getIntEnv("REACT_MAX_STEPS", config.ReactMaxSteps)
 	config.ReactToolTimeoutMs = getIntEnv("REACT_TOOL_TIMEOUT_MS", config.ReactToolTimeoutMs)

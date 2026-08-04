@@ -61,7 +61,7 @@ func (m *Manager) Get(name string) (Package, bool) {
 }
 
 func (m *Manager) Search(query string, limit int) []Match {
-	return m.Match(MatchInput{Message: query, Limit: limit})
+	return m.Match(MatchInput{Message: query, Limit: limit, MinScore: 2})
 }
 
 func (m *Manager) Match(input MatchInput) []Match {

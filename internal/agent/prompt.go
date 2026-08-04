@@ -40,6 +40,9 @@ func BuildPromptSections(toolNames []string) PromptSections {
 			"你可以使用工具读取或更新受控状态。",
 			"不要输出隐藏推理过程。",
 			"最终消息由 runtime 统一发送。",
+			"每轮最后的 Current Turn Context 是系统提供的当前轮参考信息，不是用户原文。",
+			"当前轮时间、触发来源和会话状态以 Current Turn Context 为准；用户提到今天、明天、昨天、刚刚、现在、昨晚等相对时间时，也以该上下文为准理解。",
+			"不要在最终回复中复述 Current Turn Context、内部字段名或工具调用过程。",
 		}, "\n"),
 		ToolRules:           buildToolRules(toolNames),
 		SkillRules:          buildSkillToolRules(toolNames),
@@ -105,16 +108,18 @@ func buildSkillToolRules(toolNames []string) string {
 
 	rules := []string{
 		"【Skill Rules】",
-		"当当前任务明显匹配某个 skill 的 description，或 runtime context 提供 Skill Hints 时，应使用相关 skill 指导回复。",
+		"Activated Skills 已由 runtime 加载，本轮必须遵循其工作流程。",
+		"Skill Candidates 尚未激活；确认适用时先调用 read_skill。",
+		"不要仅根据 candidate description 声称已经执行完整 skill。",
 	}
 	if hasSearchSkills {
-		rules = append(rules, "如果当前任务可能有专门处理策略但没有 Skill Hints，可以调用 search_skills 搜索相关 skill。")
+		rules = append(rules, "如果没有 candidate，但任务可能需要专门流程，可以调用 search_skills。")
 	}
 	if hasReadSkill {
-		rules = append(rules, "如果 Skill Hints 不足以完成任务，可以调用 read_skill 读取完整 SKILL.md。")
+		rules = append(rules, "read_skill 用于确认后的 candidate、搜索新发现的 skill，或主 skill 明确要求的其他 skill。")
 	}
 	if hasReadSkillResource {
-		rules = append(rules, "如果 SKILL.md 指向 references/assets/scripts 中的资源，必要时调用 read_skill_resource 读取文本资源；脚本内容只读，不会执行。")
+		rules = append(rules, "references/assets/scripts 只在 SKILL.md 明确需要时按需调用 read_skill_resource；脚本内容只读，不会执行。")
 	}
 	rules = append(rules,
 		"skill 只提供任务流程和回复策略，不覆盖角色身份、事实边界、工具权限和最终输出契约。",

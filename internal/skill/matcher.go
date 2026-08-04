@@ -2,15 +2,35 @@ package skill
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"unicode"
 )
 
+const DefaultCandidateMinScore = 8
+
+var matchStopwords = map[string]struct{}{
+	"ai":      {},
+	"chat":    {},
+	"current": {},
+	"message": {},
+	"use":     {},
+	"user":    {},
+	"when":    {},
+	"聊天":      {},
+	"回复":      {},
+	"用户":      {},
+}
+
 func MatchPackages(packages []Package, input MatchInput) []Match {
 	limit := input.Limit
 	if limit <= 0 {
 		limit = 3
+	}
+	minScore := input.MinScore
+	if minScore <= 0 {
+		minScore = DefaultCandidateMinScore
 	}
 
 	matches := make([]Match, 0, len(packages))
@@ -18,14 +38,15 @@ func MatchPackages(packages []Package, input MatchInput) []Match {
 		if !pkg.Enabled {
 			continue
 		}
-		score, reasons := scorePackage(pkg, input)
-		if score <= 0 {
+		score, confidence, reasons := scorePackage(pkg, input)
+		if score < minScore {
 			continue
 		}
 		matches = append(matches, Match{
 			Name:        pkg.Name,
 			Description: pkg.Description,
 			Score:       score,
+			Confidence:  confidence,
 			Reason:      strings.Join(reasons, ", "),
 			Scope:       pkg.Scope,
 		})
@@ -37,45 +58,48 @@ func MatchPackages(packages []Package, input MatchInput) []Match {
 		}
 		return matches[i].Score > matches[j].Score
 	})
+	adjustMatchConfidenceForRanking(matches)
 	if len(matches) > limit {
 		matches = matches[:limit]
 	}
 	return matches
 }
 
-func scorePackage(pkg Package, input MatchInput) (int, []string) {
-	nameTerms := tokenize(pkg.Name)
+func scorePackage(pkg Package, input MatchInput) (int, float64, []string) {
 	descriptionTerms := tokenize(pkg.Description)
-	tagTerms := frontmatterStrings(pkg.Frontmatter, "tags")
-	triggerTerms := frontmatterStrings(pkg.Frontmatter, "triggers")
-	queryTerms := tokenize(strings.Join([]string{
-		input.Message,
-		input.Trigger,
-		input.DialogueState.Emotion,
-		input.DialogueState.Intention,
-		input.DialogueState.ReplyExpectation,
-		input.DialogueState.SupportStrategy,
-		input.DialogueState.Topic,
-		input.DialogueState.UserNeed,
-	}, " "))
+	tagPhrases := frontmatterRawStrings(pkg.Frontmatter, "tags")
+	triggerPhrases := frontmatterRawStrings(pkg.Frontmatter, "triggers")
+	tagTerms := tokenize(strings.Join(tagPhrases, " "))
+	triggerTerms := tokenize(strings.Join(triggerPhrases, " "))
+	messageTerms := tokenize(input.Message)
 
 	score := 0
-	reasons := make([]string, 0, 3)
-	if matched := countTermMatches(queryTerms, nameTerms); matched > 0 {
-		score += matched * 5
+	reasons := make([]string, 0, 5)
+	exactTrigger := countPhraseMatches(input.Message, triggerPhrases)
+	if exactTrigger == 0 && !isRuntimeTrigger(input.Trigger) {
+		exactTrigger = countPhraseMatches(input.Trigger, triggerPhrases)
+	}
+	if exactTrigger > 0 {
+		score += 20
+		reasons = append(reasons, "matched exact trigger")
+	}
+
+	exactTag := countPhraseMatches(input.Message, tagPhrases)
+	if exactTag > 0 {
+		score += min(exactTag, 2) * 12
+		reasons = append(reasons, "matched exact tag")
+	}
+
+	exactName := containsPhrase(input.Message, pkg.Name)
+	if exactName {
+		score += 12
 		reasons = append(reasons, "matched skill name")
 	}
-	if matched := countTermMatches(queryTerms, descriptionTerms); matched > 0 {
-		score += matched * 3
+
+	descriptionMatches := countExactTermMatches(messageTerms, descriptionTerms)
+	if descriptionMatches > 0 {
+		score += min(descriptionMatches, 4) * 2
 		reasons = append(reasons, "matched description keywords")
-	}
-	if matched := countTermMatches(queryTerms, tagTerms); matched > 0 {
-		score += matched * 5
-		reasons = append(reasons, "matched tags")
-	}
-	if matched := countTermMatches(queryTerms, triggerTerms); matched > 0 {
-		score += matched * 6
-		reasons = append(reasons, "matched triggers")
 	}
 
 	stateTerms := tokenize(strings.Join([]string{
@@ -86,70 +110,156 @@ func scorePackage(pkg Package, input MatchInput) (int, []string) {
 		input.DialogueState.Topic,
 		input.DialogueState.UserNeed,
 	}, " "))
-	if matched := countTermMatches(stateTerms, append(append([]string(nil), tagTerms...), triggerTerms...)); matched > 0 {
-		score += matched * 4
-		reasons = append(reasons, "matched dialogue state")
+	if score > 0 {
+		stateMatches := countExactTermMatches(stateTerms, append(append([]string(nil), tagTerms...), triggerTerms...))
+		if stateMatches > 0 {
+			score += min(stateMatches, 2) * 2
+			reasons = append(reasons, "matched dialogue state")
+		}
 	}
 
-	if message := strings.TrimSpace(input.Message); message != "" {
-		allText := strings.ToLower(strings.Join([]string{pkg.Name, pkg.Description}, " "))
-		if strings.Contains(allText, strings.ToLower(message)) {
-			score += 8
-			reasons = append(reasons, "matched message phrase")
+	if exactTrigger == 0 {
+		triggerTokenMatches := countExactTermMatches(messageTerms, triggerTerms)
+		if triggerTokenMatches >= 2 {
+			score += min(triggerTokenMatches, 3) * 3
+			reasons = append(reasons, "matched trigger keywords")
 		}
 	}
-	if len(reasons) == 0 && strings.TrimSpace(input.Trigger) != "" {
-		if countTermMatches(tokenize(input.Trigger), triggerTerms) > 0 {
-			score += 6
-			reasons = append(reasons, "matched trigger")
+	if exactTag == 0 {
+		tagTokenMatches := countExactTermMatches(messageTerms, tagTerms)
+		if tagTokenMatches >= 2 {
+			score += min(tagTokenMatches, 2) * 4
+			reasons = append(reasons, "matched tag keywords")
 		}
 	}
-	return score, uniqueStrings(reasons)
+
+	confidence := matchConfidence(score, exactTrigger > 0, exactTag > 0, exactName, descriptionMatches)
+	return score, confidence, uniqueStrings(reasons)
 }
 
-func countTermMatches(queryTerms, packageTerms []string) int {
-	if len(queryTerms) == 0 || len(packageTerms) == 0 {
+func matchConfidence(score int, exactTrigger, exactTag, exactName bool, descriptionMatches int) float64 {
+	switch {
+	case exactTrigger:
+		return 0.95
+	case exactTag:
+		return 0.84
+	case exactName:
+		return 0.82
+	case descriptionMatches > 0:
+		return math.Min(0.65, 0.35+float64(score)*0.02)
+	default:
 		return 0
 	}
+}
+
+func adjustMatchConfidenceForRanking(matches []Match) {
+	if len(matches) == 0 {
+		return
+	}
+	if len(matches) == 1 {
+		matches[0].Confidence = clampConfidence(matches[0].Confidence + 0.03)
+		return
+	}
+
+	margin := matches[0].Score - matches[1].Score
+	switch {
+	case margin <= 2:
+		matches[0].Confidence = clampConfidence(matches[0].Confidence - 0.12)
+	case margin >= 8:
+		matches[0].Confidence = clampConfidence(matches[0].Confidence + 0.03)
+	}
+}
+
+func clampConfidence(value float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return math.Round(value*100) / 100
+}
+
+func countPhraseMatches(text string, phrases []string) int {
 	matched := 0
-	seen := make(map[string]struct{})
-	for _, query := range queryTerms {
-		for _, term := range packageTerms {
-			if query == "" || term == "" {
-				continue
-			}
-			if query == term || strings.Contains(query, term) || strings.Contains(term, query) {
-				if _, ok := seen[term]; ok {
-					continue
-				}
-				seen[term] = struct{}{}
-				matched++
-				break
-			}
+	for _, phrase := range uniqueStrings(phrases) {
+		if containsPhrase(text, phrase) {
+			matched++
 		}
 	}
 	return matched
 }
 
-func frontmatterStrings(frontmatter map[string]any, key string) []string {
+func containsPhrase(text, phrase string) bool {
+	text = normalizePhrase(text)
+	phrase = normalizePhrase(phrase)
+	if text == "" || phrase == "" {
+		return false
+	}
+	if containsCJK([]rune(phrase)) {
+		return strings.Contains(strings.ReplaceAll(text, " ", ""), strings.ReplaceAll(phrase, " ", ""))
+	}
+	return strings.Contains(" "+text+" ", " "+phrase+" ")
+}
+
+func normalizePhrase(input string) string {
+	var result []rune
+	spacePending := false
+	for _, char := range []rune(strings.ToLower(strings.TrimSpace(input))) {
+		if unicode.IsLetter(char) || unicode.IsNumber(char) {
+			if spacePending && len(result) > 0 {
+				result = append(result, ' ')
+			}
+			result = append(result, char)
+			spacePending = false
+			continue
+		}
+		spacePending = true
+	}
+	return strings.Join(strings.Fields(string(result)), " ")
+}
+
+func isRuntimeTrigger(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "message", "proactive":
+		return true
+	default:
+		return false
+	}
+}
+
+func countExactTermMatches(queryTerms, packageTerms []string) int {
+	if len(queryTerms) == 0 || len(packageTerms) == 0 {
+		return 0
+	}
+	querySet := make(map[string]struct{}, len(queryTerms))
+	for _, term := range queryTerms {
+		querySet[term] = struct{}{}
+	}
+	matched := 0
+	for _, term := range uniqueStrings(packageTerms) {
+		if _, ok := querySet[term]; ok {
+			matched++
+		}
+	}
+	return matched
+}
+
+func frontmatterRawStrings(frontmatter map[string]any, key string) []string {
 	value, ok := frontmatter[key]
 	if !ok {
 		return nil
 	}
 	switch typed := value.(type) {
 	case string:
-		return tokenize(typed)
+		return []string{typed}
 	case []string:
-		var result []string
-		for _, item := range typed {
-			result = append(result, tokenize(item)...)
-		}
-		return result
+		return append([]string(nil), typed...)
 	case []any:
 		var result []string
 		for _, item := range typed {
 			if text, ok := item.(string); ok {
-				result = append(result, tokenize(text)...)
+				result = append(result, text)
 			}
 		}
 		return result
@@ -165,31 +275,67 @@ func tokenize(input string) []string {
 	}
 
 	var result []string
-	var current []rune
-	flush := func() {
-		if len(current) == 0 {
+	var latin []rune
+	var cjk []rune
+	flushLatin := func() {
+		if len(latin) == 0 {
 			return
 		}
-		term := string(current)
-		result = append(result, term)
-		if containsCJK(current) {
-			for size := 2; size <= 4 && size <= len(current); size++ {
-				for i := 0; i+size <= len(current); i++ {
-					result = append(result, string(current[i:i+size]))
-				}
+		result = appendMeaningfulTerm(result, string(latin))
+		latin = nil
+	}
+	flushCJK := func() {
+		if len(cjk) == 0 {
+			return
+		}
+		if len(cjk) <= 4 {
+			result = appendMeaningfulTerm(result, string(cjk))
+		}
+		for size := 2; size <= 4 && size <= len(cjk); size++ {
+			for i := 0; i+size <= len(cjk); i++ {
+				result = appendMeaningfulTerm(result, string(cjk[i:i+size]))
 			}
 		}
-		current = nil
+		cjk = nil
 	}
+
 	for _, char := range []rune(input) {
-		if unicode.IsLetter(char) || unicode.IsNumber(char) {
-			current = append(current, char)
-			continue
+		switch {
+		case unicode.In(char, unicode.Han):
+			flushLatin()
+			cjk = append(cjk, char)
+		case unicode.IsLetter(char) || unicode.IsNumber(char):
+			flushCJK()
+			latin = append(latin, char)
+		default:
+			flushLatin()
+			flushCJK()
 		}
-		flush()
 	}
-	flush()
+	flushLatin()
+	flushCJK()
 	return uniqueStrings(result)
+}
+
+func appendMeaningfulTerm(values []string, term string) []string {
+	term = strings.TrimSpace(term)
+	if term == "" {
+		return values
+	}
+	if _, stopped := matchStopwords[term]; stopped {
+		return values
+	}
+	if !containsCJK([]rune(term)) && len([]rune(term)) < 2 {
+		return values
+	}
+	return append(values, term)
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func containsCJK(value []rune) bool {

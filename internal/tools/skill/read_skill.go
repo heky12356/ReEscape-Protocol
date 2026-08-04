@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
+	"project-yume/internal/eventlog"
 	skillpkg "project-yume/internal/skill"
 	"project-yume/internal/tools"
 )
@@ -42,7 +44,7 @@ func (t *ReadSkillTool) Schema() tools.Schema {
 				Description: "为什么需要读取完整 skill；用于审计，不要使用角色口吻。",
 			},
 		},
-		Required:             []string{"name", "reason"},
+		Required:             []string{"name"},
 		AdditionalProperties: false,
 	}
 }
@@ -69,9 +71,6 @@ func (t *ReadSkillTool) Execute(ctx context.Context, turn tools.TurnView, input 
 	if args.Name == "" {
 		return tools.ToolResult{}, fmt.Errorf("name is required")
 	}
-	if args.Reason == "" {
-		return tools.ToolResult{}, fmt.Errorf("reason is required")
-	}
 
 	pkg, ok := skillpkg.GetManager().Get(args.Name)
 	if !ok {
@@ -81,18 +80,63 @@ func (t *ReadSkillTool) Execute(ctx context.Context, turn tools.TurnView, input 
 	if err != nil {
 		return tools.ToolResult{}, err
 	}
+	alreadyLoaded := false
+	if tracker, ok := turn.(interface {
+		IsSkillLoaded(string) bool
+		MarkSkillRead(string)
+	}); ok {
+		alreadyLoaded = tracker.IsSkillLoaded(args.Name)
+		tracker.MarkSkillRead(args.Name)
+	}
 	payload := map[string]any{
 		"name":        pkg.Name,
 		"description": pkg.Description,
 		"body":        pkg.Body,
 		"resources":   resources,
 	}
-	content, err := json.Marshal(payload)
-	if err != nil {
-		return tools.ToolResult{}, err
-	}
-	return tools.ToolResult{
-		Content: string(content),
+	content := formatReadSkillContent(pkg, resources, alreadyLoaded)
+	result := tools.ToolResult{
+		Content: content,
 		Data:    payload,
-	}, nil
+	}
+	if !alreadyLoaded {
+		result.Events = append(result.Events, skillToolEvent(turn, "skill_model_selected", map[string]any{
+			"skill":  pkg.Name,
+			"reason": args.Reason,
+		}))
+	}
+	return result, nil
+}
+
+func formatReadSkillContent(pkg skillpkg.Package, resources []string, alreadyLoaded bool) string {
+	lines := []string{
+		fmt.Sprintf("【Skill: %s】", pkg.Name),
+		"description: " + pkg.Description,
+	}
+	if alreadyLoaded {
+		lines = append(lines, "该 skill 已在当前 turn 加载，不重复返回正文。")
+	} else {
+		lines = append(lines, "", strings.TrimSpace(pkg.Body))
+	}
+	if len(resources) > 0 {
+		lines = append(lines, "", "【Available Resources】")
+		for _, resource := range resources {
+			lines = append(lines, "- "+resource)
+		}
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func skillToolEvent(turn tools.TurnView, eventType string, data map[string]any) eventlog.Event {
+	event := eventlog.Event{
+		Type:      eventType,
+		Actor:     "runtime",
+		Data:      data,
+		CreatedAt: time.Now(),
+	}
+	if turn != nil {
+		event.SessionID = turn.SessionID()
+		event.UserID = turn.UserID()
+	}
+	return event
 }

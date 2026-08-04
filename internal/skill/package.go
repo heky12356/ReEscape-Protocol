@@ -27,6 +27,7 @@ type Match struct {
 	Name        string
 	Description string
 	Score       int
+	Confidence  float64
 	Reason      string
 	Scope       Scope
 }
@@ -37,4 +38,5 @@ type MatchInput struct {
 	DialogueState state.DialogueState
 	ToolNames     []string
 	Limit         int
+	MinScore      int
 }

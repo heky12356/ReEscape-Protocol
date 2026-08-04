@@ -40,7 +40,23 @@ func NewSearchClientFromConfig(cfg *config.Config) (SearchClient, error) {
 			return nil, fmt.Errorf("WEB_SEARCH_ENDPOINT is required for searxng provider")
 		}
 		return NewSearxNGClient(endpoint, timeout), nil
-	case "brave", "serper", "tavily":
+	case "tavily":
+		apiKey := strings.TrimSpace(cfg.WebSearchAPIKey)
+		if apiKey == "" {
+			return nil, fmt.Errorf("WEB_SEARCH_API_KEY is required for tavily provider")
+		}
+		endpoint := strings.TrimSpace(cfg.WebSearchEndpoint)
+		if endpoint == "" {
+			endpoint = defaultTavilySearchEndpoint
+		}
+		return NewTavilyClient(endpoint, apiKey, timeout, TavilyOptions{
+			SearchDepth:       cfg.TavilySearchDepth,
+			Topic:             cfg.TavilyTopic,
+			IncludeAnswer:     cfg.TavilyIncludeAnswer,
+			IncludeRawContent: cfg.TavilyIncludeRawContent,
+			SafeSearch:        cfg.TavilySafeSearch,
+		}), nil
+	case "brave", "serper":
 		return nil, fmt.Errorf("%s provider not implemented", provider)
 	default:
 		return nil, fmt.Errorf("unsupported web search provider: %s", provider)

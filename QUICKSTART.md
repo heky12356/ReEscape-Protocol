@@ -198,12 +198,12 @@ description: Use when the user expresses sadness, stress, fatigue, disappointmen
 
 ## 9. 可选：开启 Web Tools
 
-`web_search` 和 `web_fetch` 是 ReAct 只读工具，默认关闭。第一版推荐使用 SearXNG：
+`web_search` 和 `web_fetch` 是 ReAct 只读工具，默认关闭。需要稳定 agent 搜索时推荐 Tavily：
 
 ```env
 ENABLE_WEB_TOOLS=true
-WEB_SEARCH_PROVIDER=searxng
-WEB_SEARCH_ENDPOINT=http://127.0.0.1:8888/search
+WEB_SEARCH_PROVIDER=tavily
+WEB_SEARCH_API_KEY=tvly-xxx
 WEB_SEARCH_MAX_RESULTS=5
 WEB_TOOL_TIMEOUT_MS=8000
 WEB_FETCH_MAX_BYTES=1048576
@@ -211,7 +211,15 @@ WEB_FETCH_MAX_CHARS=6000
 WEB_FETCH_USER_AGENT=ReEscapeProtocolBot/1.0
 ```
 
-SearXNG 需要启用 JSON search API，并把 endpoint 配到 `/search`。工具注册类配置修改后建议重启机器人。
+也可以继续使用本地 SearXNG 作为免费自建方案：
+
+```env
+ENABLE_WEB_TOOLS=true
+WEB_SEARCH_PROVIDER=searxng
+WEB_SEARCH_ENDPOINT=http://127.0.0.1:8888/search
+```
+
+SearXNG 需要启用 JSON search API，并把 endpoint 配到 `/search`。公开 SearXNG 实例可能返回 HTML bot challenge，不建议依赖。工具注册类配置修改后建议重启机器人。
 
 ## 10. 开发模式启动前端
 
@@ -298,6 +306,7 @@ Invoke-WebRequest http://127.0.0.1:8088/metrics
 - `ENABLE_WEB_TOOLS`
 - `WEB_SEARCH_PROVIDER`
 - `WEB_SEARCH_ENDPOINT`
+- `WEB_SEARCH_API_KEY`
 - `WEB_FETCH_MAX_CHARS`
 
 ### 行为开关
@@ -321,6 +330,6 @@ Invoke-WebRequest http://127.0.0.1:8088/metrics
 - 前端空白或接口报错：先确认后端已启动，并检查 `HttpPort`。
 - ReAct 工具没有写入状态：确认 `ENABLE_REACT_AGENT=true`，并在需要副作用时设置 `REACT_ALLOW_WRITE_TOOLS=true`；关闭时写工具对模型不可见。
 - ReAct 没有注入 skill hints：确认 `ENABLE_SKILLS=true`、`SKILL_DIRS` 指向的目录存在，并且每个 skill 目录下有合法的 `SKILL.md`。
-- ReAct 看不到 web tools：确认 `ENABLE_WEB_TOOLS=true`、SearXNG endpoint 可用，并重启机器人。
+- ReAct 看不到 web tools：确认 `ENABLE_WEB_TOOLS=true`，Tavily API key 或 SearXNG endpoint 可用，并重启机器人。
 
 更详细的排查说明见 [HELP.md](./HELP.md)。

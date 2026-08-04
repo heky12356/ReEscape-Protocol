@@ -43,11 +43,11 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 	defer cancel()
 
 	state.GetManager().EnsureSession(turn.SessionID(), turn.UserID(), turn.GroupID(), turn.ChatType())
+	events := resolveTurnSkills(turn)
 	messages := r.buildMessages(turn)
 	toolPolicy := r.toolPolicy()
 	openAITools := tools.ToOpenAIToolsWithPolicy(r.registry, toolPolicy)
 	trace := Trace{RequestID: turn.RequestID(), SessionID: turn.SessionID()}
-	events := make([]eventlog.Event, 0)
 	scheduleManaged := false
 
 	for step := 0; step < budget.MaxSteps; step++ {
@@ -55,7 +55,7 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 			Model:             config.GetConfig().AiModel,
 			Messages:          messages,
 			Tools:             openAITools,
-			ToolChoice:        "auto",
+			ToolChoice:        r.toolChoiceForStep(turn, step),
 			ParallelToolCalls: false,
 			Stream:            false,
 			MaxTokens:         config.GetConfig().AiMaxTokens,
@@ -118,6 +118,25 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 	return TurnResult{Trace: trace, Events: events, ScheduleManaged: scheduleManaged}, ErrMaxStepsExceeded
 }
 
+func (r *Runtime) toolChoiceForStep(turn *TurnContext, step int) any {
+	cfg := config.GetConfig()
+	if cfg == nil ||
+		!cfg.SkillForceReadOnCandidate ||
+		step != 0 ||
+		turn == nil ||
+		len(turn.ActivatedSkills()) > 0 ||
+		len(turn.SkillCandidates()) != 1 ||
+		!containsTool(r.availableToolNames(), "read_skill") {
+		return "auto"
+	}
+	return openai.ToolChoice{
+		Type: openai.ToolTypeFunction,
+		Function: openai.ToolFunction{
+			Name: "read_skill",
+		},
+	}
+}
+
 func isScheduleManagingTool(execution tools.ExecutionResult) bool {
 	return execution.ToolName == "update_proactive_schedule" && execution.Result.Mutated
 }
@@ -125,27 +144,104 @@ func isScheduleManagingTool(execution tools.ExecutionResult) bool {
 func (r *Runtime) buildMessages(turn *TurnContext) []openai.ChatCompletionMessage {
 	toolNames := r.availableToolNames()
 
-	conversation := selectRecentMessages(state.GetManager().GetConversation(turn.SessionID()), config.GetConfig().ContextRecentTurns)
-	messages := make([]openai.ChatCompletionMessage, 0, len(conversation)+3)
+	conversation, currentTurnDeduplicated := selectConversationBeforeTurn(state.GetManager().GetConversation(turn.SessionID()), turn)
+	conversation = selectRecentMessages(conversation, config.GetConfig().ContextRecentTurns)
+	messages := make([]openai.ChatCompletionMessage, 0, len(conversation)+2)
 	messages = append(messages, openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleSystem,
 		Content: BuildSystemPrompt(toolNames),
 	})
-	if runtimeContext := buildRuntimeContext(turn); runtimeContext != "" {
-		messages = append(messages, openai.ChatCompletionMessage{
-			Role:    openai.ChatMessageRoleUser,
-			Content: runtimeContext,
-		})
-	}
 	messages = append(messages, conversation...)
-
-	if turn.trigger == TriggerProactive {
-		messages = append(messages, openai.ChatCompletionMessage{
-			Role:    openai.ChatMessageRoleUser,
-			Content: "请基于当前时间、会话状态和记忆，生成一条自然的主动私聊消息。不要解释，不要输出 JSON。",
-		})
+	if currentTurnMessage, ok := buildCurrentTurnMessage(turn, currentTurnDeduplicated || turn.trigger == TriggerProactive); ok {
+		messages = append(messages, currentTurnMessage)
 	}
 	return messages
+}
+
+func buildCurrentTurnMessage(turn *TurnContext, includeUserMessage bool) (openai.ChatCompletionMessage, bool) {
+	if turn == nil {
+		return openai.ChatCompletionMessage{}, false
+	}
+	if turn.trigger == TriggerProactive {
+		return openai.ChatCompletionMessage{
+			Role: openai.ChatMessageRoleUser,
+			Content: buildCurrentTurnEnvelope(turn,
+				"【Proactive Task】\n请基于当前时间、会话状态和记忆，生成一条自然的主动私聊消息。不要解释，不要输出 JSON。"),
+		}, true
+	}
+
+	task := ""
+	if includeUserMessage {
+		task = buildUserMessageSection(turn.Message())
+	}
+	envelope := buildCurrentTurnEnvelope(turn, task)
+	parts := buildCurrentTurnMultiContent(turn, envelope)
+	if len(parts) > 0 {
+		return openai.ChatCompletionMessage{
+			Role:         openai.ChatMessageRoleUser,
+			MultiContent: parts,
+		}, true
+	}
+	if strings.TrimSpace(envelope) == "" {
+		return openai.ChatCompletionMessage{}, false
+	}
+	return openai.ChatCompletionMessage{
+		Role:    openai.ChatMessageRoleUser,
+		Content: envelope,
+	}, true
+}
+
+func buildUserMessageSection(message string) string {
+	if strings.TrimSpace(message) == "" {
+		return "【User Message】"
+	}
+	return "【User Message】\n" + message
+}
+
+func buildCurrentTurnMultiContent(turn *TurnContext, text string) []openai.ChatMessagePart {
+	cfg := config.GetConfig()
+	if turn == nil || cfg == nil || !cfg.EnableVisionInput {
+		return nil
+	}
+
+	parts := make([]openai.ChatMessagePart, 0, len(turn.Parts())+1)
+	if strings.TrimSpace(text) != "" {
+		parts = append(parts, openai.ChatMessagePart{
+			Type: openai.ChatMessagePartTypeText,
+			Text: text,
+		})
+	}
+
+	detail := normalizeRuntimeVisionImageDetail(cfg.VisionImageDetail)
+	hasImage := false
+	for _, part := range turn.Parts() {
+		if part.Type != "image" || strings.TrimSpace(part.URL) == "" {
+			continue
+		}
+		hasImage = true
+		parts = append(parts, openai.ChatMessagePart{
+			Type: openai.ChatMessagePartTypeImageURL,
+			ImageURL: &openai.ChatMessageImageURL{
+				URL:    strings.TrimSpace(part.URL),
+				Detail: detail,
+			},
+		})
+	}
+	if !hasImage {
+		return nil
+	}
+	return parts
+}
+
+func normalizeRuntimeVisionImageDetail(raw string) openai.ImageURLDetail {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case string(openai.ImageURLDetailHigh):
+		return openai.ImageURLDetailHigh
+	case string(openai.ImageURLDetailLow):
+		return openai.ImageURLDetailLow
+	default:
+		return openai.ImageURLDetailAuto
+	}
 }
 
 func (r *Runtime) availableToolNames() []string {
@@ -196,6 +292,66 @@ func selectRecentMessages(conversation []openai.ChatCompletionMessage, recentTur
 		result = append(result, msg)
 	}
 	return result
+}
+
+func selectConversationBeforeTurn(conversation []openai.ChatCompletionMessage, turn *TurnContext) ([]openai.ChatCompletionMessage, bool) {
+	result := append([]openai.ChatCompletionMessage(nil), conversation...)
+	if turn == nil || turn.trigger == TriggerProactive || len(result) == 0 {
+		return result, false
+	}
+
+	lastIndex := len(result) - 1
+	if isCurrentTurnConversationMessage(result[lastIndex], turn) {
+		return result[:lastIndex], true
+	}
+	return result, false
+}
+
+func isCurrentTurnConversationMessage(message openai.ChatCompletionMessage, turn *TurnContext) bool {
+	if turn == nil || message.Role != openai.ChatMessageRoleUser {
+		return false
+	}
+	if len(message.MultiContent) > 0 {
+		return multiContentMatchesTurn(message.MultiContent, turn)
+	}
+	return strings.TrimSpace(message.Content) == strings.TrimSpace(turn.Message())
+}
+
+func multiContentMatchesTurn(parts []openai.ChatMessagePart, turn *TurnContext) bool {
+	textParts := make([]string, 0, len(parts))
+	imageURLs := make([]string, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case openai.ChatMessagePartTypeText:
+			if strings.TrimSpace(part.Text) != "" {
+				textParts = append(textParts, part.Text)
+			}
+		case openai.ChatMessagePartTypeImageURL:
+			if part.ImageURL != nil && strings.TrimSpace(part.ImageURL.URL) != "" {
+				imageURLs = append(imageURLs, strings.TrimSpace(part.ImageURL.URL))
+			}
+		}
+	}
+
+	if strings.TrimSpace(strings.Join(textParts, "\n")) != strings.TrimSpace(turn.Message()) {
+		return false
+	}
+
+	expectedImageURLs := make([]string, 0, len(turn.Parts()))
+	for _, part := range turn.Parts() {
+		if part.Type == "image" && strings.TrimSpace(part.URL) != "" {
+			expectedImageURLs = append(expectedImageURLs, strings.TrimSpace(part.URL))
+		}
+	}
+	if len(imageURLs) != len(expectedImageURLs) {
+		return false
+	}
+	for i := range imageURLs {
+		if imageURLs[i] != expectedImageURLs[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func stepTraceFromExecution(step int, call openai.ToolCall, execution tools.ExecutionResult) StepTrace {

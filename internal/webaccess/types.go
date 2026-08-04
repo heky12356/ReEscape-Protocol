@@ -12,6 +12,8 @@ type SearchResponse struct {
 	Provider string         `json:"provider"`
 	Query    string         `json:"query"`
 	Results  []SearchResult `json:"results"`
+	Answer   string         `json:"answer,omitempty"`
+	Usage    map[string]any `json:"usage,omitempty"`
 }
 
 type SearchResult struct {

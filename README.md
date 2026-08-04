@@ -26,7 +26,7 @@ ReEscape Protocol 是一个基于 OneBot WebSocket 的聊天机器人运行时�
 - 连续碎片消息聚合。
 - 按用户/会话隔离上下文和状态。
 - ReAct 工具调用，可按需读取或写入业务状态。
-- ReAct Skills：兼容标准 `skill-name/SKILL.md` 包，按当前消息注入 skill hints，并可通过只读工具按需读取完整 skill。
+- ReAct Skills：兼容标准 `skill-name/SKILL.md` 包，由 runtime 解析候选并自动加载高置信度 skill，扩展资源按需读取。
 - 长期记忆：用户画像、事实记忆、情绪状态。
 - 好感系统：领域逻辑在 `internal/domain/affection`，工具入口在 `internal/tools/affection`。
 - 图片素材回复：素材索引在 `assets/images/index.json`。
@@ -59,8 +59,8 @@ AI 参数的优先级：
 - AI fallback：`AI_KEY`、`AI_BASEURL`、`AI_MODEL`
 - 角色：`CHARACTER`、`CHARACTER_IDENTITY_MODE`、`ALLOW_CHARACTER_IDENTITY_EXPLANATION`
 - ReAct：`ENABLE_REACT_AGENT`、`REACT_MAX_STEPS`、`REACT_TOOL_TIMEOUT_MS`、`REACT_ALLOW_WRITE_TOOLS`、`REACT_TRACE_MODE`
-- ReAct skills：`ENABLE_SKILLS`、`SKILL_DIRS`、`SKILL_AUTO_HINT_LIMIT`、`SKILL_RESOURCE_MAX_BYTES`
-- ReAct web tools：`ENABLE_WEB_TOOLS`、`WEB_SEARCH_PROVIDER`、`WEB_SEARCH_ENDPOINT`、`WEB_SEARCH_MAX_RESULTS`、`WEB_TOOL_TIMEOUT_MS`
+- ReAct skills：`ENABLE_SKILLS`、`SKILL_DIRS`、`SKILL_CANDIDATE_MIN_SCORE`、`SKILL_AUTO_LOAD_MIN_SCORE`、`SKILL_AUTO_LOAD_MIN_CONFIDENCE`、`SKILL_MAX_AUTO_LOADED`、`SKILL_RESOURCE_MAX_BYTES`
+- ReAct web tools：`ENABLE_WEB_TOOLS`、`WEB_SEARCH_PROVIDER`、`WEB_SEARCH_ENDPOINT`、`WEB_SEARCH_API_KEY`、`WEB_SEARCH_MAX_RESULTS`、`WEB_TOOL_TIMEOUT_MS`
 - 回复策略：`LIGHT_ACK_MODE`、`SHORT_REPLY_STRICTNESS`、`ENABLE_SPACE_SEGMENT_DELIMITER`
 - 聚合：`MESSAGE_AGGREGATE_IDLE_WINDOW_MS`、`MESSAGE_AGGREGATE_MAX_WINDOW_MS`、`MESSAGE_AGGREGATE_MAX_MESSAGES`
 - 主动触达保护：`PROACTIVE_CLAIM_LEASE_MS`、`PROACTIVE_SKIP_ON_PENDING_USER`、`PROACTIVE_USER_MESSAGE_GRACE_MS`
@@ -123,7 +123,9 @@ description: Use when the user expresses sadness, stress, fatigue, disappointmen
 先承接用户情绪，不急着解决问题。
 ```
 
-默认从 `./config/skills` 加载，当前内置了 `comfort`、`conflict-repair`、`schedule-commitment` 和 `technical-explain` 示例。运行时只会自动注入匹配到的 skill name/description 作为 `Skill Hints`；完整 `SKILL.md` 需要模型通过 `read_skill` 工具按需读取，扩展材料通过 `read_skill_resource` 读取。
+默认从 `./config/skills` 加载。metadata 只用于候选召回：高置信度 skill 由 runtime 自动加载完整 `SKILL.md` 并作为 `Activated Skills` 注入当前 turn；中置信度结果只作为 `Skill Candidates` 注入，模型确认适用后必须先调用 `read_skill`。`references/`、`assets/` 和 `scripts/` 中的文本仍通过 `read_skill_resource` 渐进读取。
+
+同一个 ReAct turn 只执行一次匹配和激活，默认最多自动加载 1 个 skill。普通寒暄或只有通用 description 词的弱匹配不会注入 skill 正文。`read_skill` 主要用于中置信度候选和 `search_skills` 新发现的 skill，不再承担主要激活职责。
 
 相关配置：
 
@@ -131,6 +133,11 @@ description: Use when the user expresses sadness, stress, fatigue, disappointmen
 ENABLE_SKILLS=true
 SKILL_DIRS=./config/skills
 SKILL_AUTO_HINT_LIMIT=3
+SKILL_CANDIDATE_MIN_SCORE=8
+SKILL_AUTO_LOAD_MIN_SCORE=16
+SKILL_AUTO_LOAD_MIN_CONFIDENCE=0.75
+SKILL_MAX_AUTO_LOADED=1
+SKILL_FORCE_READ_ON_CANDIDATE=false
 SKILL_RESOURCE_MAX_BYTES=65536
 SKILL_ALLOW_SCRIPTS=false
 SKILL_LOAD_SYSTEM=false
@@ -140,18 +147,21 @@ SKILL_LOAD_SYSTEM=false
 
 ## ReAct Web Tools
 
-`web_search` / `web_fetch` 是 ReAct 只读工具，默认通过 `ENABLE_WEB_TOOLS=false` 关闭。第一版实现了 `searxng` 搜索 provider，抓取使用本地 Go HTTP client，并带有 SSRF 防护、文本 content-type 限制、大小限制和超时。
+`web_search` / `web_fetch` 是 ReAct 只读工具，默认通过 `ENABLE_WEB_TOOLS=false` 关闭。搜索 provider 支持 `searxng` 和 `tavily`；抓取使用本地 Go HTTP client，并带有 SSRF 防护、文本 content-type 限制、大小限制和超时。
 
-启用时建议先配置：
+需要稳定 agent 搜索时推荐 Tavily：
 
 ```env
 ENABLE_REACT_AGENT=true
 ENABLE_WEB_TOOLS=true
-WEB_SEARCH_PROVIDER=searxng
-WEB_SEARCH_ENDPOINT=http://127.0.0.1:8888/search
+WEB_SEARCH_PROVIDER=tavily
+WEB_SEARCH_API_KEY=tvly-xxx
+WEB_SEARCH_MAX_RESULTS=5
 ```
 
-SearXNG 实例需要启用 JSON search API。`ENABLE_WEB_TOOLS`、provider、endpoint 这类工具注册配置修改后建议重启机器人；运行时保存后会热重载配置值，但已构建的 registry 不会自动重建。
+`searxng` 适合自建免费搜索，实例需要启用 JSON search API，并把 endpoint 配到 `/search`。公开 SearXNG 实例可能返回 HTML bot challenge，不建议依赖。
+
+`tavily` 适合稳定 agent 搜索。`WEB_SEARCH_ENDPOINT` 可留空，默认使用 `https://api.tavily.com/search`；`WEB_SEARCH_API_KEY` 必填。`ENABLE_WEB_TOOLS`、provider、endpoint、API key 这类工具注册配置修改后建议重启机器人；运行时保存后会热重载配置值，但已构建的 registry 不会自动重建。
 
 ## ReAct 记忆写入
 

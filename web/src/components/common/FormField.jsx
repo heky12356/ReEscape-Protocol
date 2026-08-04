@@ -23,7 +23,7 @@ export function InputField({
   );
 }
 
-export function SelectField({ label, value, options, onChange, hint }) {
+export function SelectField({ label, value, options, optionLabels = {}, onChange, hint }) {
   return (
     <label className="field">
       <span className="field-label">{label}</span>
@@ -34,7 +34,7 @@ export function SelectField({ label, value, options, onChange, hint }) {
       >
         {(options || []).map((option) => (
           <option key={option} value={option}>
-            {option}
+            {optionLabels[option] || option}
           </option>
         ))}
       </select>

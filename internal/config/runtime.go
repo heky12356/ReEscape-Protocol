@@ -77,19 +77,15 @@ func ReloadRuntimeConfig() error {
 	config.EnableSkills = getBoolEnv("ENABLE_SKILLS", config.EnableSkills)
 	config.SkillDirs = getStringArrayEnv("SKILL_DIRS", config.SkillDirs)
 	config.SkillAutoHintLimit = getIntEnv("SKILL_AUTO_HINT_LIMIT", config.SkillAutoHintLimit)
+	config.SkillCandidateMinScore = getIntEnv("SKILL_CANDIDATE_MIN_SCORE", config.SkillCandidateMinScore)
+	config.SkillAutoLoadMinScore = getIntEnv("SKILL_AUTO_LOAD_MIN_SCORE", config.SkillAutoLoadMinScore)
+	config.SkillAutoLoadMinConfidence = getFloatEnv("SKILL_AUTO_LOAD_MIN_CONFIDENCE", config.SkillAutoLoadMinConfidence)
+	config.SkillMaxAutoLoaded = getIntEnv("SKILL_MAX_AUTO_LOADED", config.SkillMaxAutoLoaded)
+	config.SkillForceReadOnCandidate = getBoolEnv("SKILL_FORCE_READ_ON_CANDIDATE", config.SkillForceReadOnCandidate)
 	config.SkillResourceMaxBytes = getIntEnv("SKILL_RESOURCE_MAX_BYTES", config.SkillResourceMaxBytes)
 	config.SkillAllowScripts = getBoolEnv("SKILL_ALLOW_SCRIPTS", config.SkillAllowScripts)
 	config.SkillLoadSystem = getBoolEnv("SKILL_LOAD_SYSTEM", config.SkillLoadSystem)
-	if config.EnableSkills {
-		for _, err := range skill.GetManager().LoadDirsWithOptions(config.SkillDirs, skill.LoadOptions{
-			Scope:         skill.ScopeProject,
-			IncludeHidden: config.SkillLoadSystem,
-		}) {
-			utils.Warn("reload skill failed: %v", err)
-		}
-	} else {
-		skill.GetManager().LoadDirs(nil)
-	}
+	reloadSkillsFromConfig()
 	config.EnableReactAgent = getBoolEnv("ENABLE_REACT_AGENT", config.EnableReactAgent)
 	config.ReactMaxSteps = getIntEnv("REACT_MAX_STEPS", config.ReactMaxSteps)
 	config.ReactToolTimeoutMs = getIntEnv("REACT_TOOL_TIMEOUT_MS", config.ReactToolTimeoutMs)
@@ -98,13 +94,20 @@ func ReloadRuntimeConfig() error {
 	config.ReactTotalTimeoutMs = getIntEnv("REACT_TOTAL_TIMEOUT_MS", config.ReactTotalTimeoutMs)
 	config.EnableWebTools = getBoolEnv("ENABLE_WEB_TOOLS", config.EnableWebTools)
 	config.WebSearchProvider = getStringEnv("WEB_SEARCH_PROVIDER", config.WebSearchProvider)
-	config.WebSearchEndpoint = getStringEnv("WEB_SEARCH_ENDPOINT", config.WebSearchEndpoint)
+	if value, ok := os.LookupEnv("WEB_SEARCH_ENDPOINT"); ok {
+		config.WebSearchEndpoint = value
+	}
 	config.WebSearchAPIKey = os.Getenv("WEB_SEARCH_API_KEY")
 	config.WebSearchMaxResults = getIntEnv("WEB_SEARCH_MAX_RESULTS", config.WebSearchMaxResults)
 	config.WebToolTimeoutMs = getIntEnv("WEB_TOOL_TIMEOUT_MS", config.WebToolTimeoutMs)
 	config.WebFetchMaxBytes = getIntEnv("WEB_FETCH_MAX_BYTES", config.WebFetchMaxBytes)
 	config.WebFetchMaxChars = getIntEnv("WEB_FETCH_MAX_CHARS", config.WebFetchMaxChars)
 	config.WebFetchUserAgent = getStringEnv("WEB_FETCH_USER_AGENT", config.WebFetchUserAgent)
+	config.TavilySearchDepth = normalizeTavilySearchDepth(getStringEnv("TAVILY_SEARCH_DEPTH", config.TavilySearchDepth))
+	config.TavilyTopic = normalizeTavilyTopic(getStringEnv("TAVILY_TOPIC", config.TavilyTopic))
+	config.TavilyIncludeAnswer = getBoolEnv("TAVILY_INCLUDE_ANSWER", config.TavilyIncludeAnswer)
+	config.TavilyIncludeRawContent = getBoolEnv("TAVILY_INCLUDE_RAW_CONTENT", config.TavilyIncludeRawContent)
+	config.TavilySafeSearch = getBoolEnv("TAVILY_SAFE_SEARCH", config.TavilySafeSearch)
 	config.CharacterIdentityMode = normalizeCharacterIdentityMode(getStringEnv("CHARACTER_IDENTITY_MODE", config.CharacterIdentityMode))
 	config.AllowCharacterIdentityExplanation = getBoolEnv("ALLOW_CHARACTER_IDENTITY_EXPLANATION", config.AllowCharacterIdentityExplanation)
 
@@ -133,4 +136,17 @@ func ReloadRuntimeConfig() error {
 	}
 
 	return nil
+}
+
+func reloadSkillsFromConfig() {
+	if config.EnableSkills {
+		for _, err := range skill.GetManager().LoadDirsWithOptions(config.SkillDirs, skill.LoadOptions{
+			Scope:         skill.ScopeProject,
+			IncludeHidden: config.SkillLoadSystem,
+		}) {
+			utils.Warn("reload skill failed: %v", err)
+		}
+		return
+	}
+	skill.GetManager().LoadDirs(nil)
 }

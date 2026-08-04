@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	skillpkg "project-yume/internal/skill"
 )
@@ -37,12 +38,41 @@ func TestReadSkillToolReturnsBodyAndResources(t *testing.T) {
 	}
 	t.Cleanup(func() { skillpkg.GetManager().LoadDirs(nil) })
 
-	result, err := NewReadSkillTool().Execute(context.Background(), nil, json.RawMessage(`{"name":"comfort","reason":"test"}`))
+	result, err := NewReadSkillTool().Execute(context.Background(), nil, json.RawMessage(`{"name":"comfort"}`))
 	if err != nil {
 		t.Fatalf("execute read_skill: %v", err)
 	}
 	if !strings.Contains(result.Content, "# Comfort") || !strings.Contains(result.Content, "references/examples.md") {
 		t.Fatalf("unexpected content: %q", result.Content)
+	}
+}
+
+func TestReadSkillResourceRequiresSkillAccessForTrackedTurn(t *testing.T) {
+	root := t.TempDir()
+	writeSkillFile(t, filepath.Join(root, "comfort", "SKILL.md"), "---\nname: comfort\ndescription: Use when user is sad.\n---\n# Comfort")
+	writeSkillFile(t, filepath.Join(root, "comfort", "references", "examples.md"), "example")
+	if errs := skillpkg.GetManager().LoadDirs([]string{root}); len(errs) != 0 {
+		t.Fatalf("load skills: %v", errs)
+	}
+	t.Cleanup(func() { skillpkg.GetManager().LoadDirs(nil) })
+
+	turn := &trackedSkillTurn{loaded: make(map[string]bool)}
+	resourceInput := json.RawMessage(`{"name":"comfort","path":"references/examples.md","reason":"test"}`)
+	if _, err := NewReadSkillResourceTool(64).Execute(context.Background(), turn, resourceInput); err == nil {
+		t.Fatal("expected resource read before SKILL.md to be rejected")
+	}
+	if _, err := NewReadSkillTool().Execute(context.Background(), turn, json.RawMessage(`{"name":"comfort"}`)); err != nil {
+		t.Fatalf("read skill: %v", err)
+	}
+	result, err := NewReadSkillResourceTool(64).Execute(context.Background(), turn, resourceInput)
+	if err != nil {
+		t.Fatalf("read resource after skill: %v", err)
+	}
+	if !strings.Contains(result.Content, "example") {
+		t.Fatalf("unexpected resource content: %q", result.Content)
+	}
+	if len(result.Events) != 1 || result.Events[0].Type != "skill_resource_read" {
+		t.Fatalf("expected skill_resource_read event, got %#v", result.Events)
 	}
 }
 
@@ -70,3 +100,20 @@ func writeSkillFile(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
+
+type trackedSkillTurn struct {
+	loaded map[string]bool
+}
+
+func (t *trackedSkillTurn) RequestID() string               { return "request" }
+func (t *trackedSkillTurn) SessionID() string               { return "private:1" }
+func (t *trackedSkillTurn) UserID() int64                   { return 1 }
+func (t *trackedSkillTurn) GroupID() int64                  { return 0 }
+func (t *trackedSkillTurn) ChatType() int                   { return 1 }
+func (t *trackedSkillTurn) Message() string                 { return "" }
+func (t *trackedSkillTurn) ReferenceTime() time.Time        { return time.Now() }
+func (t *trackedSkillTurn) Trigger() string                 { return "message" }
+func (t *trackedSkillTurn) Actor() string                   { return "user" }
+func (t *trackedSkillTurn) IsSkillLoaded(name string) bool  { return t.loaded[name] }
+func (t *trackedSkillTurn) MarkSkillRead(name string)       { t.loaded[name] = true }
+func (t *trackedSkillTurn) HasSkillAccess(name string) bool { return t.loaded[name] }

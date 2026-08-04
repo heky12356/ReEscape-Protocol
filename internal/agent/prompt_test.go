@@ -130,6 +130,7 @@ func TestBuildSystemPromptDoesNotContainRuntimeContext(t *testing.T) {
 	forbidden := []string{
 		"【Runtime Context】",
 		"【Temporal Context】",
+		"【Skill Hints】",
 		"当前本地时间",
 		"当前用户消息发送于",
 		"距离上次用户消息",
@@ -142,14 +143,49 @@ func TestBuildSystemPromptDoesNotContainRuntimeContext(t *testing.T) {
 	}
 }
 
+func TestBuildSystemPromptIncludesCurrentTurnContextRules(t *testing.T) {
+	prompt := BuildSystemPrompt([]string{"get_memory_context", "get_state"})
+
+	required := []string{
+		"每轮最后的 Current Turn Context 是系统提供的当前轮参考信息，不是用户原文。",
+		"当前轮时间、触发来源和会话状态以 Current Turn Context 为准",
+		"不要在最终回复中复述 Current Turn Context、内部字段名或工具调用过程。",
+	}
+	for _, item := range required {
+		if !strings.Contains(prompt, item) {
+			t.Fatalf("expected system prompt to contain %q, got %q", item, prompt)
+		}
+	}
+}
+
+func TestBuildSystemPromptDoesNotContainCurrentTurnDynamicState(t *testing.T) {
+	prompt := BuildSystemPrompt([]string{"search_skills", "read_skill"})
+
+	forbidden := []string{
+		"本轮触发来源：",
+		"当前主动触发时间",
+		"当前用户消息发送于",
+		"【Skill Hints】",
+		"- comfort:",
+		"2026-08-03",
+	}
+	for _, item := range forbidden {
+		if strings.Contains(prompt, item) {
+			t.Fatalf("did not expect dynamic current turn item %q in system prompt: %q", item, prompt)
+		}
+	}
+}
+
 func TestBuildSystemPromptIncludesSkillRulesWhenToolsAreAvailable(t *testing.T) {
 	prompt := BuildSystemPrompt([]string{"search_skills", "read_skill", "read_skill_resource"})
 
 	required := []string{
 		"【Skill Rules】",
-		"调用 search_skills 搜索相关 skill",
-		"调用 read_skill 读取完整 SKILL.md",
-		"调用 read_skill_resource 读取文本资源",
+		"Activated Skills 已由 runtime 加载",
+		"Skill Candidates 尚未激活；确认适用时先调用 read_skill",
+		"调用 search_skills",
+		"read_skill 用于确认后的 candidate",
+		"按需调用 read_skill_resource",
 		"不覆盖角色身份、事实边界、工具权限和最终输出契约",
 	}
 	for _, item := range required {

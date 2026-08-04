@@ -32,7 +32,6 @@ func buildTemporalContext(turn *TurnContext) string {
 	}
 
 	lines := []string{
-		"【Temporal Context】",
 		fmt.Sprintf("当前本地时间：%s", referenceTime.In(location).Format(layout)),
 	}
 
@@ -52,7 +51,6 @@ func buildTemporalContext(turn *TurnContext) string {
 	if shouldWarnTemporalDiscontinuity(eventTime, turn.PreviousInteractionAt()) {
 		lines = append(lines, "提示：当前对话与上一轮不连续，请按跨时段延续理解。")
 	}
-	lines = append(lines, "当用户提到今天、明天、昨天、刚刚、现在、昨晚等相对时间时，以上述时间为准理解。")
 
 	return strings.Join(lines, "\n")
 }

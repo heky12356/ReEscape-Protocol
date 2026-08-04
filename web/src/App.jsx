@@ -23,10 +23,10 @@ const MENU_ITEMS = [
   },
   {
     key: "prompt",
-    label: "人格与 Prompt",
+    label: "人格与提示词",
     icon: "Ψ",
     note: "声音设计",
-    description: "维护人格文件、补充系统提示词，并检查最终真正送给模型的完整 Prompt。"
+    description: "维护人格文件、补充系统提示词，并检查最终真正送给模型的完整提示词。"
   },
   {
     key: "logs",
@@ -53,7 +53,7 @@ export default function App() {
       <main className="console-shell">
         <section className="hero-band">
           <div className="hero-copy">
-            <div className="eyebrow">ReEscape protocol / operator deck</div>
+            <div className="eyebrow">ReEscape Protocol / 管理控制台</div>
             <h1 className="hero-title">{currentSection.label}</h1>
             <p className="hero-lead">{currentSection.description}</p>
           </div>
@@ -68,18 +68,18 @@ export default function App() {
             </div>
 
             <div className="signal-readout">
-              <div className="signal-label">Current posture</div>
+              <div className="signal-label">当前运行状态</div>
               <div className="signal-value">
-                {panel.ready.status === "ok" ? "Ready for traffic" : "Needs attention"}
+                {panel.ready.status === "ok" ? "服务已就绪" : "需要检查"}
               </div>
               <div className="signal-meta">
-                Profile <span className="mono">{panel.config.aiProfile || "default"}</span> · Character{" "}
+                配置档 <span className="mono">{panel.config.aiProfile || "default"}</span> · 人格{" "}
                 <span className="mono">{panel.config.character || "-"}</span>
               </div>
 
               <div className="probe-row">
-                <StatusPill label="Health" value={panel.health.status} />
-                <StatusPill label="Ready" value={panel.ready.status} />
+                <StatusPill label="健康状态" value={panel.health.status} />
+                <StatusPill label="就绪状态" value={panel.ready.status} />
               </div>
             </div>
           </div>
@@ -87,19 +87,19 @@ export default function App() {
 
         <div className="command-strip">
           <div className="command-chip">
-            <span>Env file</span>
+            <span>环境配置文件</span>
             <strong className="mono">{panel.config.environmentConfig}</strong>
           </div>
           <div className="command-chip">
-            <span>Profiles</span>
+            <span>模型配置档</span>
             <strong>{panel.digest.profileCount}</strong>
           </div>
           <div className="command-chip">
-            <span>Characters</span>
+            <span>人格文件</span>
             <strong>{panel.digest.characterCount}</strong>
           </div>
           <div className="command-chip">
-            <span>Logs</span>
+            <span>日志文件</span>
             <strong>{panel.digest.logCount}</strong>
           </div>
         </div>
@@ -120,11 +120,12 @@ export default function App() {
 
 function StatusPill({ label, value }) {
   const tone = value === "ok" ? "good" : value === "unknown" ? "idle" : "warn";
+  const displayValue = value === "ok" ? "正常" : value === "unknown" ? "未知" : value || "未知";
 
   return (
     <div className={`status-pill ${tone}`}>
       <span>{label}</span>
-      <strong>{value || "unknown"}</strong>
+      <strong>{displayValue}</strong>
     </div>
   );
 }

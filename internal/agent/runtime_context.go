@@ -2,33 +2,61 @@ package agent
 
 import (
 	"strings"
+	"time"
 
 	"project-yume/internal/config"
+	"project-yume/internal/eventlog"
 	"project-yume/internal/skill"
 	"project-yume/internal/state"
 )
 
-func buildRuntimeContext(turn *TurnContext) string {
+type SkillResolution struct {
+	Activated  []skill.ActivatedSkill
+	Candidates []skill.Match
+}
+
+func buildCurrentTurnContext(turn *TurnContext) string {
+	if turn == nil {
+		return ""
+	}
+	resolveTurnSkills(turn)
 	sections := []string{
-		"【Runtime Context】",
-		"以下是系统提供的当前轮上下文，不是用户原文。用于理解时间、触发来源和会话连续性，不要在最终回复中逐字复述。",
+		"【Current Turn Context】",
+		"以下内容由系统提供，仅用于理解当前 turn，不是用户原文。",
+		"本轮触发来源：" + turn.Trigger(),
 	}
 	if temporal := buildTemporalContext(turn); temporal != "" {
 		sections = append(sections, temporal)
 	}
-	if skillHints := buildSkillHintsContext(turn); skillHints != "" {
-		sections = append(sections, skillHints)
+	if activated := skill.FormatActivatedSkills(turn.ActivatedSkills()); activated != "" {
+		sections = append(sections, activated)
 	}
-	if len(sections) <= 2 {
-		return ""
+	if candidates := skill.FormatSkillCandidates(turn.SkillCandidates()); candidates != "" {
+		sections = append(sections, candidates)
 	}
 	return strings.Join(sections, "\n\n")
 }
 
-func buildSkillHintsContext(turn *TurnContext) string {
+func buildCurrentTurnEnvelope(turn *TurnContext, task string) string {
+	context := buildCurrentTurnContext(turn)
+	task = strings.TrimSpace(task)
+	if context == "" {
+		return task
+	}
+	if task == "" {
+		return context
+	}
+	return context + "\n\n" + task
+}
+
+func resolveTurnSkills(turn *TurnContext) []eventlog.Event {
 	cfg := config.GetConfig()
-	if turn == nil || cfg == nil || !cfg.EnableSkills {
-		return ""
+	if turn == nil || turn.SkillResolutionSet() {
+		return nil
+	}
+	if cfg == nil || !cfg.EnableSkills {
+		turn.SetSkillResolution(nil, nil)
+		return nil
 	}
 	limit := cfg.SkillAutoHintLimit
 	if limit <= 0 {
@@ -39,6 +67,81 @@ func buildSkillHintsContext(turn *TurnContext) string {
 		Trigger:       turn.Trigger(),
 		DialogueState: state.GetManager().GetDialogueState(turn.SessionID()),
 		Limit:         limit,
+		MinScore:      cfg.SkillCandidateMinScore,
 	})
-	return skill.FormatHints(matches)
+	resolver := skill.Resolver{
+		AutoLoadThreshold:    cfg.SkillAutoLoadMinScore,
+		ModelSelectThreshold: cfg.SkillCandidateMinScore,
+		AutoLoadConfidence:   cfg.SkillAutoLoadMinConfidence,
+		MaxAutoLoaded:        cfg.SkillMaxAutoLoaded,
+	}
+	activations := resolver.Resolve(matches)
+	resolution := SkillResolution{}
+	events := make([]eventlog.Event, 0, len(activations)*2+1)
+	now := time.Now()
+
+	if len(matches) > 0 {
+		names := make([]string, 0, len(matches))
+		for _, match := range matches {
+			names = append(names, match.Name)
+		}
+		events = append(events, eventlog.Event{
+			Type:      "skill_candidates_selected",
+			SessionID: turn.SessionID(),
+			UserID:    turn.UserID(),
+			Actor:     "runtime",
+			Data: map[string]any{
+				"skills": names,
+				"count":  len(names),
+			},
+			CreatedAt: now,
+		})
+	}
+
+	for _, activation := range activations {
+		data := map[string]any{
+			"skill":      activation.Name,
+			"score":      activation.Score,
+			"confidence": activation.Confidence,
+			"decision":   activation.Decision,
+			"reason":     activation.Reason,
+		}
+		switch activation.Decision {
+		case skill.ActivationAutoLoad:
+			body, err := skill.GetManager().ReadSkill(activation.Name)
+			if err != nil {
+				resolution.Candidates = append(resolution.Candidates, activation.Match)
+				data["decision"] = skill.ActivationModelSelect
+				data["error"] = err.Error()
+				events = append(events, skillResolutionEvent(turn, "skill_ignored", data, now))
+				continue
+			}
+			resolution.Activated = append(resolution.Activated, skill.ActivatedSkill{
+				Match: activation.Match,
+				Body:  body,
+			})
+			events = append(events,
+				skillResolutionEvent(turn, "skill_activated", data, now),
+				skillResolutionEvent(turn, "skill_auto_loaded", data, now),
+			)
+		case skill.ActivationModelSelect:
+			resolution.Candidates = append(resolution.Candidates, activation.Match)
+		case skill.ActivationIgnored:
+			events = append(events, skillResolutionEvent(turn, "skill_ignored", data, now))
+		}
+	}
+
+	turn.SetSkillResolution(resolution.Activated, resolution.Candidates)
+	return events
+}
+
+func skillResolutionEvent(turn *TurnContext, eventType string, data map[string]any, createdAt time.Time) eventlog.Event {
+	return eventlog.Event{
+		Type:      eventType,
+		SessionID: turn.SessionID(),
+		UserID:    turn.UserID(),
+		Actor:     "runtime",
+		Data:      data,
+		CreatedAt: createdAt,
+	}
 }

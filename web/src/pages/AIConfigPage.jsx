@@ -277,27 +277,27 @@ export function AIConfigPage({ panel }) {
               hint="默认关闭；开启后需要可用 provider。"
               onChange={(v) => updateField(panel, "enableWebTools", v === "true")}
             />
-            <SelectField
-              label="Search provider"
-              value={cfg.webSearchProvider}
-              options={WEB_PROVIDER_OPTIONS}
-              hint="第一版已实现 searxng，其它 provider 预留。"
-              onChange={(v) => updateField(panel, "webSearchProvider", v)}
-            />
-            <InputField
-              label="Search endpoint"
-              value={cfg.webSearchEndpoint}
-              placeholder="http://127.0.0.1:8888/search"
-              hint="SearXNG 需要启用 JSON format，并配置到 /search。"
-              onChange={(v) => updateField(panel, "webSearchEndpoint", v)}
-            />
-            <InputField
-              label="Search API key"
-              placeholder={cfg.webSearchApiKeySet ? "currently set" : "not set"}
-              hint="留空则保留当前 WEB_SEARCH_API_KEY。"
-              value={cfg.webSearchApiKey}
-              onChange={(v) => updateField(panel, "webSearchApiKey", v)}
-            />
+              <SelectField
+                label="Search provider"
+                value={cfg.webSearchProvider}
+                options={WEB_PROVIDER_OPTIONS}
+                hint="已实现 searxng 和 tavily；brave/serper 仍为预留。"
+                onChange={(v) => updateField(panel, "webSearchProvider", v)}
+              />
+              <InputField
+                label="Search endpoint"
+                value={cfg.webSearchEndpoint}
+                placeholder="http://127.0.0.1:8888/search"
+                hint="SearXNG 需要配置到 /search；Tavily 可留空使用默认 API 地址。"
+                onChange={(v) => updateField(panel, "webSearchEndpoint", v)}
+              />
+              <InputField
+                label="Search API key"
+                placeholder={cfg.webSearchApiKeySet ? "currently set" : "not set"}
+                hint="Tavily 必填；留空则保留当前 WEB_SEARCH_API_KEY。"
+                value={cfg.webSearchApiKey}
+                onChange={(v) => updateField(panel, "webSearchApiKey", v)}
+              />
             <InputField
               label="Max results"
               type="number"

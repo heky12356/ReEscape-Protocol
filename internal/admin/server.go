@@ -1159,6 +1159,9 @@ func validateUpdateRequest(req updateConfigRequest) error {
 	if req.EnableWebTools && provider == "searxng" && strings.TrimSpace(req.WebSearchEndpoint) == "" {
 		return fmt.Errorf("webSearchEndpoint is required when searxng web tools are enabled")
 	}
+	if req.EnableWebTools && provider == "tavily" && strings.TrimSpace(req.WebSearchAPIKey) == "" && strings.TrimSpace(currentWebSearchAPIKey()) == "" {
+		return fmt.Errorf("webSearchApiKey is required when tavily web tools are enabled")
+	}
 	if req.WebSearchMaxResults <= 0 || req.WebSearchMaxResults > 10 {
 		return fmt.Errorf("webSearchMaxResults must be in [1,10]")
 	}
@@ -1175,6 +1178,13 @@ func validateUpdateRequest(req updateConfigRequest) error {
 		return fmt.Errorf("webFetchUserAgent is required")
 	}
 	return nil
+}
+
+func currentWebSearchAPIKey() string {
+	if cfg := config.GetConfig(); cfg != nil && strings.TrimSpace(cfg.WebSearchAPIKey) != "" {
+		return cfg.WebSearchAPIKey
+	}
+	return os.Getenv("WEB_SEARCH_API_KEY")
 }
 
 func currentLogDir() string {

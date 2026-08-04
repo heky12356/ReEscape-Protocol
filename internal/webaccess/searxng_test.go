@@ -18,6 +18,9 @@ func TestSearxNGClientSearchParsesResults(t *testing.T) {
 		if got := r.URL.Query().Get("format"); got != "json" {
 			t.Fatalf("unexpected format: %s", got)
 		}
+		if got := r.URL.Query().Get("time_range"); got != "week" {
+			t.Fatalf("unexpected time_range: %s", got)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"results":[{"title":"One","url":"https://example.com/one","content":"First result","engine":"engine-a"},{"title":"Two","url":"https://example.com/two","content":"Second result"}]}`)
 	}))

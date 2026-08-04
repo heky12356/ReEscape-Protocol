@@ -35,7 +35,6 @@ func TestBuildTemporalContextIncludesMessageTimingAndAggregation(t *testing.T) {
 
 	context := buildTemporalContext(turn)
 
-	assertTemporalContains(t, context, "【Temporal Context】")
 	assertTemporalContains(t, context, "当前本地时间：2026-08-01 14:30:12")
 	assertTemporalContains(t, context, "当前用户消息发送于：2026-08-01 14:29:58")
 	assertTemporalContains(t, context, "距离上次用户消息：23 小时 12 分钟。")
@@ -53,7 +52,7 @@ func TestBuildTemporalContextCanBeDisabled(t *testing.T) {
 	}
 }
 
-func TestBuildRuntimeContextWrapsTemporalContext(t *testing.T) {
+func TestBuildCurrentTurnContextWrapsTemporalContext(t *testing.T) {
 	restoreTemporalConfig(t, true, "Asia/Shanghai", "2006-01-02 15:04:05")
 
 	turn := NewTurnContext(TurnInput{
@@ -61,26 +60,31 @@ func TestBuildRuntimeContextWrapsTemporalContext(t *testing.T) {
 		ReferenceTime: time.Date(2026, 8, 1, 6, 30, 12, 0, time.UTC),
 	})
 
-	context := buildRuntimeContext(turn)
+	context := buildCurrentTurnContext(turn)
 
-	assertTemporalContains(t, context, "【Runtime Context】")
+	assertTemporalContains(t, context, "【Current Turn Context】")
 	assertTemporalContains(t, context, "不是用户原文")
-	assertTemporalContains(t, context, "【Temporal Context】")
+	assertTemporalContains(t, context, "本轮触发来源：message")
+	assertTemporalContains(t, context, "当前本地时间：2026-08-01 14:30:12")
 	if strings.Contains(context, turn.Message()) {
-		t.Fatalf("did not expect runtime context to duplicate user message: %q", context)
+		t.Fatalf("did not expect current turn context to duplicate user message: %q", context)
 	}
 }
 
-func TestBuildRuntimeContextCanBeDisabled(t *testing.T) {
+func TestBuildCurrentTurnContextOmitsTemporalDataWhenTimeContextDisabled(t *testing.T) {
 	restoreTemporalConfig(t, false, "Asia/Shanghai", "2006-01-02 15:04:05")
+	restoreSkillConfig(t, false, 2)
 
 	turn := NewTurnContext(TurnInput{ReferenceTime: time.Now()})
-	if context := buildRuntimeContext(turn); context != "" {
-		t.Fatalf("expected empty runtime context, got %q", context)
+	context := buildCurrentTurnContext(turn)
+	assertTemporalContains(t, context, "【Current Turn Context】")
+	assertTemporalContains(t, context, "本轮触发来源：message")
+	if strings.Contains(context, "当前本地时间") {
+		t.Fatalf("did not expect temporal data when time context is disabled, got %q", context)
 	}
 }
 
-func TestBuildRuntimeContextIncludesProactiveTriggerTiming(t *testing.T) {
+func TestBuildCurrentTurnContextIncludesProactiveTriggerTiming(t *testing.T) {
 	restoreTemporalConfig(t, true, "Asia/Shanghai", "2006-01-02 15:04:05")
 
 	triggerTime := time.Date(2026, 8, 1, 7, 15, 0, 0, time.UTC)
@@ -90,50 +94,105 @@ func TestBuildRuntimeContextIncludesProactiveTriggerTiming(t *testing.T) {
 		Trigger:       TriggerProactive,
 	})
 
-	context := buildRuntimeContext(turn)
+	context := buildCurrentTurnContext(turn)
 
-	assertTemporalContains(t, context, "【Runtime Context】")
+	assertTemporalContains(t, context, "【Current Turn Context】")
+	assertTemporalContains(t, context, "本轮触发来源：proactive")
 	assertTemporalContains(t, context, "当前主动触发时间：2026-08-01 15:15:00")
 	if strings.Contains(context, "当前用户消息发送于") {
-		t.Fatalf("did not expect proactive runtime context to use user message timing: %q", context)
+		t.Fatalf("did not expect proactive current turn context to use user message timing: %q", context)
 	}
 }
 
-func TestBuildRuntimeContextIncludesSkillHints(t *testing.T) {
+func TestBuildCurrentTurnContextIncludesSkillCandidates(t *testing.T) {
 	restoreTemporalConfig(t, false, "Asia/Shanghai", "2006-01-02 15:04:05")
 	restoreSkillConfig(t, true, 2)
-	loadAgentTestSkill(t, "comfort", "Use when the user feels sad or overwhelmed.", "# Comfort")
+	loadAgentTestSkill(t, "comfort", "sad overwhelmed emotional support", "# Comfort")
 
 	turn := NewTurnContext(TurnInput{
 		SessionID: "private:42",
-		Message:   "I feel sad",
+		Message:   "sad overwhelmed emotional support",
 	})
 
-	context := buildRuntimeContext(turn)
-	assertTemporalContains(t, context, "【Runtime Context】")
-	assertTemporalContains(t, context, "【Skill Hints】")
-	assertTemporalContains(t, context, "- comfort: Use when the user feels sad or overwhelmed.")
+	context := buildCurrentTurnContext(turn)
+	assertTemporalContains(t, context, "【Current Turn Context】")
+	assertTemporalContains(t, context, "【Skill Candidates】")
+	assertTemporalContains(t, context, "- comfort: sad overwhelmed emotional support")
 	if strings.Contains(context, "# Comfort") {
-		t.Fatalf("did not expect full skill body in runtime context: %q", context)
+		t.Fatalf("did not expect full skill body in current turn context: %q", context)
 	}
 }
 
-func TestBuildRuntimeContextOmitsSkillHintsWhenDisabled(t *testing.T) {
+func TestBuildCurrentTurnContextIncludesAutoLoadedSkillBody(t *testing.T) {
+	restoreTemporalConfig(t, false, "Asia/Shanghai", "2006-01-02 15:04:05")
+	restoreSkillConfig(t, true, 2)
+	loadAgentTestSkillWithFrontmatter(
+		t,
+		"paper-humanizer",
+		"Polish academic writing.",
+		"triggers:\n  - 润色这段论文\n",
+		"# Paper Humanizer\nFollow the full workflow.",
+	)
+
+	context := buildCurrentTurnContext(NewTurnContext(TurnInput{
+		SessionID: "private:43",
+		Message:   "帮我润色这段论文",
+	}))
+	assertTemporalContains(t, context, "【Activated Skills】")
+	assertTemporalContains(t, context, "【Skill: paper-humanizer】")
+	assertTemporalContains(t, context, "Follow the full workflow.")
+	if strings.Contains(context, "【Skill Candidates】") {
+		t.Fatalf("did not expect auto-loaded skill to remain a candidate: %q", context)
+	}
+}
+
+func TestResolveTurnSkillsEmitsActivationEventsOnlyOnce(t *testing.T) {
+	restoreSkillConfig(t, true, 2)
+	loadAgentTestSkillWithFrontmatter(
+		t,
+		"paper-humanizer",
+		"Polish academic writing.",
+		"triggers:\n  - 润色这段论文\n",
+		"# Paper Humanizer",
+	)
+	turn := NewTurnContext(TurnInput{
+		SessionID: "private:44",
+		UserID:    44,
+		Message:   "帮我润色这段论文",
+	})
+
+	events := resolveTurnSkills(turn)
+	eventTypes := make(map[string]bool)
+	for _, event := range events {
+		eventTypes[event.Type] = true
+	}
+	if !eventTypes["skill_candidates_selected"] ||
+		!eventTypes["skill_activated"] ||
+		!eventTypes["skill_auto_loaded"] {
+		t.Fatalf("expected activation audit events, got %#v", events)
+	}
+	if repeated := resolveTurnSkills(turn); len(repeated) != 0 {
+		t.Fatalf("expected skill resolution to be cached for the turn, got %#v", repeated)
+	}
+}
+
+func TestBuildCurrentTurnContextOmitsSkillsWhenDisabled(t *testing.T) {
 	restoreTemporalConfig(t, false, "Asia/Shanghai", "2006-01-02 15:04:05")
 	restoreSkillConfig(t, false, 2)
 	loadAgentTestSkill(t, "comfort", "Use when the user feels sad or overwhelmed.", "# Comfort")
 
-	context := buildRuntimeContext(NewTurnContext(TurnInput{
+	context := buildCurrentTurnContext(NewTurnContext(TurnInput{
 		SessionID: "private:42",
 		Message:   "I feel sad",
 	}))
-	if strings.Contains(context, "【Skill Hints】") {
-		t.Fatalf("did not expect skill hints when disabled: %q", context)
+	if strings.Contains(context, "【Skill Candidates】") || strings.Contains(context, "【Activated Skills】") {
+		t.Fatalf("did not expect skills when disabled: %q", context)
 	}
 }
 
-func TestRuntimeBuildMessagesInjectsRuntimeContextBeforeConversation(t *testing.T) {
+func TestRuntimeBuildMessagesPlacesTemporalContextInCurrentTurnPacket(t *testing.T) {
 	restoreTemporalConfig(t, true, "Asia/Shanghai", "2006-01-02 15:04")
+	restoreSkillConfig(t, false, 2)
 	sm := state.GetManager()
 	sm.ClearAllSessions()
 	t.Cleanup(sm.ClearAllSessions)
@@ -151,25 +210,28 @@ func TestRuntimeBuildMessagesInjectsRuntimeContextBeforeConversation(t *testing.
 		SessionID:     sessionID,
 		UserID:        42,
 		ChatType:      1,
+		Message:       "昨天那个事情我想了一下",
 		ReferenceTime: messageTime,
 		StartedAt:     messageTime,
 		EndedAt:       messageTime,
 	}))
 
-	if len(messages) < 3 {
-		t.Fatalf("expected system prompt, temporal context, and conversation, got %d messages", len(messages))
+	if len(messages) != 2 {
+		t.Fatalf("expected system prompt and current turn packet, got %#v", messages)
 	}
 	if messages[0].Role != openai.ChatMessageRoleSystem || !strings.Contains(messages[0].Content, "【Agent Policy】") {
 		t.Fatalf("expected first message to be agent system prompt, got %#v", messages[0])
 	}
-	if messages[1].Role != openai.ChatMessageRoleUser ||
-		!strings.Contains(messages[1].Content, "【Runtime Context】") ||
-		!strings.Contains(messages[1].Content, "【Temporal Context】") ||
-		!strings.Contains(messages[1].Content, "不是用户原文") {
-		t.Fatalf("expected second message to be runtime user context, got %#v", messages[1])
+	last := messages[len(messages)-1]
+	if last.Role != openai.ChatMessageRoleUser ||
+		!strings.Contains(last.Content, "【Current Turn Context】") ||
+		!strings.Contains(last.Content, "当前用户消息发送于：2026-08-02 09:30") ||
+		!strings.Contains(last.Content, "不是用户原文") ||
+		!strings.Contains(last.Content, "【User Message】") {
+		t.Fatalf("expected final message to be current turn packet, got %#v", last)
 	}
-	if messages[2].Role != openai.ChatMessageRoleUser || messages[2].Content != "昨天那个事情我想了一下" {
-		t.Fatalf("expected conversation after runtime context, got %#v", messages[2])
+	if strings.Contains(messages[0].Content, "2026-08-02 09:30") {
+		t.Fatalf("did not expect concrete current turn time in system prompt: %q", messages[0].Content)
 	}
 }
 
@@ -197,17 +259,33 @@ func restoreSkillConfig(t *testing.T, enabled bool, limit int) {
 	cfg := config.GetConfig()
 	previousEnabled := cfg.EnableSkills
 	previousLimit := cfg.SkillAutoHintLimit
+	previousCandidateMinScore := cfg.SkillCandidateMinScore
+	previousAutoLoadMinScore := cfg.SkillAutoLoadMinScore
+	previousAutoLoadMinConfidence := cfg.SkillAutoLoadMinConfidence
+	previousMaxAutoLoaded := cfg.SkillMaxAutoLoaded
 	t.Cleanup(func() {
 		cfg.EnableSkills = previousEnabled
 		cfg.SkillAutoHintLimit = previousLimit
+		cfg.SkillCandidateMinScore = previousCandidateMinScore
+		cfg.SkillAutoLoadMinScore = previousAutoLoadMinScore
+		cfg.SkillAutoLoadMinConfidence = previousAutoLoadMinConfidence
+		cfg.SkillMaxAutoLoaded = previousMaxAutoLoaded
 		skill.GetManager().LoadDirs(nil)
 	})
 
 	cfg.EnableSkills = enabled
 	cfg.SkillAutoHintLimit = limit
+	cfg.SkillCandidateMinScore = 8
+	cfg.SkillAutoLoadMinScore = 16
+	cfg.SkillAutoLoadMinConfidence = 0.75
+	cfg.SkillMaxAutoLoaded = 1
 }
 
 func loadAgentTestSkill(t *testing.T, name, description, body string) {
+	loadAgentTestSkillWithFrontmatter(t, name, description, "", body)
+}
+
+func loadAgentTestSkillWithFrontmatter(t *testing.T, name, description, frontmatter, body string) {
 	t.Helper()
 
 	root := t.TempDir()
@@ -215,7 +293,7 @@ func loadAgentTestSkill(t *testing.T, name, description, body string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	content := "---\nname: " + name + "\ndescription: " + description + "\n---\n" + body
+	content := "---\nname: " + name + "\ndescription: " + description + "\n" + frontmatter + "---\n" + body
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}

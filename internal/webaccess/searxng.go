@@ -128,7 +128,7 @@ func (c *SearxNGClient) Search(ctx context.Context, req SearchRequest) (SearchRe
 
 func searxngTimeRange(recency string) string {
 	switch strings.ToLower(strings.TrimSpace(recency)) {
-	case "day", "month", "year":
+	case "day", "week", "month", "year":
 		return strings.ToLower(strings.TrimSpace(recency))
 	default:
 		return ""

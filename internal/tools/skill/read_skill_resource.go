@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"project-yume/internal/config"
+	"project-yume/internal/eventlog"
 	skillpkg "project-yume/internal/skill"
 	"project-yume/internal/tools"
 )
@@ -88,6 +89,11 @@ func (t *ReadSkillResourceTool) Execute(ctx context.Context, turn tools.TurnView
 	if args.Reason == "" {
 		return tools.ToolResult{}, fmt.Errorf("reason is required")
 	}
+	if access, ok := turn.(interface {
+		HasSkillAccess(string) bool
+	}); ok && !access.HasSkillAccess(args.Name) {
+		return tools.ToolResult{}, fmt.Errorf("skill must be activated or read before accessing resources: %s", args.Name)
+	}
 
 	maxBytes := t.maxBytes
 	if cfg := config.GetConfig(); cfg != nil && cfg.SkillResourceMaxBytes > 0 {
@@ -110,5 +116,9 @@ func (t *ReadSkillResourceTool) Execute(ctx context.Context, turn tools.TurnView
 	return tools.ToolResult{
 		Content: string(data),
 		Data:    result,
+		Events: []eventlog.Event{skillToolEvent(turn, "skill_resource_read", map[string]any{
+			"skill": args.Name,
+			"path":  args.Path,
+		})},
 	}, nil
 }

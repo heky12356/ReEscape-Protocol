@@ -85,13 +85,31 @@ func (t *SearchSkillsTool) Execute(ctx context.Context, turn tools.TurnView, inp
 	}
 
 	matches := skillpkg.GetManager().Search(args.Query, args.Limit)
-	payload := map[string]any{"matches": matches}
-	content, err := json.Marshal(payload)
-	if err != nil {
-		return tools.ToolResult{}, err
+	results := make([]map[string]any, 0, len(matches))
+	lines := []string{"【Skill Search Results】"}
+	for _, match := range matches {
+		results = append(results, map[string]any{
+			"name":           match.Name,
+			"description":    match.Description,
+			"score":          match.Score,
+			"confidence":     match.Confidence,
+			"reason":         match.Reason,
+			"suggested_read": match.Score >= skillpkg.DefaultCandidateMinScore,
+		})
+		lines = append(lines, fmt.Sprintf(
+			"- %s: score=%d confidence=%.2f reason=%s",
+			match.Name,
+			match.Score,
+			match.Confidence,
+			match.Reason,
+		))
 	}
+	if len(matches) == 0 {
+		lines = append(lines, "未找到相关 skill。")
+	}
+	payload := map[string]any{"matches": results}
 	return tools.ToolResult{
-		Content: string(content),
+		Content: strings.Join(lines, "\n"),
 		Data:    payload,
 	}, nil
 }

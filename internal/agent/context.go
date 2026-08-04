@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"strings"
 	"time"
 
 	"project-yume/internal/model"
+	"project-yume/internal/skill"
 )
 
 type Trigger string
@@ -40,6 +42,10 @@ type TurnContext struct {
 	previousInteractionAt      time.Time
 	trigger                    Trigger
 	actor                      Actor
+	skillResolutionSet         bool
+	activatedSkills            []skill.ActivatedSkill
+	skillCandidates            []skill.Match
+	readSkills                 map[string]struct{}
 }
 
 type TurnInput struct {
@@ -177,4 +183,66 @@ func (t *TurnContext) Trigger() string {
 
 func (t *TurnContext) Actor() string {
 	return string(t.actor)
+}
+
+func (t *TurnContext) SetSkillResolution(activated []skill.ActivatedSkill, candidates []skill.Match) {
+	if t == nil {
+		return
+	}
+	t.activatedSkills = append([]skill.ActivatedSkill(nil), activated...)
+	t.skillCandidates = append([]skill.Match(nil), candidates...)
+	t.skillResolutionSet = true
+	if t.readSkills == nil {
+		t.readSkills = make(map[string]struct{})
+	}
+}
+
+func (t *TurnContext) SkillResolutionSet() bool {
+	return t != nil && t.skillResolutionSet
+}
+
+func (t *TurnContext) ActivatedSkills() []skill.ActivatedSkill {
+	if t == nil {
+		return nil
+	}
+	return append([]skill.ActivatedSkill(nil), t.activatedSkills...)
+}
+
+func (t *TurnContext) SkillCandidates() []skill.Match {
+	if t == nil {
+		return nil
+	}
+	return append([]skill.Match(nil), t.skillCandidates...)
+}
+
+func (t *TurnContext) MarkSkillRead(name string) {
+	if t == nil {
+		return
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	if t.readSkills == nil {
+		t.readSkills = make(map[string]struct{})
+	}
+	t.readSkills[name] = struct{}{}
+}
+
+func (t *TurnContext) IsSkillLoaded(name string) bool {
+	if t == nil {
+		return false
+	}
+	name = strings.TrimSpace(name)
+	for _, activated := range t.activatedSkills {
+		if activated.Name == name {
+			return true
+		}
+	}
+	_, ok := t.readSkills[name]
+	return ok
+}
+
+func (t *TurnContext) HasSkillAccess(name string) bool {
+	return t.IsSkillLoaded(name)
 }

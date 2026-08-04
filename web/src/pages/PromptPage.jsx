@@ -4,6 +4,14 @@ import { InputField, SelectField, TextAreaField } from "../components/common/For
 
 const BOOLEAN_OPTIONS = ["true", "false"];
 const IDENTITY_MODE_OPTIONS = ["product_identity", "legacy"];
+const BOOLEAN_OPTION_LABELS = {
+  true: "允许",
+  false: "不允许"
+};
+const IDENTITY_MODE_LABELS = {
+  product_identity: "产品内身份",
+  legacy: "旧版身份模式"
+};
 
 export function PromptPage({ panel }) {
   const cfg = panel.config;
@@ -82,8 +90,8 @@ export function PromptPage({ panel }) {
   return (
     <div className="stack">
       <Panel
-        eyebrow="Voice source"
-        title="生效人格与系统补充 Prompt"
+        eyebrow="人格来源"
+        title="生效人格与系统补充提示词"
         subtitle="角色身份、系统补充和 ReAct 工具规则分层预览，最终回复仍保持角色口吻。"
         actions={
           <button
@@ -99,27 +107,29 @@ export function PromptPage({ panel }) {
         <div className="split-layout">
           <div className="stack compact">
             <SelectField
-              label="人格文件 (CHARACTER)"
+              label="人格文件（CHARACTER）"
               value={cfg.character}
               options={cfg.characterOptions}
               onChange={(v) => updateConfigField(panel, "character", v)}
             />
             <SelectField
-              label="Identity mode"
+              label="身份模式"
               value={cfg.characterIdentityMode}
               options={IDENTITY_MODE_OPTIONS}
+              optionLabels={IDENTITY_MODE_LABELS}
               hint="默认使用产品内身份，不把角色描述为临时扮演。"
               onChange={(v) => updateConfigField(panel, "characterIdentityMode", v)}
             />
             <SelectField
-              label="Allow identity explanation"
+              label="允许解释身份机制"
               value={String(cfg.allowCharacterIdentityExplanation)}
               options={BOOLEAN_OPTIONS}
+              optionLabels={BOOLEAN_OPTION_LABELS}
               hint="关闭时不主动解释模型、提示词或工具机制。"
               onChange={(v) => updateConfigField(panel, "allowCharacterIdentityExplanation", v === "true")}
             />
             <TextAreaField
-              label="AI_PROMPT"
+              label="系统补充提示词（AI_PROMPT）"
               value={cfg.aiPromptRaw}
               rows={7}
               hint="补充系统说明，适合放临时策略，不建议放角色身份。"
@@ -128,10 +138,10 @@ export function PromptPage({ panel }) {
           </div>
 
           <div className="insight-card alternate">
-            <div className="insight-kicker">Prompt layers</div>
+            <div className="insight-kicker">提示词分层</div>
             <div className="insight-title">角色身份只约束最终可见回复，工具调用保持客观结构化。</div>
             <p className="insight-copy">
-              Admin 现在会返回 base、user、character、agent、effective 五段预览，方便定位每层来源。
+              管理后台会返回基础、用户、角色、代理和最终生效五段预览，方便定位每层来源。
             </p>
             <div className="insight-meta mono">{panel.characterFile || cfg.character || "-"}</div>
           </div>
@@ -139,7 +149,7 @@ export function PromptPage({ panel }) {
       </Panel>
 
       <Panel
-        eyebrow="Character card"
+        eyebrow="人格卡片"
         title="人格文件编辑器"
         subtitle={`当前文件: ${panel.characterFile || cfg.character || "-"}`}
         actions={
@@ -157,21 +167,21 @@ export function PromptPage({ panel }) {
       >
         <div className="form-grid">
           <InputField
-            label="显示名称 (name)"
+            label="显示名称（name）"
             value={panel.characterConfig.name}
             onChange={(v) => updateCharacterField(panel, "name", v)}
           />
           <InputField
             label="新文件名"
             value={newFileName}
-            placeholder="example: assistant_v2"
+            placeholder="例如：assistant_v2"
             onChange={setNewFileName}
           />
         </div>
 
         <div className="form-row">
           <TextAreaField
-            label="描述 (description)"
+            label="描述（description）"
             value={panel.characterConfig.description}
             rows={4}
             onChange={(v) => updateCharacterField(panel, "description", v)}
@@ -180,24 +190,24 @@ export function PromptPage({ panel }) {
 
         <div className="editor-grid">
           <InputField
-            label="Role name"
+            label="角色名称（roleName）"
             value={panel.characterConfig.identity?.roleName}
             onChange={(v) => updateNestedCharacterField(panel, "identity", "roleName", v)}
           />
           <InputField
-            label="Self reference"
+            label="角色自称（selfReference）"
             value={panel.characterConfig.identity?.selfReference}
             onChange={(v) => updateNestedCharacterField(panel, "identity", "selfReference", v)}
           />
           <TextAreaField
-            label="Product identity"
+            label="产品内身份（productIdentity）"
             value={panel.characterConfig.identity?.productIdentity}
             rows={5}
             hint="例如：你在 ReEscape Protocol 中以江梦的身份与用户对话。"
             onChange={(v) => updateNestedCharacterField(panel, "identity", "productIdentity", v)}
           />
           <TextAreaField
-            label="Identity policy"
+            label="身份表达策略（identityPolicy）"
             value={panel.characterConfig.identity?.identityPolicy}
             rows={5}
             hint="用于身份边界，不要写“假扮”。"
@@ -207,34 +217,34 @@ export function PromptPage({ panel }) {
 
         <div className="editor-grid">
           <InputField
-            label="Tone"
+            label="语气（tone）"
             value={panel.characterConfig.voice?.tone}
             onChange={(v) => updateNestedCharacterField(panel, "voice", "tone", v)}
           />
           <InputField
-            label="Style"
+            label="表达风格（style）"
             value={panel.characterConfig.voice?.style}
             onChange={(v) => updateNestedCharacterField(panel, "voice", "style", v)}
           />
           <InputField
-            label="Pacing"
+            label="回复节奏（pacing）"
             value={panel.characterConfig.voice?.pacing}
             onChange={(v) => updateNestedCharacterField(panel, "voice", "pacing", v)}
           />
           <TextAreaField
-            label="Vocabulary (one per line)"
+            label="常用词汇（每行一个）"
             value={vocabularyText}
             rows={6}
             onChange={setVocabularyText}
           />
           <TextAreaField
-            label="Avoid words (one per line)"
+            label="避免使用的词语（每行一个）"
             value={avoidText}
             rows={6}
             onChange={setAvoidText}
           />
           <TextAreaField
-            label="Quotes (one line per quote)"
+            label="经典语句（每行一句）"
             value={quotesText}
             rows={6}
             onChange={setQuotesText}
@@ -243,35 +253,35 @@ export function PromptPage({ panel }) {
 
         <div className="editor-grid">
           <InputField
-            label="Default stage"
+            label="默认关系阶段（defaultStage）"
             value={panel.characterConfig.relationship?.defaultStage}
             onChange={(v) => updateNestedCharacterField(panel, "relationship", "defaultStage", v)}
           />
           <InputField
-            label="Addressing"
+            label="对用户的称呼（addressing）"
             value={panel.characterConfig.relationship?.addressing}
             onChange={(v) => updateNestedCharacterField(panel, "relationship", "addressing", v)}
           />
           <TextAreaField
-            label="Intimacy rule"
+            label="亲密度规则（intimacyRule）"
             value={panel.characterConfig.relationship?.intimacyRule}
             rows={5}
             onChange={(v) => updateNestedCharacterField(panel, "relationship", "intimacyRule", v)}
           />
           <TextAreaField
-            label="Do not reveal (one per line)"
+            label="禁止透露的内容（每行一项）"
             value={doNotRevealText}
             rows={5}
             onChange={setDoNotRevealText}
           />
           <TextAreaField
-            label="Safety boundaries (one per line)"
+            label="安全边界（每行一项）"
             value={safetyBoundariesText}
             rows={5}
             onChange={setSafetyBoundariesText}
           />
           <TextAreaField
-            label="Relationship rules (one per line)"
+            label="关系规则（每行一项）"
             value={relationshipRulesText}
             rows={5}
             onChange={setRelationshipRulesText}
@@ -280,7 +290,7 @@ export function PromptPage({ panel }) {
 
         <div className="form-row">
           <TextAreaField
-            label="Examples (JSON array)"
+            label="示例对话（JSON 数组）"
             value={examplesText}
             rows={9}
             hint='格式：[{"situation":"安慰","user":"我好累","reply":"先停一下嘛$你已经撑很久了"}]'
@@ -290,19 +300,19 @@ export function PromptPage({ panel }) {
 
         <div className="editor-grid">
           <TextAreaField
-            label="Legacy personality (JSON object)"
+            label="旧版性格配置（JSON 对象）"
             value={personalityText}
             rows={10}
             onChange={setPersonalityText}
           />
           <TextAreaField
-            label="Legacy responses (JSON object)"
+            label="旧版回复配置（JSON 对象）"
             value={responsesText}
             rows={10}
             onChange={setResponsesText}
           />
           <TextAreaField
-            label="Legacy behavior (JSON object)"
+            label="旧版行为配置（JSON 对象）"
             value={behaviorText}
             rows={10}
             onChange={setBehaviorText}
@@ -321,26 +331,26 @@ export function PromptPage({ panel }) {
         </div>
       </Panel>
 
-      <Panel eyebrow="Prompt preview" title="分层 Prompt 预览" subtitle="后端实际返回的 prompt section。">
+      <Panel eyebrow="提示词预览" title="分层提示词预览" subtitle="后端实际返回的提示词分层内容。">
         <div className="editor-grid">
-          <PromptPreview title="Base prompt" content={preview.basePrompt} />
-          <PromptPreview title="User prompt" content={preview.userPrompt} />
-          <PromptPreview title="Character prompt" content={preview.characterPrompt} />
-          <PromptPreview title="Agent prompt" content={preview.agentPrompt} />
+          <PromptPreview title="基础提示词" content={preview.basePrompt} />
+          <PromptPreview title="用户补充提示词" content={preview.userPrompt} />
+          <PromptPreview title="角色提示词" content={preview.characterPrompt} />
+          <PromptPreview title="代理规则提示词" content={preview.agentPrompt} />
         </div>
         <div className="form-row">
-          <PromptPreview title="Effective prompt" content={preview.effectivePrompt || cfg.effectivePrompt} />
+          <PromptPreview title="最终生效提示词" content={preview.effectivePrompt || cfg.effectivePrompt} />
         </div>
       </Panel>
 
       <Panel
-        eyebrow="Image shelf"
+        eyebrow="图片素材"
         title="图片素材索引"
         subtitle="这里先做只读可视化，素材图片和 index.json 仍然在仓库目录里维护。"
       >
         <div className="artifact-grid">
           <div className="artifact-card emphasis">
-            <div className="artifact-title">Asset index</div>
+            <div className="artifact-title">素材索引文件</div>
             <p className="artifact-note">
               {cfg.imageAssetIndexFile || "-"}
               <br />
@@ -349,12 +359,12 @@ export function PromptPage({ panel }) {
           </div>
 
           <div className="artifact-card">
-            <div className="artifact-title">Registered assets</div>
+            <div className="artifact-title">已登记素材</div>
             <ul className="artifact-list mono">
               {panel.imageAssets.map((asset) => (
                 <li key={asset.id}>
                   <span>{asset.id}</span>
-                  <span>{asset.enabled ? "enabled" : "disabled"}</span>
+                  <span>{asset.enabled ? "已启用" : "已禁用"}</span>
                 </li>
               ))}
               {panel.imageAssets.length === 0 ? <li>暂无素材索引</li> : null}
@@ -419,10 +429,10 @@ function parseExamples(text) {
   try {
     parsed = JSON.parse(text || "[]");
   } catch (err) {
-    throw new Error(`Examples 不是合法 JSON: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`示例对话不是合法 JSON: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (!Array.isArray(parsed)) {
-    throw new Error("Examples 必须是 JSON 数组");
+    throw new Error("示例对话必须是 JSON 数组");
   }
   return parsed.map((item) => ({
     situation: String(item?.situation || "").trim(),
@@ -439,12 +449,12 @@ function linesToArray(text) {
 }
 
 function buildCharacterConfig(base, editor) {
-  const personalityRaw = parseJSONObject(editor.personalityText, "Personality");
+  const personalityRaw = parseJSONObject(editor.personalityText, "旧版性格配置");
   const personality = Object.fromEntries(
     Object.entries(personalityRaw).map(([key, value]) => [String(key), String(value)])
   );
-  const responses = parseJSONObject(editor.responsesText, "Responses");
-  const behavior = parseJSONObject(editor.behaviorText, "Behavior");
+  const responses = parseJSONObject(editor.responsesText, "旧版回复配置");
+  const behavior = parseJSONObject(editor.behaviorText, "旧版行为配置");
 
   return {
     ...base,

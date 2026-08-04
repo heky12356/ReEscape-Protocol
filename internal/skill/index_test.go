@@ -10,7 +10,7 @@ import (
 
 func TestManagerListSearchAndRead(t *testing.T) {
 	root := t.TempDir()
-	writeSkillFile(t, filepath.Join(root, "comfort", "SKILL.md"), "---\nname: comfort\ndescription: Use when the user is sad or overwhelmed.\ntags: [sadness, support]\n---\n# Comfort")
+	writeSkillFile(t, filepath.Join(root, "comfort", "SKILL.md"), "---\nname: comfort\ndescription: Use when the user is sad or overwhelmed.\ntags: [sad, support]\n---\n# Comfort")
 	writeSkillFile(t, filepath.Join(root, "schedule", "SKILL.md"), "---\nname: schedule\ndescription: Use for future reminders.\ntriggers: [proactive, reminder]\n---\n# Schedule")
 
 	manager := &Manager{}

@@ -90,6 +90,11 @@ type Config struct {
 	EnableSkills                 bool   // 启用标准 Agent Skill 包
 	SkillDirs                    []string
 	SkillAutoHintLimit           int
+	SkillCandidateMinScore       int
+	SkillAutoLoadMinScore        int
+	SkillAutoLoadMinConfidence   float64
+	SkillMaxAutoLoaded           int
+	SkillForceReadOnCandidate    bool
 	SkillResourceMaxBytes        int
 	SkillAllowScripts            bool
 	SkillLoadSystem              bool
@@ -103,15 +108,20 @@ type Config struct {
 	ReactTotalTimeoutMs  int    // 单轮总超时(毫秒)
 
 	// ReAct Web Tool 配置
-	EnableWebTools      bool
-	WebSearchProvider   string
-	WebSearchEndpoint   string
-	WebSearchAPIKey     string
-	WebSearchMaxResults int
-	WebToolTimeoutMs    int
-	WebFetchMaxBytes    int
-	WebFetchMaxChars    int
-	WebFetchUserAgent   string
+	EnableWebTools          bool
+	WebSearchProvider       string
+	WebSearchEndpoint       string
+	WebSearchAPIKey         string
+	WebSearchMaxResults     int
+	WebToolTimeoutMs        int
+	WebFetchMaxBytes        int
+	WebFetchMaxChars        int
+	WebFetchUserAgent       string
+	TavilySearchDepth       string
+	TavilyTopic             string
+	TavilyIncludeAnswer     bool
+	TavilyIncludeRawContent bool
+	TavilySafeSearch        bool
 }
 
 var config = &Config{}
@@ -209,9 +219,15 @@ func init() {
 	config.EnableSkills = getBoolEnv("ENABLE_SKILLS", true)
 	config.SkillDirs = getStringArrayEnv("SKILL_DIRS", []string{"./config/skills"})
 	config.SkillAutoHintLimit = getIntEnv("SKILL_AUTO_HINT_LIMIT", 3)
+	config.SkillCandidateMinScore = getIntEnv("SKILL_CANDIDATE_MIN_SCORE", 8)
+	config.SkillAutoLoadMinScore = getIntEnv("SKILL_AUTO_LOAD_MIN_SCORE", 16)
+	config.SkillAutoLoadMinConfidence = getFloatEnv("SKILL_AUTO_LOAD_MIN_CONFIDENCE", 0.75)
+	config.SkillMaxAutoLoaded = getIntEnv("SKILL_MAX_AUTO_LOADED", 1)
+	config.SkillForceReadOnCandidate = getBoolEnv("SKILL_FORCE_READ_ON_CANDIDATE", false)
 	config.SkillResourceMaxBytes = getIntEnv("SKILL_RESOURCE_MAX_BYTES", 65536)
 	config.SkillAllowScripts = getBoolEnv("SKILL_ALLOW_SCRIPTS", false)
 	config.SkillLoadSystem = getBoolEnv("SKILL_LOAD_SYSTEM", false)
+	reloadSkillsFromConfig()
 	config.EnableReactAgent = getBoolEnv("ENABLE_REACT_AGENT", false)
 	config.ReactMaxSteps = getIntEnv("REACT_MAX_STEPS", 4)
 	config.ReactToolTimeoutMs = getIntEnv("REACT_TOOL_TIMEOUT_MS", 3000)
@@ -227,6 +243,11 @@ func init() {
 	config.WebFetchMaxBytes = getIntEnv("WEB_FETCH_MAX_BYTES", 1048576)
 	config.WebFetchMaxChars = getIntEnv("WEB_FETCH_MAX_CHARS", 6000)
 	config.WebFetchUserAgent = getStringEnv("WEB_FETCH_USER_AGENT", "ReEscapeProtocolBot/1.0")
+	config.TavilySearchDepth = normalizeTavilySearchDepth(getStringEnv("TAVILY_SEARCH_DEPTH", "basic"))
+	config.TavilyTopic = normalizeTavilyTopic(getStringEnv("TAVILY_TOPIC", "general"))
+	config.TavilyIncludeAnswer = getBoolEnv("TAVILY_INCLUDE_ANSWER", false)
+	config.TavilyIncludeRawContent = getBoolEnv("TAVILY_INCLUDE_RAW_CONTENT", false)
+	config.TavilySafeSearch = getBoolEnv("TAVILY_SAFE_SEARCH", false)
 
 	characterManager, err := character.NewCharacterManager(getCharacterConfigDir(), config.Character)
 	if err != nil {
@@ -353,6 +374,24 @@ func normalizeReactTraceMode(value string) string {
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return "basic"
+	}
+}
+
+func normalizeTavilySearchDepth(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "advanced":
+		return "advanced"
+	default:
+		return "basic"
+	}
+}
+
+func normalizeTavilyTopic(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "news":
+		return "news"
+	default:
+		return "general"
 	}
 }
 

@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -439,7 +438,7 @@ func (s *server) handlePutConfig(c *gin.Context) {
 		updates["WEB_SEARCH_API_KEY"] = strings.TrimSpace(req.WebSearchAPIKey)
 	}
 
-	envFile := resolveEnvFilePath(config.GetEnvFilePath())
+	envFile := resolveEnvFilePath(config.GetConfig().EnvFile)
 	if err := upsertEnvFile(envFile, updates); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("update env failed: %v", err)})
 		return
@@ -884,10 +883,6 @@ func (s *server) buildConfigResponse() (configResponse, error) {
 	}
 	aiProfileNames := config.AIProfileNames(aiProfiles)
 
-	envFile := resolveEnvFilePath(config.GetEnvFilePath())
-	envMap, _ := readEnvMap(envFile)
-	character := firstNonEmpty(cfg.Character, readEnvValue(envMap, "CHARACTER", "Character"))
-	aiPromptRaw := firstNonEmpty(os.Getenv("AI_PROMPT"), readEnvValue(envMap, "AI_PROMPT", "AiPrompt"))
 	promptSections := config.CurrentPromptSections()
 	toolNames := listToolNames()
 	promptPreview := PromptPreview{
@@ -913,7 +908,7 @@ func (s *server) buildConfigResponse() (configResponse, error) {
 		AIRetryCount:                      cfg.AiRetryCount,
 		AIRateLimit:                       cfg.AiRateLimit,
 		AITopP:                            cfg.AiTopP,
-		AIPromptRaw:                       aiPromptRaw,
+		AIPromptRaw:                       cfg.UserPrompt,
 		CharacterIdentityMode:             cfg.CharacterIdentityMode,
 		AllowCharacterIdentityExplanation: cfg.AllowCharacterIdentityExplanation,
 		EnableTimeContext:                 cfg.EnableTimeContext,
@@ -925,11 +920,11 @@ func (s *server) buildConfigResponse() (configResponse, error) {
 		EnableImageAssetReply:             cfg.EnableImageAssetReply,
 		ImageAssetDir:                     cfg.ImageAssetDir,
 		ImageAssetIndexFile:               cfg.ImageAssetIndexFile,
-		Character:                         character,
+		Character:                         cfg.Character,
 		CharacterOptions:                  characterOptions,
 		EffectivePrompt:                   cfg.AiPrompt,
 		PromptPreview:                     promptPreview,
-		EnvironmentConfig:                 envFile,
+		EnvironmentConfig:                 cfg.EnvFile,
 		EnableReactAgent:                  cfg.EnableReactAgent,
 		ReactMaxSteps:                     cfg.ReactMaxSteps,
 		ReactToolTimeoutMs:                cfg.ReactToolTimeoutMs,
@@ -982,82 +977,6 @@ func currentCatalogOptions() catalog.Options {
 		SearchMaxResults: cfg.WebSearchMaxResults,
 		FetchMaxChars:    cfg.WebFetchMaxChars,
 	}
-}
-
-func readEnvMap(path string) (map[string]string, error) {
-	result := make(map[string]string)
-
-	file, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return result, nil
-		}
-		return nil, err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if strings.HasPrefix(line, "export ") {
-			line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
-		}
-
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		if key == "" {
-			continue
-		}
-
-		if idx := strings.Index(value, " #"); idx >= 0 {
-			value = strings.TrimSpace(value[:idx])
-		}
-		if len(value) >= 2 {
-			if (strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"")) ||
-				(strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'")) {
-				value = value[1 : len(value)-1]
-			}
-		}
-
-		result[key] = value
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-
-	return result, nil
-}
-
-func readEnvValue(envMap map[string]string, keys ...string) string {
-	for _, key := range keys {
-		for existingKey, value := range envMap {
-			if strings.EqualFold(strings.TrimSpace(existingKey), strings.TrimSpace(key)) {
-				trimmed := strings.TrimSpace(value)
-				if trimmed != "" {
-					return trimmed
-				}
-			}
-		}
-	}
-	return ""
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func resolveEnvFilePath(path string) string {
@@ -1190,7 +1109,7 @@ func currentWebSearchAPIKey() string {
 	if cfg := config.GetConfig(); cfg != nil && strings.TrimSpace(cfg.WebSearchAPIKey) != "" {
 		return cfg.WebSearchAPIKey
 	}
-	return os.Getenv("WEB_SEARCH_API_KEY")
+	return ""
 }
 
 func currentLogDir() string {

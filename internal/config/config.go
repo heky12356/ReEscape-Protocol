@@ -26,6 +26,7 @@ type Config struct {
 	AiModel                           string
 	AiProfile                         string
 	AiConfigFile                      string
+	EnvFile                           string
 	Character                         string
 	CharacterIdentityMode             string
 	AllowCharacterIdentityExplanation bool
@@ -136,6 +137,7 @@ func init() {
 	if envFile == "" {
 		envFile = ".env"
 	}
+	config.EnvFile = envFile
 	if err := godotenv.Load(envFile); err != nil {
 		utils.Warn("env file not loaded (%s), fallback to system env only: %v", envFile, err)
 	}

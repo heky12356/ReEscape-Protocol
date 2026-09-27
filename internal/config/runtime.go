@@ -19,6 +19,7 @@ func GetEnvFilePath() string {
 }
 
 func ReloadRuntimeConfig() error {
+	config.EnvFile = GetEnvFilePath()
 	config.Hostadd = getStringEnv("HOSTADD", config.Hostadd)
 	config.WsPort = getStringEnv("WsPort", config.WsPort)
 	config.HttpPort = getStringEnv("HttpPort", "8088")

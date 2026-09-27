@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"project-yume/internal/agent"
-	"project-yume/internal/aifunction"
 	"project-yume/internal/assets"
 	"project-yume/internal/character"
 	"project-yume/internal/config"
@@ -199,12 +198,14 @@ type createCharacterRequest struct {
 }
 
 type server struct {
-	webDistDir string
+	webDistDir          string
+	reloadRuntimeConfig func() error
 }
 
-func Start(ctx context.Context) {
+func Start(ctx context.Context, reloadRuntimeConfig func() error) {
 	s := &server{
-		webDistDir: filepath.Clean("./web/dist"),
+		webDistDir:          filepath.Clean("./web/dist"),
+		reloadRuntimeConfig: reloadRuntimeConfig,
 	}
 
 	httpPort := config.GetConfig().HttpPort
@@ -229,6 +230,13 @@ func Start(ctx context.Context) {
 	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		utils.Error("admin web server error: %v", err)
 	}
+}
+
+func (s *server) reloadConfig() error {
+	if s == nil || s.reloadRuntimeConfig == nil {
+		return errors.New("runtime reload handler is not configured")
+	}
+	return s.reloadRuntimeConfig()
 }
 
 func (s *server) routes() *gin.Engine {
@@ -441,12 +449,10 @@ func (s *server) handlePutConfig(c *gin.Context) {
 		_ = os.Setenv(key, value)
 	}
 
-	if err := config.ReloadRuntimeConfig(); err != nil {
+	if err := s.reloadConfig(); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("reload config failed: %v", err)})
 		return
 	}
-	aifunction.ReloadClient()
-	aifunction.ResetRateLimiter()
 
 	resp, err := s.buildConfigResponse()
 	if err != nil {
@@ -779,7 +785,7 @@ func (s *server) handleUpdateCharacterConfig(c *gin.Context) {
 		return
 	}
 
-	if err := config.ReloadRuntimeConfig(); err != nil {
+	if err := s.reloadConfig(); err != nil {
 		utils.Warn("reload runtime config after character update failed: %v", err)
 	}
 
@@ -819,7 +825,7 @@ func (s *server) handleCreateCharacterConfig(c *gin.Context) {
 		return
 	}
 
-	if err := config.ReloadRuntimeConfig(); err != nil {
+	if err := s.reloadConfig(); err != nil {
 		utils.Warn("reload runtime config after character create failed: %v", err)
 	}
 

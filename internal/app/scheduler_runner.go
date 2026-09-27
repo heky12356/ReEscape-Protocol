@@ -18,7 +18,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func startScheduler(c *websocket.Conn, scheduler *scheduler.NaturalScheduler, agentRuntime *agent.Runtime, eventStore eventlog.Store,
+func startScheduler(c *websocket.Conn, scheduler *scheduler.NaturalScheduler, agentRuntime *agent.RuntimeHandle, eventStore eventlog.Store,
 	ctx context.Context, sessionID string, targetUserID int64,
 ) {
 	time.Sleep(time.Second)
@@ -54,10 +54,11 @@ func startScheduler(c *websocket.Conn, scheduler *scheduler.NaturalScheduler, ag
 }
 
 func sendScheduledTurn(ctx context.Context, c *websocket.Conn, scheduler *scheduler.NaturalScheduler,
-	agentRuntime *agent.Runtime, eventStore eventlog.Store, sessionID string, targetUserID int64,
+	agentRuntime *agent.RuntimeHandle, eventStore eventlog.Store, sessionID string, targetUserID int64,
 ) error {
-	if config.GetConfig().EnableReactAgent && agentRuntime != nil {
-		sentAt, sent, err := sendScheduledAgentMessage(ctx, c, scheduler, agentRuntime, eventStore, sessionID, targetUserID)
+	runtime := agentRuntime.Get()
+	if config.GetConfig().EnableReactAgent && runtime != nil {
+		sentAt, sent, err := sendScheduledAgentMessage(ctx, c, scheduler, runtime, eventStore, sessionID, targetUserID)
 		if err == nil {
 			if sent {
 				scheduler.CompleteClaim(sessionID, sentAt)

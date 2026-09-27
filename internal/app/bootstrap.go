@@ -7,6 +7,7 @@ import (
 
 	"project-yume/internal/admin"
 	"project-yume/internal/agent"
+	"project-yume/internal/aifunction"
 	"project-yume/internal/config"
 	"project-yume/internal/domain/affection"
 	"project-yume/internal/eventlog"
@@ -30,7 +31,7 @@ type Components struct {
 	MessageProcessor *handler.MessageProcessor
 	MessagePipeline  *inbound.Pipeline
 	NaturalScheduler *scheduler.NaturalScheduler
-	AgentRuntime     *agent.Runtime
+	AgentRuntime     *agent.RuntimeHandle
 	EventStore       eventlog.Store
 	FlushWorker      *storage.FlushWorker
 }
@@ -38,6 +39,7 @@ type Components struct {
 func Bootstrap(ctx context.Context) (*Components, error) {
 	cfg := config.GetConfig()
 
+	runtimeHandle := agent.NewRuntimeHandle(NewAgentRuntime())
 	components := &Components{
 		MessageProcessor: handler.NewMessageProcessor(),
 		MessagePipeline: inbound.NewPipeline(
@@ -45,7 +47,7 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 			inbound.NewFilterStage(),
 			inbound.NewNormalizeStage(),
 		),
-		AgentRuntime: NewAgentRuntime(),
+		AgentRuntime: runtimeHandle,
 		FlushWorker:  storage.NewFlushWorker(2 * time.Second),
 	}
 
@@ -107,7 +109,15 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 	components.FlushWorker.Register(eventlog.FlushTaskName, eventStore.Flush)
 	go components.FlushWorker.Run(ctx)
 
-	go admin.Start(ctx)
+	go admin.Start(ctx, func() error {
+		if err := config.ReloadRuntimeConfig(); err != nil {
+			return err
+		}
+		aifunction.ReloadClient()
+		aifunction.ResetRateLimiter()
+		runtimeHandle.Replace(NewAgentRuntime())
+		return nil
+	})
 
 	return components, nil
 }

@@ -24,7 +24,7 @@ import (
 )
 
 func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
-	pipeline *inbound.Pipeline, processor *handler.MessageProcessor, agentRuntime *agent.Runtime, eventStore eventlog.Store,
+	pipeline *inbound.Pipeline, processor *handler.MessageProcessor, agentRuntime *agent.RuntimeHandle, eventStore eventlog.Store,
 	naturalScheduler *scheduler.NaturalScheduler, ctx context.Context,
 ) {
 	cfg := config.GetConfig()
@@ -238,10 +238,11 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 }
 
 func processMessageTurn(ctx context.Context, c *websocket.Conn, messageCtx handler.MessageContext,
-	processor *handler.MessageProcessor, agentRuntime *agent.Runtime, eventStore eventlog.Store,
+	processor *handler.MessageProcessor, agentRuntime *agent.RuntimeHandle, eventStore eventlog.Store,
 ) (*handler.ProcessResult, error) {
 	cfg := config.GetConfig()
-	if cfg.EnableReactAgent && agentRuntime != nil {
+	runtime := agentRuntime.Get()
+	if cfg.EnableReactAgent && runtime != nil {
 		turn := agent.NewTurnContext(agent.TurnInput{
 			RequestID:                  messageCtx.RequestID,
 			SessionID:                  messageCtx.SessionID,
@@ -264,7 +265,7 @@ func processMessageTurn(ctx context.Context, c *websocket.Conn, messageCtx handl
 			Actor:                      agent.ActorUser,
 		})
 
-		agentResult, err := agentRuntime.RunTurn(ctx, turn)
+		agentResult, err := runtime.RunTurn(ctx, turn)
 		if err == nil {
 			reply := strings.TrimSpace(agentResult.FinalReply.Content)
 			if agentResult.ShouldSend && reply != "" {

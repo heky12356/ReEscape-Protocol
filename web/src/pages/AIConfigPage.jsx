@@ -266,7 +266,7 @@ export function AIConfigPage({ panel }) {
       <Panel
         eyebrow="Web tools"
         title="外部搜索与网页读取"
-        subtitle="这层给 ReAct agent 注册只读 web_search / web_fetch 工具；开关类配置修改后需要重启机器人。"
+        subtitle="这层给 ReAct agent 注册只读 web_search / web_fetch 工具；保存后会重载配置并重建运行时。"
       >
         <div className="split-layout">
           <div className="form-grid">

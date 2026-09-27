@@ -1,7 +1,6 @@
 package service
 
 import (
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -33,7 +32,7 @@ func SendMsg(c *websocket.Conn, userID int64, msg string) error {
 
 		if chunk.ImageAssetID != "" {
 			if err := sendPrivateImageAsset(c, userID, chunk.ImageAssetID); err != nil {
-				utils.Warn("send image asset failed: %v", err)
+				return fmt.Errorf("send image asset %q: %w", chunk.ImageAssetID, err)
 			}
 		}
 	}
@@ -92,24 +91,13 @@ func sendPrivateImageAsset(c *websocket.Conn, userID int64, assetID string) erro
 }
 
 func sendPrivateRawMessage(c *websocket.Conn, userID int64, msg string) error {
-	wsMsg := model.Message{
-		Action: "send_private_msg",
-		Params: model.UserMessageParams{
-			User_id: userID,
-			Message: msg,
-		},
-		Echo: "send_msg",
-	}
-	jsonData, err := json.Marshal(wsMsg)
-	if err != nil {
-		utils.Error("Error marshaling JSON: %v", err)
-		return err
-	}
-
 	time.Sleep(time.Duration(rand.Intn(2000)+1000) * time.Millisecond)
-	err = connect.WriteMessage(c, websocket.TextMessage, jsonData)
+	_, err := connect.CallAPI(c, "send_private_msg", model.UserMessageParams{
+		User_id: userID,
+		Message: msg,
+	})
 	if err != nil {
-		utils.Error("Write Error: %v", err)
+		utils.Error("send private message failed: %v", err)
 		return err
 	}
 	return nil

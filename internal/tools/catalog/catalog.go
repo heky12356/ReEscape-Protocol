@@ -37,6 +37,7 @@ func NewRegistry(opts ...Options) *tools.Registry {
 	registry.MustRegister(toolmemory.NewRememberFactTool())
 	registry.MustRegister(toolmemory.NewUpdateProfileTool())
 	registry.MustRegister(toolimage.NewListAssetsTool())
+	registry.MustRegister(toolimage.NewSaveAssetTool())
 	registry.MustRegister(tooltime.NewGetCurrentTimeContextTool())
 	registry.MustRegister(toolaffection.NewGetAffectionTool())
 	registry.MustRegister(toolaffection.NewUpdateAffectionTool())

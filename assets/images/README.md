@@ -22,3 +22,7 @@ Rules:
 - `id` must be unique
 - `file` can be a relative local file name, an absolute path, or an `http/https` URL
 - only `enabled=true` assets can be used by the bot
+
+ReAct can also use the write tool `save_image_asset` when write tools are enabled. It saves
+the current message image, or an explicitly provided public image URL, into this directory
+and registers the new entry in `index.json`. The tool never accepts a local destination path.

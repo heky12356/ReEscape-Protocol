@@ -123,15 +123,22 @@ func ResolveImageAssetCQFile(asset ImageAsset) (string, error) {
 	if !filepath.IsAbs(resolved) {
 		resolved = filepath.Join(currentImageAssetDir(), resolved)
 	}
-	resolved = filepath.Clean(resolved)
+	resolved, err := filepath.Abs(filepath.Clean(resolved))
+	if err != nil {
+		return "", fmt.Errorf("resolve image asset file path: %w", err)
+	}
 
 	if _, err := os.Stat(resolved); err != nil {
 		return "", fmt.Errorf("image asset file not found: %s", resolved)
 	}
 
+	filePath := filepath.ToSlash(resolved)
+	if filepath.VolumeName(resolved) != "" && !strings.HasPrefix(filePath, "/") {
+		filePath = "/" + filePath
+	}
 	u := &url.URL{
 		Scheme: "file",
-		Path:   filepath.ToSlash(resolved),
+		Path:   filePath,
 	}
 	return u.String(), nil
 }

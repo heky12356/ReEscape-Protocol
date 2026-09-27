@@ -80,6 +80,22 @@ func TestNewRegistryRegistersReadOnlySkillTools(t *testing.T) {
 	}
 }
 
+func TestNewRegistryRegistersImageSaveToolAsWriteTool(t *testing.T) {
+	registry := NewRegistry()
+	tool, ok := registry.Get("save_image_asset")
+	if !ok {
+		t.Fatal("expected save_image_asset to be registered")
+	}
+	if tool.ReadOnly() {
+		t.Fatal("expected save_image_asset to be a write tool")
+	}
+
+	definitions := ListDefinitionsWithPolicy(tools.Policy{AllowWriteTools: false})
+	if containsDefinition(definitions, "save_image_asset") {
+		t.Fatal("did not expect save_image_asset when write tools are disabled")
+	}
+}
+
 func TestSkillToolsRemainAvailableWhenWriteToolsAreDisabled(t *testing.T) {
 	definitions := ListDefinitionsWithPolicy(tools.Policy{AllowWriteTools: false})
 	for _, name := range []string{"search_skills", "read_skill", "read_skill_resource"} {

@@ -22,7 +22,18 @@ func ValidateOutboundURL(ctx context.Context, raw string) (*url.URL, error) {
 	return validateOutboundURL(ctx, raw, defaultResolver{})
 }
 
+// ValidateOutboundURLWithAllowedHosts validates an outbound URL while allowing
+// exact hostnames whose DNS is intentionally handled by a local proxy/Fake-IP.
+// The allowlist is hostname-only and does not permit arbitrary private IP URLs.
+func ValidateOutboundURLWithAllowedHosts(ctx context.Context, raw string, allowedHosts ...string) (*url.URL, error) {
+	return validateOutboundURLWithAllowedHosts(ctx, raw, defaultResolver{}, allowedHosts...)
+}
+
 func validateOutboundURL(ctx context.Context, raw string, r resolver) (*url.URL, error) {
+	return validateOutboundURLWithAllowedHosts(ctx, raw, r)
+}
+
+func validateOutboundURLWithAllowedHosts(ctx context.Context, raw string, r resolver, allowedHosts ...string) (*url.URL, error) {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return nil, fmt.Errorf("invalid url: %w", err)
@@ -40,6 +51,9 @@ func validateOutboundURL(ctx context.Context, raw string, r resolver) (*url.URL,
 	}
 	if port := strings.TrimSpace(parsed.Port()); port != "" && port != "80" && port != "443" {
 		return nil, fmt.Errorf("non-standard ports are not allowed")
+	}
+	if isAllowedOutboundHost(host, allowedHosts) {
+		return parsed, nil
 	}
 
 	if ip := net.ParseIP(host); ip != nil {
@@ -63,6 +77,23 @@ func validateOutboundURL(ctx context.Context, raw string, r resolver) (*url.URL,
 	}
 
 	return parsed, nil
+}
+
+func isAllowedOutboundHost(host string, allowedHosts []string) bool {
+	host = normalizeOutboundHost(host)
+	if host == "" {
+		return false
+	}
+	for _, allowedHost := range allowedHosts {
+		if host == normalizeOutboundHost(allowedHost) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeOutboundHost(host string) string {
+	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
 }
 
 func isLocalhostName(host string) bool {

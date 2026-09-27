@@ -66,3 +66,42 @@ func TestValidateOutboundURLAllowsPublicHTTPSTarget(t *testing.T) {
 		t.Fatalf("unexpected parsed url: %s", got)
 	}
 }
+
+func TestValidateOutboundURLAllowsExactAllowlistedHostWithSyntheticDNS(t *testing.T) {
+	resolver := staticResolver{
+		"multimedia.nt.qq.com.cn": {
+			{IP: net.ParseIP("127.144.1.125")},
+			{IP: net.ParseIP("fd00:696e:6974:6578::38:17e")},
+		},
+	}
+
+	parsed, err := validateOutboundURLWithAllowedHosts(
+		context.Background(),
+		"https://multimedia.nt.qq.com.cn/download?fileid=test",
+		resolver,
+		"multimedia.nt.qq.com.cn",
+	)
+	if err != nil {
+		t.Fatalf("expected exact allowlisted host to be allowed: %v", err)
+	}
+	if parsed.Hostname() != "multimedia.nt.qq.com.cn" {
+		t.Fatalf("unexpected host: %s", parsed.Hostname())
+	}
+}
+
+func TestValidateOutboundURLDoesNotAllowSubdomainOfAllowlistedHost(t *testing.T) {
+	resolver := staticResolver{
+		"evil.multimedia.nt.qq.com.cn": {
+			{IP: net.ParseIP("127.0.0.1")},
+		},
+	}
+
+	if _, err := validateOutboundURLWithAllowedHosts(
+		context.Background(),
+		"https://evil.multimedia.nt.qq.com.cn/download",
+		resolver,
+		"multimedia.nt.qq.com.cn",
+	); err == nil {
+		t.Fatal("expected non-exact hostname to remain blocked")
+	}
+}

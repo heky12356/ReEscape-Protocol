@@ -1,5 +1,7 @@
 package model
 
+import "encoding/json"
+
 type Sender struct {
 	User_id  int64  `json:"user_id"`
 	Nickname string `json:"nickname"`
@@ -8,8 +10,8 @@ type Sender struct {
 }
 
 type ReMessage struct {
-	Type string            `json:"type"`
-	Data map[string]string `json:"data"`
+	Type string                     `json:"type"`
+	Data map[string]json.RawMessage `json:"data"`
 }
 
 type Response struct {

@@ -133,6 +133,13 @@ func buildIncomingMessageParts(resp model.Response) []model.MessagePart {
 	}}
 }
 
-func decodeIncomingSegmentValue(value string) string {
-	return strings.TrimSpace(html.UnescapeString(value))
+func decodeIncomingSegmentValue(value json.RawMessage) string {
+	var decoded string
+	if len(value) == 0 || string(value) == "null" {
+		return ""
+	}
+	if err := json.Unmarshal(value, &decoded); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(html.UnescapeString(decoded))
 }

@@ -407,11 +407,11 @@ func normalizeCharacterIdentityMode(value string) string {
 }
 
 func buildBasePrompt(enableSpaceSegmentDelimiter bool) string {
-	segmentInstruction := `1. 回复时使用 "$" 作为分段标记，每段内容应该简短自然，这个特别重要请务必要遵守`
-	replyFormatExample := "第一段内容$第二段内容$第三段内容"
+	segmentInstruction := `1. 回复时优先使用 "$" 作为分段标记；如果自然输出段落之间有空行，也可以使用连续两个换行分段，每段内容应该简短自然`
+	replyFormatExample := "第一段内容$第二段内容$第三段内容 或 第一段内容\n\n第二段内容\n\n第三段内容"
 	if enableSpaceSegmentDelimiter {
-		segmentInstruction = `1. 回复时优先使用 "$" 作为分段标记；如果你更自然地输出空格分段，也可以用空格隔开各段`
-		replyFormatExample = "第一段内容$第二段内容$第三段内容 或 第一段内容 第二段内容 第三段内容"
+		segmentInstruction = `1. 回复时优先使用 "$" 作为分段标记；如果你更自然地输出空行或空格分段，也可以分别用连续两个换行或空格隔开各段`
+		replyFormatExample = "第一段内容$第二段内容$第三段内容 或 第一段内容\n\n第二段内容\n\n第三段内容 或 第一段内容 第二段内容 第三段内容"
 	}
 
 	return strings.TrimSpace(`

@@ -18,9 +18,10 @@ func TestBuildReplyOutputContractReinforcesDollarSegmentation(t *testing.T) {
 
 	required := []string{
 		"【最终输出要求】",
-		"$ 作为分段标记",
-		"输出示例：第一句$第二句$第三句",
-		"最后自检：只要不是单句短回应，就必须带 $ 再输出。",
+		"优先使用 $ 作为分段标记",
+		"连续两个换行分段",
+		"输出示例：第一句$第二句$第三句 或 第一句\n\n第二句\n\n第三句",
+		"最后自检：只要不是单句短回应，就必须明确使用 $ 或连续两个换行分段后再输出。",
 	}
 	for _, item := range required {
 		if !strings.Contains(contract, item) {
@@ -45,7 +46,7 @@ func TestBuildGenerationSystemPromptEndsWithOutputContract(t *testing.T) {
 	if !strings.Contains(prompt, "【最终输出要求】") {
 		t.Fatalf("expected output contract in prompt, got %q", prompt)
 	}
-	if !strings.HasSuffix(strings.TrimSpace(prompt), "最后自检：只要不是单句短回应，就必须带 $ 再输出。") {
+	if !strings.HasSuffix(strings.TrimSpace(prompt), "最后自检：只要不是单句短回应，就必须明确使用 $ 或连续两个换行分段后再输出。") {
 		t.Fatalf("expected prompt to end with hard output contract, got %q", prompt)
 	}
 }
@@ -65,8 +66,8 @@ func TestBuildReplyOutputContractAllowsSpaceDelimiterWhenEnabled(t *testing.T) {
 
 	required := []string{
 		"优先使用 $ 作为分段标记",
-		"也允许使用空格隔开各段",
-		"输出示例：第一句$第二句$第三句 或 第一句 第二句 第三句",
+		"或使用空格隔开各段",
+		"输出示例：第一句$第二句$第三句 或 第一句\n\n第二句\n\n第三句 或 第一句 第二句 第三句",
 	}
 	for _, item := range required {
 		if !strings.Contains(contract, item) {

@@ -50,6 +50,40 @@ func TestSplitReplySegmentsDollarByDefault(t *testing.T) {
 	}
 }
 
+func TestSplitReplySegmentsBlankLineByDefault(t *testing.T) {
+	cfg := config.GetConfig()
+	previous := cfg.EnableSpaceSegmentDelimiter
+	cfg.EnableSpaceSegmentDelimiter = false
+	defer func() { cfg.EnableSpaceSegmentDelimiter = previous }()
+
+	segments := splitReplySegments("第一段\n\n第二段\r\n\r\n第三段")
+	if len(segments) != 3 {
+		t.Fatalf("expected 3 segments, got %d: %#v", len(segments), segments)
+	}
+	if segments[0] != "第一段" || segments[1] != "第二段" || segments[2] != "第三段" {
+		t.Fatalf("unexpected segments: %#v", segments)
+	}
+}
+
+func TestSplitReplySegmentsKeepsSingleNewline(t *testing.T) {
+	cfg := config.GetConfig()
+	previous := cfg.EnableSpaceSegmentDelimiter
+	cfg.EnableSpaceSegmentDelimiter = false
+	defer func() { cfg.EnableSpaceSegmentDelimiter = previous }()
+
+	segments := splitReplySegments("第一行\n第二行")
+	if len(segments) != 1 || segments[0] != "第一行\n第二行" {
+		t.Fatalf("expected single newline to remain in one segment, got %#v", segments)
+	}
+}
+
+func TestSplitReplySegmentsSupportsDollarAndBlankLineTogether(t *testing.T) {
+	segments := splitReplySegments("第一段$第二段\n\n第三段")
+	if len(segments) != 3 {
+		t.Fatalf("expected 3 segments, got %d: %#v", len(segments), segments)
+	}
+}
+
 func TestSplitReplySegmentsDoesNotUseSpaceByDefault(t *testing.T) {
 	cfg := config.GetConfig()
 	previous := cfg.EnableSpaceSegmentDelimiter

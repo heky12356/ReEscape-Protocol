@@ -50,8 +50,9 @@ func splitReplySegments(text string) []string {
 		return nil
 	}
 
-	if strings.Contains(trimmed, "$") {
-		return strings.Split(trimmed, "$")
+	trimmed = normalizeReplyNewlines(trimmed)
+	if strings.Contains(trimmed, "$") || strings.Contains(trimmed, "\n\n") {
+		return splitReplyDelimiters(trimmed)
 	}
 
 	if config.GetConfig().EnableSpaceSegmentDelimiter && strings.Contains(trimmed, " ") {
@@ -59,4 +60,22 @@ func splitReplySegments(text string) []string {
 	}
 
 	return []string{trimmed}
+}
+
+func normalizeReplyNewlines(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	return strings.ReplaceAll(text, "\r", "\n")
+}
+
+func splitReplyDelimiters(text string) []string {
+	text = strings.ReplaceAll(text, "$", "\n\n")
+	parts := strings.Split(text, "\n\n")
+	segments := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			segments = append(segments, part)
+		}
+	}
+	return segments
 }

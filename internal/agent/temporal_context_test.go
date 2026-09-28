@@ -71,6 +71,21 @@ func TestBuildCurrentTurnContextWrapsTemporalContext(t *testing.T) {
 	}
 }
 
+func TestBuildCurrentTurnContextIncludesPendingInterruptedReply(t *testing.T) {
+	sessionID := "agent-test-interrupted"
+	state.GetManager().SetInterruptedReply(sessionID, state.InterruptedReply{
+		DeliveredSegments: []string{"第一句"}, UndeliveredSegments: []string{"第二句"},
+		Summary: "未发送内容：第二句", Status: "pending",
+	})
+	t.Cleanup(func() { state.GetManager().ClearInterruptedReply(sessionID, "") })
+
+	turn := NewTurnContext(TurnInput{SessionID: sessionID, ReferenceTime: time.Now()})
+	context := buildCurrentTurnContext(turn)
+	if !strings.Contains(context, "【上一轮投递状态】") || !strings.Contains(context, "未发送内容：第二句") {
+		t.Fatalf("expected interrupted reply context, got %q", context)
+	}
+}
+
 func TestBuildCurrentTurnContextOmitsTemporalDataWhenTimeContextDisabled(t *testing.T) {
 	restoreTemporalConfig(t, false, "Asia/Shanghai", "2006-01-02 15:04:05")
 	restoreSkillConfig(t, false, 2)

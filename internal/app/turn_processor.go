@@ -41,6 +41,7 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 			}
 
 			sessionID := state.BuildSessionID(msg.User_id, msg.Group_id, msg.Type)
+			state.GetManager().CancelActiveDelivery(sessionID)
 			enrichedParts := service.EnrichMessageParts(c, msg.Parts)
 			if len(enrichedParts) == 0 {
 				enrichedParts = append([]model.MessagePart(nil), msg.Parts...)
@@ -269,17 +270,18 @@ func processMessageTurn(ctx context.Context, c *websocket.Conn, messageCtx handl
 		if err == nil {
 			reply := strings.TrimSpace(agentResult.FinalReply.Content)
 			if agentResult.ShouldSend && reply != "" {
-				if sendErr := service.SendMsg(c, messageCtx.UserID, reply); sendErr != nil {
-					return nil, sendErr
+				delivery := service.DeliverTurnReply(ctx, c, service.DeliveryRequest{TurnID: messageCtx.RequestID, SessionID: messageCtx.SessionID, UserID: messageCtx.UserID, Reply: reply})
+				agentResult.Events = append(agentResult.Events, deliveryEvents(delivery, messageCtx.UserID)...)
+				if delivery.Status != service.DeliveryResultDelivered && delivery.Status != service.DeliveryResultPartial {
+					if eventStore != nil {
+						if appendErr := eventStore.Append(ctx, agentResult.Events...); appendErr != nil {
+							utils.Warn("append agent events failed: %v", appendErr)
+						}
+					}
+					return &handler.ProcessResult{Handled: agentResult.Handled, MemoryManaged: true, ScheduleManaged: agentResult.ScheduleManaged, ReplyMode: service.ReplyModeFullReply}, nil
 				}
-				agentResult.Events = append(agentResult.Events, eventlog.Event{
-					Type:      "reply_sent",
-					SessionID: messageCtx.SessionID,
-					UserID:    messageCtx.UserID,
-					Actor:     "runtime",
-					Message:   service.BuildAssistantTranscript(reply),
-					CreatedAt: time.Now(),
-				})
+				agentResult.FinalReply.Content = delivery.DeliveredContent
+				reply = delivery.DeliveredContent
 			}
 			if eventStore != nil {
 				if appendErr := eventStore.Append(ctx, agentResult.Events...); appendErr != nil {
@@ -300,6 +302,39 @@ func processMessageTurn(ctx context.Context, c *websocket.Conn, messageCtx handl
 	}
 
 	return processor.Process(c, messageCtx)
+}
+
+func deliveryEvents(result service.DeliveryResult, userID int64) []eventlog.Event {
+	events := make([]eventlog.Event, 0, len(result.Items)+2)
+	events = append(events, eventlog.Event{Type: "delivery_started", SessionID: result.SessionID, UserID: userID, Actor: "runtime", CreatedAt: result.StartedAt, Data: map[string]any{
+		"delivery_id": result.DeliveryID, "turn_id": result.TurnID, "item_count": len(result.Items),
+	}})
+	for _, item := range result.Items {
+		createdAt := item.DeliveredAt
+		if createdAt.IsZero() {
+			createdAt = item.StartedAt
+		}
+		if createdAt.IsZero() {
+			createdAt = result.FinishedAt
+		}
+		events = append(events, eventlog.Event{Type: "delivery_item_" + string(item.Status), SessionID: result.SessionID, UserID: userID, Actor: "runtime", CreatedAt: createdAt, Data: map[string]any{
+			"delivery_id": result.DeliveryID, "turn_id": result.TurnID, "item_index": item.Index, "kind": item.Kind, "status": string(item.Status), "message_id": item.MessageID, "asset_id": item.AssetID, "error": item.Error,
+		}})
+	}
+	typ := "reply_delivery_failed"
+	if result.Status == service.DeliveryResultDelivered {
+		typ = "reply_delivered"
+	}
+	if result.Status == service.DeliveryResultPartial {
+		typ = "reply_partial"
+	}
+	if result.Status == service.DeliveryResultCancelled {
+		typ = "reply_cancelled"
+	}
+	events = append(events, eventlog.Event{Type: typ, SessionID: result.SessionID, UserID: userID, Actor: "runtime", Message: result.DeliveredContent, CreatedAt: result.FinishedAt, Data: map[string]any{
+		"delivery_id": result.DeliveryID, "turn_id": result.TurnID, "status": result.Status, "first_committed": result.FirstCommitted, "delivered_count": result.DeliveredCount, "failed_count": result.FailedCount, "cancelled_count": result.CancelledCount, "error": result.Error,
+	}})
+	return events
 }
 
 func recordIncomingConversationTurn(messageCtx handler.MessageContext) {

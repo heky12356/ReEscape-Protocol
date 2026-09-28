@@ -1,6 +1,8 @@
 package scheduler
 
 import (
+	"context"
+	"fmt"
 	"math/rand"
 	"time"
 
@@ -33,12 +35,20 @@ func SendScheduledMessage(c *websocket.Conn, scheduler *corescheduler.NaturalSch
 		state.GetManager().SetState(sessionID, state.StateNeedComfort)
 	}
 
-	if err := service.SendMsg(c, targetUserID, message); err != nil {
-		return err
+	turnID := utils.NewRequestID("proactive")
+	deliveryCtx, deliveryCancel, _ := state.GetManager().BeginActiveDelivery(context.Background(), sessionID, turnID, turnID)
+	delivery := service.DeliverReply(deliveryCtx, c, service.DeliveryRequest{TurnID: turnID, SessionID: sessionID, UserID: targetUserID, Reply: message, Proactive: true, Cancel: deliveryCtx.Done()})
+	if delivery.FirstCommitted {
+		state.GetManager().MarkDeliveryCommitted(sessionID, turnID)
+	}
+	deliveryCancel()
+	state.GetManager().EndActiveDelivery(sessionID, turnID)
+	if delivery.Status != service.DeliveryResultDelivered && delivery.Status != service.DeliveryResultPartial {
+		return fmt.Errorf("scheduled message delivery %s: %s", delivery.Status, delivery.Error)
 	}
 
 	sentAt := time.Now()
-	state.GetManager().RecordAssistantTurn(sessionID, service.BuildAssistantTranscript(message), sentAt, true)
+	state.GetManager().RecordAssistantTurn(sessionID, delivery.DeliveredContent, sentAt, true)
 	state.GetManager().UpdateLastReplyMode(sessionID, "proactive")
 	next := scheduler.RescheduleFrom(sessionID, sentAt)
 	utils.Info("主动消息已发送，下一次主动触达时间: %s", next.Format(time.RFC3339))

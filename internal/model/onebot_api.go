@@ -19,3 +19,7 @@ type APIResponse struct {
 	Data    json.RawMessage `json:"data"`
 	Echo    string          `json:"echo"`
 }
+
+type SendMessageData struct {
+	MessageID int64 `json:"message_id"`
+}

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -33,6 +34,17 @@ func buildCurrentTurnContext(turn *TurnContext) string {
 	}
 	if candidates := skill.FormatSkillCandidates(turn.SkillCandidates()); candidates != "" {
 		sections = append(sections, candidates)
+	}
+	if interrupted := state.GetManager().GetInterruptedReply(turn.SessionID()); interrupted != nil && interrupted.Status == "pending" {
+		section := []string{
+			"【上一轮投递状态】",
+			fmt.Sprintf("上一轮回复已有 %d 段成功发送，后续内容未发送。未发送内容仅作为可能的延续意图，不代表用户已经看到。", len(interrupted.DeliveredSegments)),
+			"请根据当前用户消息判断是否自然承接；无关时忽略，不要主动解释投递过程。",
+		}
+		if strings.TrimSpace(interrupted.Summary) != "" {
+			section = append(section, "摘要："+interrupted.Summary)
+		}
+		sections = append(sections, strings.Join(section, "\n"))
 	}
 	return strings.Join(sections, "\n\n")
 }

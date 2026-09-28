@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -44,11 +45,21 @@ type MessageContext struct {
 	DropReason                 string
 }
 
-func sendAIFallbackReply(c *websocket.Conn, userID int64) (string, error) {
-	if err := service.SendMsg(c, userID, aiFallbackReply); err != nil {
-		return "", err
+func sendAIFallbackReply(c *websocket.Conn, ctx MessageContext) (string, error) {
+	return sendContextReply(c, ctx, aiFallbackReply)
+}
+
+func sendContextReply(c *websocket.Conn, ctx MessageContext, reply string) (string, error) {
+	result := service.DeliverTurnReply(context.Background(), c, service.DeliveryRequest{
+		TurnID: ctx.RequestID, SessionID: ctx.SessionID, UserID: ctx.UserID, Reply: reply,
+	})
+	if result.Status == service.DeliveryResultDelivered || result.Status == service.DeliveryResultPartial {
+		return result.DeliveredContent, nil
 	}
-	return aiFallbackReply, nil
+	if result.Error != "" {
+		return "", fmt.Errorf("reply delivery %s: %s", result.Status, result.Error)
+	}
+	return "", fmt.Errorf("reply delivery %s", result.Status)
 }
 
 // MessageHandler 消息处理器接口
@@ -97,7 +108,7 @@ func (h *PresetHandler) Handle(c *websocket.Conn, ctx MessageContext, sm *state.
 		sm.SetState(ctx.SessionID, state.StateLongChat)
 	}
 
-	if err := service.SendMsg(c, ctx.UserID, response); err != nil {
+	if _, err := sendContextReply(c, ctx, response); err != nil {
 		return nil, err
 	}
 	return &ProcessResult{
@@ -163,7 +174,7 @@ func (h *EmotionHandler) startAIChat(c *websocket.Conn, ctx MessageContext, sm *
 			utils.Int64("user_id", ctx.UserID),
 			utils.Err(err),
 		)
-		fallback, sendErr := sendAIFallbackReply(c, ctx.UserID)
+		fallback, sendErr := sendAIFallbackReply(c, ctx)
 		if sendErr != nil {
 			return nil, fmt.Errorf("AI chat failed and fallback send failed: %v / %v", err, sendErr)
 		}
@@ -180,9 +191,12 @@ func (h *EmotionHandler) startAIChat(c *websocket.Conn, ctx MessageContext, sm *
 		map[string]string{"kind": "chat", "mode": "start", "result": "ok"},
 	)
 
+	var deliveredReply string
 	for _, response := range responses {
-		if err := service.SendMsg(c, ctx.UserID, response); err != nil {
-			return nil, fmt.Errorf("发送AI回复失败: %v", err)
+		var sendErr error
+		deliveredReply, sendErr = sendContextReply(c, ctx, response)
+		if sendErr != nil {
+			return nil, fmt.Errorf("发送AI回复失败: %v", sendErr)
 		}
 	}
 
@@ -190,7 +204,7 @@ func (h *EmotionHandler) startAIChat(c *websocket.Conn, ctx MessageContext, sm *
 		Handled:   true,
 		Emotion:   emotion,
 		Intention: intention,
-		Reply:     service.StripReplyDirectives(responses[len(responses)-1]),
+		Reply:     deliveredReply,
 	}, nil
 }
 
@@ -244,7 +258,7 @@ func (h *LongChatHandler) continueAIChat(c *websocket.Conn, ctx MessageContext, 
 			utils.Int64("user_id", ctx.UserID),
 			utils.Err(err),
 		)
-		fallback, sendErr := sendAIFallbackReply(c, ctx.UserID)
+		fallback, sendErr := sendAIFallbackReply(c, ctx)
 		if sendErr != nil {
 			return nil, fmt.Errorf("AI conversation failed and fallback send failed: %v / %v", err, sendErr)
 		}
@@ -261,9 +275,12 @@ func (h *LongChatHandler) continueAIChat(c *websocket.Conn, ctx MessageContext, 
 		map[string]string{"kind": "chat", "mode": "continue", "result": "ok"},
 	)
 
+	var deliveredReply string
 	for _, response := range responses {
-		if err := service.SendMsg(c, ctx.UserID, response); err != nil {
-			return nil, fmt.Errorf("发送AI回复失败: %v", err)
+		var sendErr error
+		deliveredReply, sendErr = sendContextReply(c, ctx, response)
+		if sendErr != nil {
+			return nil, fmt.Errorf("发送AI回复失败: %v", sendErr)
 		}
 	}
 
@@ -271,13 +288,13 @@ func (h *LongChatHandler) continueAIChat(c *websocket.Conn, ctx MessageContext, 
 		Handled:   true,
 		Emotion:   emotion,
 		Intention: intention,
-		Reply:     service.StripReplyDirectives(responses[len(responses)-1]),
+		Reply:     deliveredReply,
 	}, nil
 }
 
 func (h *LongChatHandler) endAIChat(c *websocket.Conn, ctx MessageContext, sm *state.StateManager) (string, error) {
 	reply := "好吧，那拜拜。"
-	if err := service.SendMsg(c, ctx.UserID, reply); err != nil {
+	if _, err := sendContextReply(c, ctx, reply); err != nil {
 		return "", fmt.Errorf("发送结束回复失败: %v", err)
 	}
 
@@ -332,8 +349,11 @@ func applyStructuredReply(c *websocket.Conn, ctx MessageContext, sm *state.State
 	switch analysis.ReplyMode {
 	case service.ReplyModeLightAck:
 		reply = service.SelectLightAck(ctx.SessionID, ctx.Message, analysis)
-		if err = service.SendMsg(c, ctx.UserID, reply); err != nil {
+		if delivered, sendErr := sendContextReply(c, ctx, reply); sendErr != nil {
+			err = sendErr
 			return nil, err
+		} else {
+			reply = delivered
 		}
 	case service.ReplyModeFullReply:
 		reply, err = generateNaturalReply(c, ctx, sm, analysis)
@@ -341,7 +361,7 @@ func applyStructuredReply(c *websocket.Conn, ctx MessageContext, sm *state.State
 			return nil, err
 		}
 	default:
-		fallback, fallbackErr := sendAIFallbackReply(c, ctx.UserID)
+		fallback, fallbackErr := sendAIFallbackReply(c, ctx)
 		if fallbackErr != nil {
 			return nil, fallbackErr
 		}
@@ -388,7 +408,7 @@ func generateNaturalReply(c *websocket.Conn, ctx MessageContext, sm *state.State
 			utils.Int64("user_id", ctx.UserID),
 			utils.Err(err),
 		)
-		fallback, sendErr := sendAIFallbackReply(c, ctx.UserID)
+		fallback, sendErr := sendAIFallbackReply(c, ctx)
 		if sendErr != nil {
 			return "", fmt.Errorf("ai generation failed and fallback send failed: %v / %v", err, sendErr)
 		}
@@ -400,16 +420,19 @@ func generateNaturalReply(c *websocket.Conn, ctx MessageContext, sm *state.State
 		map[string]string{"kind": "chat", "mode": "generate", "result": "ok"},
 	)
 
+	var deliveredReply string
 	for _, response := range responses {
-		if err := service.SendMsg(c, ctx.UserID, response); err != nil {
-			return "", fmt.Errorf("发送AI回复失败: %v", err)
+		var sendErr error
+		deliveredReply, sendErr = sendContextReply(c, ctx, response)
+		if sendErr != nil {
+			return "", fmt.Errorf("发送AI回复失败: %v", sendErr)
 		}
 	}
 
 	if len(responses) == 0 {
 		return "", fmt.Errorf("ai generation returned empty responses")
 	}
-	return responses[len(responses)-1], nil
+	return deliveredReply, nil
 }
 
 func buildGenerationSystemPrompt(ctx MessageContext, analysis service.MessageAnalysis) string {
@@ -624,7 +647,7 @@ func (mp *MessageProcessor) Process(c *websocket.Conn, ctx MessageContext) (*Pro
 		return result, nil
 	}
 
-	err := service.SendMsg(c, ctx.UserID, "?")
+	_, err := sendContextReply(c, ctx, "?")
 	return &ProcessResult{
 		Handled:   true,
 		Replied:   true,

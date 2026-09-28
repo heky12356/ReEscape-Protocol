@@ -1,6 +1,7 @@
 package state
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -60,7 +61,29 @@ type Session struct {
 	Summary                    string                         `json:"summary"`
 	ActiveTopics               []string                       `json:"active_topics"`
 	DialogueState              DialogueState                  `json:"dialogue_state"`
+	InterruptedReply           *InterruptedReply              `json:"interrupted_reply,omitempty"`
 	LastUpdated                time.Time                      `json:"last_updated"`
+}
+
+type InterruptedReply struct {
+	ID                  string    `json:"id"`
+	SourceTurnID        string    `json:"source_turn_id"`
+	SessionID           string    `json:"session_id"`
+	DeliveredSegments   []string  `json:"delivered_segments,omitempty"`
+	UndeliveredSegments []string  `json:"undelivered_segments,omitempty"`
+	Summary             string    `json:"summary,omitempty"`
+	Status              string    `json:"status"`
+	CreatedAt           time.Time `json:"created_at"`
+	ExpiresAt           time.Time `json:"expires_at"`
+}
+
+type ActiveDelivery struct {
+	DeliveryID string
+	TurnID     string
+	Cancel     context.CancelFunc
+	Done       chan struct{}
+	Committed  bool
+	StartedAt  time.Time
 }
 
 // DialogueState 保存最近一轮结构化对话判断，用于影响后续回复。
@@ -93,10 +116,11 @@ type legacyConversationStorage struct {
 
 // StateManager 状态管理器
 type StateManager struct {
-	mu       sync.RWMutex
-	sessions map[string]*Session
-	store    storage.SnapshotStore
-	dirty    storage.DirtyMarker
+	mu               sync.RWMutex
+	sessions         map[string]*Session
+	activeDeliveries map[string]*ActiveDelivery
+	store            storage.SnapshotStore
+	dirty            storage.DirtyMarker
 }
 
 var manager *StateManager
@@ -107,7 +131,8 @@ const FlushTaskName = "sessions"
 // 初始化
 func init() {
 	manager = &StateManager{
-		sessions: make(map[string]*Session),
+		sessions:         make(map[string]*Session),
+		activeDeliveries: make(map[string]*ActiveDelivery),
 	}
 }
 
@@ -134,6 +159,129 @@ func (sm *StateManager) EnsureSession(sessionID string, userID, groupID int64, c
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.ensureSessionLocked(sessionID, userID, groupID, chatType)
+}
+
+// BeginActiveDelivery starts the single delivery allowed for a session. An
+// existing delivery is cancelled so a newer turn can take ownership.
+func (sm *StateManager) BeginActiveDelivery(parent context.Context, sessionID, deliveryID, turnID string) (context.Context, context.CancelFunc, bool) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
+	sm.mu.Lock()
+	if sm.activeDeliveries == nil {
+		sm.activeDeliveries = make(map[string]*ActiveDelivery)
+	}
+	replaced := false
+	if previous := sm.activeDeliveries[sessionID]; previous != nil {
+		previous.Cancel()
+		replaced = true
+	}
+	done := make(chan struct{})
+	sm.activeDeliveries[sessionID] = &ActiveDelivery{DeliveryID: deliveryID, TurnID: turnID, Cancel: cancel, Done: done, StartedAt: time.Now()}
+	sm.mu.Unlock()
+	return ctx, cancel, replaced
+}
+
+func (sm *StateManager) MarkDeliveryCommitted(sessionID, deliveryID string) {
+	sm.mu.Lock()
+	if active := sm.activeDeliveries[sessionID]; active != nil && (deliveryID == "" || active.DeliveryID == deliveryID) {
+		active.Committed = true
+	}
+	sm.mu.Unlock()
+}
+
+func (sm *StateManager) CancelActiveDelivery(sessionID string) bool {
+	sm.mu.Lock()
+	active := sm.activeDeliveries[sessionID]
+	sm.mu.Unlock()
+	if active == nil {
+		return false
+	}
+	active.Cancel()
+	return true
+}
+
+func (sm *StateManager) GetActiveDelivery(sessionID string) *ActiveDelivery {
+	sm.mu.RLock()
+	active := sm.activeDeliveries[sessionID]
+	if active == nil {
+		sm.mu.RUnlock()
+		return nil
+	}
+	copy := *active
+	sm.mu.RUnlock()
+	return &copy
+}
+
+func (sm *StateManager) EndActiveDelivery(sessionID, deliveryID string) {
+	sm.mu.Lock()
+	active := sm.activeDeliveries[sessionID]
+	if active != nil && (deliveryID == "" || active.DeliveryID == deliveryID) {
+		delete(sm.activeDeliveries, sessionID)
+		close(active.Done)
+	}
+	sm.mu.Unlock()
+}
+
+func (sm *StateManager) SetInterruptedReply(sessionID string, interrupted InterruptedReply) {
+	sm.mu.Lock()
+	session := sm.ensureSessionLocked(sessionID, 0, 0, 0)
+	interrupted.SessionID = sessionID
+	if interrupted.ID == "" {
+		interrupted.ID = fmt.Sprintf("interrupted-%d", time.Now().UnixNano())
+	}
+	if interrupted.CreatedAt.IsZero() {
+		interrupted.CreatedAt = time.Now()
+	}
+	if interrupted.ExpiresAt.IsZero() {
+		interrupted.ExpiresAt = interrupted.CreatedAt.Add(30 * time.Minute)
+	}
+	if interrupted.Status == "" {
+		interrupted.Status = "pending"
+	}
+	session.InterruptedReply = &interrupted
+	session.LastUpdated = time.Now()
+	sm.mu.Unlock()
+	sm.markDirty()
+}
+
+func (sm *StateManager) GetInterruptedReply(sessionID string) *InterruptedReply {
+	sm.mu.Lock()
+	session := sm.sessions[sessionID]
+	if session == nil || session.InterruptedReply == nil {
+		sm.mu.Unlock()
+		return nil
+	}
+	if !session.InterruptedReply.ExpiresAt.IsZero() && time.Now().After(session.InterruptedReply.ExpiresAt) {
+		session.InterruptedReply.Status = "expired"
+		result := *session.InterruptedReply
+		sm.mu.Unlock()
+		sm.markDirty()
+		return &result
+	}
+	result := *session.InterruptedReply
+	result.DeliveredSegments = append([]string(nil), session.InterruptedReply.DeliveredSegments...)
+	result.UndeliveredSegments = append([]string(nil), session.InterruptedReply.UndeliveredSegments...)
+	sm.mu.Unlock()
+	return &result
+}
+
+func (sm *StateManager) ClearInterruptedReply(sessionID string, status string) {
+	sm.mu.Lock()
+	session := sm.sessions[sessionID]
+	if session == nil || session.InterruptedReply == nil {
+		sm.mu.Unlock()
+		return
+	}
+	if status == "" {
+		session.InterruptedReply = nil
+	} else {
+		session.InterruptedReply.Status = status
+	}
+	session.LastUpdated = time.Now()
+	sm.mu.Unlock()
+	sm.markDirty()
 }
 
 // SetState 设置当前状态
@@ -663,6 +811,7 @@ func (sm *StateManager) ResetSession(sessionID string) {
 		session.ProactiveScheduleUpdatedAt = time.Time{}
 		session.ProactiveScheduleUpdatedBy = ""
 		session.ProactiveScheduleManual = false
+		session.InterruptedReply = nil
 		session.LastUpdated = now
 	}
 	sm.mu.Unlock()
@@ -973,6 +1122,7 @@ func (sm *StateManager) snapshotLocked() map[string]*Session {
 			Summary:                    session.Summary,
 			ActiveTopics:               append([]string(nil), session.ActiveTopics...),
 			DialogueState:              session.DialogueState,
+			InterruptedReply:           cloneInterruptedReply(session.InterruptedReply),
 			LastUpdated:                session.LastUpdated,
 		}
 	}
@@ -1020,6 +1170,16 @@ func cloneIntMap(source map[string]int) map[string]int {
 		result[key] = value
 	}
 	return result
+}
+
+func cloneInterruptedReply(source *InterruptedReply) *InterruptedReply {
+	if source == nil {
+		return nil
+	}
+	result := *source
+	result.DeliveredSegments = append([]string(nil), source.DeliveredSegments...)
+	result.UndeliveredSegments = append([]string(nil), source.UndeliveredSegments...)
+	return &result
 }
 
 func (sm *StateManager) GetConversationSummary(sessionID string) string {

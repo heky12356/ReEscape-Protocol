@@ -10,6 +10,7 @@ import (
 	"project-yume/internal/connect"
 	"project-yume/internal/metrics"
 	"project-yume/internal/model"
+	"project-yume/internal/state"
 	"project-yume/internal/utils"
 
 	"github.com/gorilla/websocket"
@@ -59,6 +60,12 @@ func startMessageReceiver(c *websocket.Conn, msgChan chan model.Msg, ctx context
 				)
 				continue
 			}
+			state.GetManager().CancelActiveDelivery(state.BuildSessionID(msg.User_id, msg.Group_id, func() int {
+				if msg.Message_type == "group" {
+					return 0
+				}
+				return 1
+			}()))
 
 			internalMsg := model.Msg{
 				Message:   msg.Raw_message,

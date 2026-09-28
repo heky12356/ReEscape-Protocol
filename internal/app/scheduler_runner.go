@@ -156,12 +156,20 @@ func sendScheduledAgentMessage(ctx context.Context, c *websocket.Conn, scheduler
 		utils.Info("主动消息发送前发现用户 turn pending，跳过 proactive")
 		return time.Time{}, false, nil
 	}
-	if err := service.SendMsg(c, targetUserID, reply); err != nil {
-		return time.Time{}, false, err
+	delivery := service.DeliverTurnReply(ctx, c, service.DeliveryRequest{TurnID: turn.RequestID(), SessionID: sessionID, UserID: targetUserID, Reply: reply, Proactive: true})
+	resultEvents := deliveryEvents(delivery, targetUserID)
+	result.Events = append(result.Events, resultEvents...)
+	if delivery.Status != service.DeliveryResultDelivered && delivery.Status != service.DeliveryResultPartial {
+		if eventStore != nil {
+			if err := eventStore.Append(ctx, result.Events...); err != nil {
+				utils.Warn("append proactive agent events failed: %v", err)
+			}
+		}
+		return time.Time{}, false, fmt.Errorf("proactive reply delivery %s: %s", delivery.Status, delivery.Error)
 	}
 
 	sentAt := time.Now()
-	transcript := service.BuildAssistantTranscript(reply)
+	transcript := delivery.DeliveredContent
 	state.GetManager().RecordAssistantTurn(sessionID, transcript, sentAt, true)
 	state.GetManager().UpdateLastReplyMode(sessionID, "proactive")
 	var next time.Time
@@ -174,18 +182,13 @@ func sendScheduledAgentMessage(ctx context.Context, c *websocket.Conn, scheduler
 	if !next.IsZero() {
 		nextAt = next.Format(time.RFC3339)
 	}
-	result.Events = append(result.Events, eventlog.Event{
-		Type:      "reply_sent",
-		SessionID: sessionID,
-		UserID:    targetUserID,
-		Actor:     "runtime",
-		Message:   transcript,
-		CreatedAt: sentAt,
-		Data: map[string]any{
-			"trigger": "proactive",
-			"next_at": nextAt,
-		},
-	})
+	if delivery.Status == service.DeliveryResultDelivered {
+		result.Events = append(result.Events, eventlog.Event{
+			Type: "reply_sent", SessionID: sessionID, UserID: targetUserID,
+			Actor: "runtime", Message: transcript, CreatedAt: sentAt,
+			Data: map[string]any{"trigger": "proactive", "next_at": nextAt},
+		})
+	}
 	if eventStore != nil {
 		if err := eventStore.Append(ctx, result.Events...); err != nil {
 			utils.Warn("append proactive agent events failed: %v", err)

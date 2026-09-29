@@ -49,6 +49,7 @@ const defaultConfig = {
   webSearchProvider: "searxng",
   webSearchEndpoint: "",
   webSearchApiKey: "",
+  webSearchApiKeyMasked: "",
   webSearchApiKeySet: false,
   webSearchMaxResults: 5,
   webToolTimeoutMs: 8000,

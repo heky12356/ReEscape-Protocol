@@ -293,8 +293,9 @@ export function AIConfigPage({ panel }) {
               />
               <InputField
                 label="Search API key"
-                placeholder={cfg.webSearchApiKeySet ? "currently set" : "not set"}
-                hint="Tavily 必填；留空则保留当前 WEB_SEARCH_API_KEY。"
+                type="password"
+                placeholder={cfg.webSearchApiKeySet ? cfg.webSearchApiKeyMasked : "not set"}
+                hint="Tavily 必填；输入新值可替换当前 key，留空则保留现有 key。"
                 value={cfg.webSearchApiKey}
                 onChange={(v) => updateField(panel, "webSearchApiKey", v)}
               />

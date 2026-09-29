@@ -51,39 +51,22 @@ export default function App() {
       <Sidebar items={MENU_ITEMS} active={active} onChange={setActive} panel={panel} />
 
       <main className="console-shell">
-        <section className="hero-band">
-          <div className="hero-copy">
+        <header className="page-header">
+          <div className="page-heading">
             <div className="eyebrow">ReEscape Protocol / 管理控制台</div>
-            <h1 className="hero-title">{currentSection.label}</h1>
-            <p className="hero-lead">{currentSection.description}</p>
+            <div className="page-title-row">
+              <h1 className="page-title">{currentSection.label}</h1>
+              <span className="page-context">{currentSection.note}</span>
+            </div>
+            <p className="page-lead">{currentSection.description}</p>
           </div>
 
-          <div className="hero-signal-card">
-            <div className="signal-disc" aria-hidden="true">
-              <span className="signal-disc-ring ring-one" />
-              <span className="signal-disc-ring ring-two" />
-              <span className="signal-disc-ring ring-three" />
-              <span className="signal-sweep" />
-              <span className="signal-core" />
-            </div>
-
-            <div className="signal-readout">
-              <div className="signal-label">当前运行状态</div>
-              <div className="signal-value">
-                {panel.ready.status === "ok" ? "服务已就绪" : "需要检查"}
-              </div>
-              <div className="signal-meta">
-                配置档 <span className="mono">{panel.config.aiProfile || "default"}</span> · 人格{" "}
-                <span className="mono">{panel.config.character || "-"}</span>
-              </div>
-
-              <div className="probe-row">
-                <StatusPill label="健康状态" value={panel.health.status} />
-                <StatusPill label="就绪状态" value={panel.ready.status} />
-              </div>
-            </div>
+          <div className="page-status" aria-label="当前运行状态">
+            <span className={`status-dot ${panel.ready.status === "ok" ? "good" : "warn"}`} />
+            <strong>{panel.ready.status === "ok" ? "服务正常" : "需要检查"}</strong>
+            <span className="page-status-meta mono">{panel.config.aiProfile || "default"}</span>
           </div>
-        </section>
+        </header>
 
         <div className="command-strip">
           <div className="command-chip">
@@ -114,18 +97,6 @@ export default function App() {
           {active === "logs" ? <LogsPage panel={panel} /> : null}
         </section>
       </main>
-    </div>
-  );
-}
-
-function StatusPill({ label, value }) {
-  const tone = value === "ok" ? "good" : value === "unknown" ? "idle" : "warn";
-  const displayValue = value === "ok" ? "正常" : value === "unknown" ? "未知" : value || "未知";
-
-  return (
-    <div className={`status-pill ${tone}`}>
-      <span>{label}</span>
-      <strong>{displayValue}</strong>
     </div>
   );
 }

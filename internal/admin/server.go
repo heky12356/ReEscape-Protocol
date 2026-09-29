@@ -76,6 +76,7 @@ type configResponse struct {
 	EnableWebTools                    bool          `json:"enableWebTools"`
 	WebSearchProvider                 string        `json:"webSearchProvider"`
 	WebSearchEndpoint                 string        `json:"webSearchEndpoint"`
+	WebSearchAPIKeyMasked             string        `json:"webSearchApiKeyMasked"`
 	WebSearchAPIKeySet                bool          `json:"webSearchApiKeySet"`
 	WebSearchMaxResults               int           `json:"webSearchMaxResults"`
 	WebToolTimeoutMs                  int           `json:"webToolTimeoutMs"`
@@ -934,6 +935,7 @@ func (s *server) buildConfigResponse() (configResponse, error) {
 		EnableWebTools:                    cfg.EnableWebTools,
 		WebSearchProvider:                 cfg.WebSearchProvider,
 		WebSearchEndpoint:                 cfg.WebSearchEndpoint,
+		WebSearchAPIKeyMasked:             maskSecret(cfg.WebSearchAPIKey),
 		WebSearchAPIKeySet:                strings.TrimSpace(cfg.WebSearchAPIKey) != "",
 		WebSearchMaxResults:               cfg.WebSearchMaxResults,
 		WebToolTimeoutMs:                  cfg.WebToolTimeoutMs,

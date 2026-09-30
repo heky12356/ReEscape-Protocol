@@ -10,6 +10,8 @@ import (
 
 	"github.com/sashabaranov/go-openai"
 
+	"project-yume/internal/domain/intent"
+	"project-yume/internal/domain/openloop"
 	"project-yume/internal/storage"
 )
 
@@ -52,6 +54,7 @@ type Session struct {
 	ProactiveClaimedAt         time.Time                      `json:"proactive_claimed_at,omitempty"`
 	ProactiveClaimedUntil      time.Time                      `json:"proactive_claimed_until,omitempty"`
 	ProactiveScheduleSummary   string                         `json:"proactive_schedule_summary,omitempty"`
+	ProactiveScheduleIntentID  string                         `json:"proactive_schedule_intent_id,omitempty"`
 	ProactiveScheduleReason    string                         `json:"proactive_schedule_reason,omitempty"`
 	ProactiveScheduleMeta      map[string]any                 `json:"proactive_schedule_meta,omitempty"`
 	ProactiveScheduleUpdatedAt time.Time                      `json:"proactive_schedule_updated_at,omitempty"`
@@ -101,7 +104,9 @@ type DialogueState struct {
 
 // SessionStorage 会话存储。
 type SessionStorage struct {
-	Sessions map[string]*Session `json:"sessions"`
+	Sessions  map[string]*Session          `json:"sessions"`
+	OpenLoops map[string]openloop.OpenLoop `json:"open_loops,omitempty"`
+	Intents   map[string]intent.Intent     `json:"intents,omitempty"`
 }
 
 type legacyConversationData struct {
@@ -118,6 +123,8 @@ type legacyConversationStorage struct {
 type StateManager struct {
 	mu               sync.RWMutex
 	sessions         map[string]*Session
+	openLoops        map[string]openloop.OpenLoop
+	intents          map[string]intent.Intent
 	activeDeliveries map[string]*ActiveDelivery
 	store            storage.SnapshotStore
 	dirty            storage.DirtyMarker
@@ -132,6 +139,8 @@ const FlushTaskName = "sessions"
 func init() {
 	manager = &StateManager{
 		sessions:         make(map[string]*Session),
+		openLoops:        make(map[string]openloop.OpenLoop),
+		intents:          make(map[string]intent.Intent),
 		activeDeliveries: make(map[string]*ActiveDelivery),
 	}
 }
@@ -480,6 +489,34 @@ func (sm *StateManager) TryClaimProactiveTurnWithUserGate(sessionID string, now 
 	return true, next
 }
 
+// TryClaimProactiveTurnForIntent claims the execution lease for an already due
+// Intent without requiring the legacy schedule index to be populated.
+func (sm *StateManager) TryClaimProactiveTurnForIntent(sessionID string, now time.Time, lease time.Duration, skipOnUserTurn bool, userGrace time.Duration) bool {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if lease <= 0 {
+		lease = 2 * time.Minute
+	}
+	sm.mu.Lock()
+	session := sm.ensureSessionLocked(sessionID, 0, 0, 0)
+	if skipOnUserTurn && !isSessionIdleForProactiveLocked(session, now, userGrace) {
+		sm.mu.Unlock()
+		return false
+	}
+	if session.ProactiveTurnInFlight && (session.ProactiveClaimedUntil.IsZero() || now.Before(session.ProactiveClaimedUntil)) {
+		sm.mu.Unlock()
+		return false
+	}
+	session.ProactiveTurnInFlight = true
+	session.ProactiveClaimedAt = now
+	session.ProactiveClaimedUntil = now.Add(lease)
+	session.LastUpdated = now
+	sm.mu.Unlock()
+	sm.markDirty()
+	return true
+}
+
 func (sm *StateManager) HasActiveProactiveClaim(sessionID string, now time.Time) bool {
 	if now.IsZero() {
 		now = time.Now()
@@ -578,6 +615,7 @@ func (sm *StateManager) GetProactiveSchedule(sessionID string) ProactiveSchedule
 		LastProactiveAt:   session.LastProactiveAt,
 		LastInteractionAt: session.LastInteractionAt,
 		Summary:           session.ProactiveScheduleSummary,
+		IntentID:          session.ProactiveScheduleIntentID,
 		Reason:            session.ProactiveScheduleReason,
 		Meta:              cloneScheduleMeta(session.ProactiveScheduleMeta),
 		Manual:            session.ProactiveScheduleManual,
@@ -595,6 +633,7 @@ func (sm *StateManager) SetProactiveSchedule(sessionID string, schedule Proactiv
 	}
 	session.NextScheduledAt = schedule.NextScheduledAt
 	session.ProactiveScheduleSummary = normalizeScheduleSummary(schedule.Summary)
+	session.ProactiveScheduleIntentID = strings.TrimSpace(schedule.IntentID)
 	session.ProactiveScheduleReason = strings.TrimSpace(schedule.Reason)
 	session.ProactiveScheduleMeta = normalizeScheduleMeta(schedule.Meta)
 	session.ProactiveScheduleManual = schedule.Manual
@@ -612,6 +651,7 @@ func (sm *StateManager) ClearProactiveSchedule(sessionID string, reason string, 
 	now := time.Now()
 	session.NextScheduledAt = time.Time{}
 	session.ProactiveScheduleSummary = "用户取消近期主动触达"
+	session.ProactiveScheduleIntentID = ""
 	session.ProactiveScheduleReason = strings.TrimSpace(reason)
 	session.ProactiveScheduleMeta = nil
 	session.ProactiveScheduleManual = true
@@ -737,6 +777,8 @@ func (sm *StateManager) ClearConversation(sessionID string) {
 func (sm *StateManager) ClearAllSessions() {
 	sm.mu.Lock()
 	sm.sessions = make(map[string]*Session)
+	sm.openLoops = make(map[string]openloop.OpenLoop)
+	sm.intents = make(map[string]intent.Intent)
 	sm.mu.Unlock()
 
 	sm.markDirty()
@@ -806,6 +848,7 @@ func (sm *StateManager) ResetSession(sessionID string) {
 		session.ProactiveClaimedAt = time.Time{}
 		session.ProactiveClaimedUntil = time.Time{}
 		session.ProactiveScheduleSummary = ""
+		session.ProactiveScheduleIntentID = ""
 		session.ProactiveScheduleReason = ""
 		session.ProactiveScheduleMeta = nil
 		session.ProactiveScheduleUpdatedAt = time.Time{}
@@ -927,7 +970,11 @@ func (sm *StateManager) Flush() error {
 		return nil
 	}
 
-	data, err := json.MarshalIndent(SessionStorage{Sessions: snapshot}, "", "  ")
+	sm.mu.RLock()
+	openLoops := cloneOpenLoops(sm.openLoops)
+	intents := cloneIntents(sm.intents)
+	sm.mu.RUnlock()
+	data, err := json.MarshalIndent(SessionStorage{Sessions: snapshot, OpenLoops: openLoops, Intents: intents}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal sessions failed: %w", err)
 	}
@@ -952,7 +999,19 @@ func (sm *StateManager) loadSessionsFromBytes(data []byte) error {
 		}
 		sm.mu.Lock()
 		sm.sessions = storage.Sessions
+		if raw, exists := envelope["open_loops"]; exists {
+			_ = json.Unmarshal(raw, &sm.openLoops)
+		}
+		if raw, exists := envelope["intents"]; exists {
+			_ = json.Unmarshal(raw, &sm.intents)
+		}
 		sm.normalizeSessions()
+		if sm.openLoops == nil {
+			sm.openLoops = make(map[string]openloop.OpenLoop)
+		}
+		if sm.intents == nil {
+			sm.intents = make(map[string]intent.Intent)
+		}
 		sm.mu.Unlock()
 		return nil
 	}
@@ -964,6 +1023,8 @@ func (sm *StateManager) loadSessionsFromBytes(data []byte) error {
 		}
 		sm.mu.Lock()
 		sm.sessions = migrateLegacyConversations(legacy.Conversations)
+		sm.openLoops = make(map[string]openloop.OpenLoop)
+		sm.intents = make(map[string]intent.Intent)
 		sm.normalizeSessions()
 		sm.mu.Unlock()
 		return nil
@@ -973,6 +1034,12 @@ func (sm *StateManager) loadSessionsFromBytes(data []byte) error {
 }
 
 func (sm *StateManager) normalizeSessions() {
+	if sm.openLoops == nil {
+		sm.openLoops = make(map[string]openloop.OpenLoop)
+	}
+	if sm.intents == nil {
+		sm.intents = make(map[string]intent.Intent)
+	}
 	if sm.sessions == nil {
 		sm.sessions = make(map[string]*Session)
 		return
@@ -1113,6 +1180,7 @@ func (sm *StateManager) snapshotLocked() map[string]*Session {
 			ProactiveClaimedAt:         session.ProactiveClaimedAt,
 			ProactiveClaimedUntil:      session.ProactiveClaimedUntil,
 			ProactiveScheduleSummary:   session.ProactiveScheduleSummary,
+			ProactiveScheduleIntentID:  session.ProactiveScheduleIntentID,
 			ProactiveScheduleReason:    session.ProactiveScheduleReason,
 			ProactiveScheduleMeta:      cloneScheduleMeta(session.ProactiveScheduleMeta),
 			ProactiveScheduleUpdatedAt: session.ProactiveScheduleUpdatedAt,
@@ -1182,6 +1250,26 @@ func cloneInterruptedReply(source *InterruptedReply) *InterruptedReply {
 	return &result
 }
 
+func cloneOpenLoops(source map[string]openloop.OpenLoop) map[string]openloop.OpenLoop {
+	result := make(map[string]openloop.OpenLoop, len(source))
+	for key, value := range source {
+		result[key] = openloop.Normalize(value)
+	}
+	return result
+}
+
+func cloneIntents(source map[string]intent.Intent) map[string]intent.Intent {
+	result := make(map[string]intent.Intent, len(source))
+	for key, value := range source {
+		value = intent.Normalize(value)
+		if value.Meta != nil {
+			value.Meta = cloneScheduleMeta(value.Meta)
+		}
+		result[key] = value
+	}
+	return result
+}
+
 func (sm *StateManager) GetConversationSummary(sessionID string) string {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -1213,9 +1301,26 @@ func (sm *StateManager) BuildConversationContextLayers(sessionID string, recentT
 	}
 
 	conversation := append([]openai.ChatCompletionMessage(nil), session.Conversation...)
+	userID := session.UserID
 	sm.mu.RUnlock()
 
-	return buildConversationContextLayers(conversation, recentTurns, summaryMaxTurns, openLoopLimit)
+	layers := buildConversationContextLayers(conversation, recentTurns, summaryMaxTurns, openLoopLimit)
+	for _, item := range sm.ListOpenLoops(userID, sessionID, false) {
+		duplicate := false
+		for _, existing := range layers.OpenLoops {
+			if existing.ID != "" && existing.ID == item.ID {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate && openloop.IsActionable(item) {
+			layers.OpenLoops = append(layers.OpenLoops, item)
+		}
+		if len(layers.OpenLoops) >= openLoopLimit {
+			break
+		}
+	}
+	return layers
 }
 
 func refreshSessionDerivedMemory(session *Session) {

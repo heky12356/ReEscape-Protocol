@@ -4,8 +4,42 @@ import (
 	"time"
 
 	"project-yume/internal/config"
+	"project-yume/internal/domain/intent"
 	"project-yume/internal/state"
 )
+
+func (ns *NaturalScheduler) TryClaimIntentDue(userID int64, sessionID string, now time.Time) (intent.Intent, bool) {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if !ns.IsIdleForProactive(sessionID, now) {
+		return intent.Intent{}, false
+	}
+	claimed, ok := state.GetManager().IntentStore().ClaimDue(userID, sessionID, now)
+	if !ok {
+		return intent.Intent{}, false
+	}
+	proactiveClaimed := state.GetManager().TryClaimProactiveTurnForIntent(sessionID, now, ns.claimLease(), config.GetConfig().ProactiveSkipOnPendingUser, ns.userMessageGrace())
+	if !proactiveClaimed {
+		_, _ = state.GetManager().IntentStore().Transition(claimed.ID, intent.StatusPending, now)
+		return intent.Intent{}, false
+	}
+	return claimed, true
+}
+
+func (ns *NaturalScheduler) ReleaseIntent(id string) {
+	if id == "" {
+		return
+	}
+	_, _ = state.GetManager().IntentStore().Transition(id, intent.StatusPending, time.Now())
+}
+
+func (ns *NaturalScheduler) CompleteIntent(id string, at time.Time) {
+	if id == "" {
+		return
+	}
+	_, _ = state.GetManager().IntentStore().Transition(id, intent.StatusCompleted, at)
+}
 
 func (ns *NaturalScheduler) RescheduleFrom(sessionID string, baseTime time.Time) time.Time {
 	if baseTime.IsZero() {

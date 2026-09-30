@@ -4,6 +4,7 @@ import (
 	"project-yume/internal/tools"
 	toolaffection "project-yume/internal/tools/affection"
 	toolimage "project-yume/internal/tools/image"
+	toolintent "project-yume/internal/tools/intent"
 	toolmemory "project-yume/internal/tools/memory"
 	toolscheduler "project-yume/internal/tools/scheduler"
 	toolsession "project-yume/internal/tools/session"
@@ -33,6 +34,10 @@ func NewRegistry(opts ...Options) *tools.Registry {
 	registry.MustRegister(toolsession.NewGetStateTool())
 	registry.MustRegister(toolscheduler.NewGetProactiveScheduleTool())
 	registry.MustRegister(toolscheduler.NewUpdateProactiveScheduleTool())
+	registry.MustRegister(toolintent.NewGetIntentTool())
+	registry.MustRegister(toolintent.NewUpdateIntentTool())
+	registry.MustRegister(toolintent.NewGetOpenLoopTool())
+	registry.MustRegister(toolintent.NewUpdateOpenLoopTool())
 	registry.MustRegister(toolmemory.NewGetMemoryContextTool())
 	registry.MustRegister(toolmemory.NewRememberFactTool())
 	registry.MustRegister(toolmemory.NewUpdateProfileTool())

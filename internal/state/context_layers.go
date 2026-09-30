@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/sashabaranov/go-openai"
+
+	"project-yume/internal/domain/openloop"
 )
 
 const (
@@ -16,10 +18,14 @@ const (
 
 // ConversationContextLayers 提供面向 prompt assembly 的分层上下文。
 type ConversationContextLayers struct {
-	RecentTurns    []ConversationTurn `json:"recent_turns"`
-	RollingSummary string             `json:"rolling_summary"`
-	OpenLoops      []OpenLoop         `json:"open_loops"`
+	RecentTurns    []ConversationTurn  `json:"recent_turns"`
+	RollingSummary string              `json:"rolling_summary"`
+	OpenLoops      []openloop.OpenLoop `json:"open_loops"`
 }
+
+// OpenLoop is kept as a source-compatible alias for callers of the state package.
+// The canonical type lives in internal/domain/openloop.
+type OpenLoop = openloop.OpenLoop
 
 // ConversationTurn 表示一个 user turn 及其后续 assistant 回复。
 type ConversationTurn struct {
@@ -28,13 +34,6 @@ type ConversationTurn struct {
 	UserIndex   int    `json:"user_index"`
 	HasReply    bool   `json:"has_reply"`
 	IsUnmatched bool   `json:"is_unmatched"`
-}
-
-// OpenLoop 表示仍未闭合的对话事项。
-type OpenLoop struct {
-	Kind        string `json:"kind"`
-	Description string `json:"description"`
-	TurnIndex   int    `json:"turn_index"`
 }
 
 func buildConversationContextLayers(conversation []openai.ChatCompletionMessage, recentTurns int, summaryMaxTurns int, openLoopLimit int) ConversationContextLayers {
@@ -206,12 +205,12 @@ func summarizeCommitments(turns []ConversationTurn) string {
 	return joinUnique(items, 2)
 }
 
-func extractOpenLoops(turns []ConversationTurn, limit int) []OpenLoop {
+func extractOpenLoops(turns []ConversationTurn, limit int) []openloop.OpenLoop {
 	if len(turns) == 0 || limit <= 0 {
 		return nil
 	}
 
-	loops := make([]OpenLoop, 0, limit)
+	loops := make([]openloop.OpenLoop, 0, limit)
 	seen := make(map[string]struct{})
 
 	for idx := len(turns) - 1; idx >= 0 && len(loops) < limit; idx-- {
@@ -226,27 +225,15 @@ func extractOpenLoops(turns []ConversationTurn, limit int) []OpenLoop {
 				kind = "unresolved_problem"
 				description = truncateRunes(turn.User, 48)
 			}
-			addOpenLoop(&loops, seen, OpenLoop{
-				Kind:        kind,
-				Description: description,
-				TurnIndex:   idx,
-			}, limit)
+			addOpenLoop(&loops, seen, openloop.FromState(0, "", kind, description, idx), limit)
 		}
 
 		if turn.User != "" && isProblemStatement(turn.User) && !assistantLikelyResolved(turn.Assistant) {
-			addOpenLoop(&loops, seen, OpenLoop{
-				Kind:        "unresolved_problem",
-				Description: truncateRunes(turn.User, 48),
-				TurnIndex:   idx,
-			}, limit)
+			addOpenLoop(&loops, seen, openloop.FromState(0, "", "unresolved_problem", truncateRunes(turn.User, 48), idx), limit)
 		}
 
 		if turn.Assistant != "" && assistantPromisesFollowUp(turn.Assistant) {
-			addOpenLoop(&loops, seen, OpenLoop{
-				Kind:        "assistant_follow_up",
-				Description: truncateRunes(turn.Assistant, 48),
-				TurnIndex:   idx,
-			}, limit)
+			addOpenLoop(&loops, seen, openloop.FromState(0, "", "assistant_follow_up", truncateRunes(turn.Assistant, 48), idx), limit)
 		}
 	}
 
@@ -257,11 +244,11 @@ func extractOpenLoops(turns []ConversationTurn, limit int) []OpenLoop {
 	return loops
 }
 
-func addOpenLoop(loops *[]OpenLoop, seen map[string]struct{}, loop OpenLoop, limit int) {
+func addOpenLoop(loops *[]openloop.OpenLoop, seen map[string]struct{}, loop openloop.OpenLoop, limit int) {
 	if len(*loops) >= limit {
 		return
 	}
-	key := loop.Kind + "::" + normalizeDedupKey(loop.Description)
+	key := string(loop.Kind) + "::" + normalizeDedupKey(loop.Description)
 	if _, ok := seen[key]; ok {
 		return
 	}

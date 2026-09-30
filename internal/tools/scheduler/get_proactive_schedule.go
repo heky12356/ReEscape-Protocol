@@ -50,6 +50,7 @@ func (t *GetProactiveScheduleTool) Execute(ctx context.Context, turn tools.TurnV
 func scheduleData(schedule state.ProactiveSchedule) map[string]any {
 	return map[string]any{
 		"session_id":          schedule.SessionID,
+		"intent_id":           schedule.IntentID,
 		"next_scheduled_at":   formatScheduleTime(schedule.NextScheduledAt),
 		"last_proactive_at":   formatScheduleTime(schedule.LastProactiveAt),
 		"last_interaction_at": formatScheduleTime(schedule.LastInteractionAt),

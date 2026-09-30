@@ -9,6 +9,7 @@ const maxProactiveScheduleSummaryRunes = 120
 
 type ProactiveSchedule struct {
 	SessionID         string         `json:"session_id"`
+	IntentID          string         `json:"intent_id,omitempty"`
 	NextScheduledAt   time.Time      `json:"next_scheduled_at,omitempty"`
 	LastProactiveAt   time.Time      `json:"last_proactive_at,omitempty"`
 	LastInteractionAt time.Time      `json:"last_interaction_at,omitempty"`

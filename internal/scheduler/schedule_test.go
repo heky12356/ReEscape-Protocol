@@ -5,8 +5,29 @@ import (
 	"time"
 
 	"project-yume/internal/config"
+	"project-yume/internal/domain/intent"
 	"project-yume/internal/state"
 )
+
+func TestNaturalSchedulerClaimsDueIntentOnlyOnce(t *testing.T) {
+	sm := state.GetManager()
+	sm.ClearAllSessions()
+	t.Cleanup(sm.ClearAllSessions)
+	sessionID := state.PrivateSessionID(42)
+	now := time.Now()
+	item := intent.NewProactiveContact(42, sessionID, "后续提醒", now.Add(-time.Minute))
+	if _, err := sm.IntentStore().Upsert(item); err != nil {
+		t.Fatal(err)
+	}
+	ns := NewNaturalScheduler()
+	claimed, ok := ns.TryClaimIntentDue(42, sessionID, now)
+	if !ok || claimed.ID != item.ID || claimed.Status != intent.StatusClaimed {
+		t.Fatalf("unexpected intent claim: %+v %v", claimed, ok)
+	}
+	if _, ok := ns.TryClaimIntentDue(42, sessionID, now); ok {
+		t.Fatal("intent should only be claimed once")
+	}
+}
 
 func TestNaturalSchedulerTryClaimDueClaimsOnlyOnce(t *testing.T) {
 	sm := state.GetManager()

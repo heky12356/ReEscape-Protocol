@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"project-yume/internal/config"
+	"project-yume/internal/domain/openloop"
 	"project-yume/internal/memory"
 	"project-yume/internal/state"
 )
@@ -147,7 +148,7 @@ func formatRecentTurns(turns []state.ConversationTurn) string {
 	return strings.Join(lines, "\n")
 }
 
-func formatOpenLoops(loops []state.OpenLoop) string {
+func formatOpenLoops(loops []openloop.OpenLoop) string {
 	if len(loops) == 0 {
 		return ""
 	}
@@ -158,7 +159,7 @@ func formatOpenLoops(loops []state.OpenLoop) string {
 		if description == "" {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("- [%s] %s", mapOpenLoopKind(loop.Kind), description))
+		lines = append(lines, fmt.Sprintf("- [%s] %s", mapOpenLoopKind(string(loop.Kind)), description))
 	}
 
 	return strings.Join(lines, "\n")

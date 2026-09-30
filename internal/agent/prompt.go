@@ -87,6 +87,9 @@ func buildToolRules(toolNames []string) string {
 	if scheduleRules := buildScheduleToolRules(toolNames); scheduleRules != "" {
 		rules = append(rules, scheduleRules)
 	}
+	if intentRules := buildIntentToolRules(toolNames); intentRules != "" {
+		rules = append(rules, intentRules)
+	}
 	if memoryRules := buildMemoryToolRules(toolNames); memoryRules != "" {
 		rules = append(rules, memoryRules)
 	}
@@ -94,6 +97,30 @@ func buildToolRules(toolNames []string) string {
 		toolNames = append([]string(nil), toolNames...)
 		sort.Strings(toolNames)
 		rules = append(rules, fmt.Sprintf("可用工具：%s", strings.Join(toolNames, ", ")))
+	}
+	return strings.Join(rules, "\n")
+}
+
+func buildIntentToolRules(toolNames []string) string {
+	hasGet := containsTool(toolNames, "get_intent")
+	hasUpdate := containsTool(toolNames, "update_intent")
+	hasGetLoop := containsTool(toolNames, "get_open_loop")
+	hasUpdateLoop := containsTool(toolNames, "update_open_loop")
+	if !hasGet && !hasUpdate && !hasGetLoop && !hasUpdateLoop {
+		return ""
+	}
+	rules := []string{"【Intent Rules】"}
+	if hasGet {
+		rules = append(rules, "当用户询问已有提醒、后续约定或需要确认未来动作时，调用 get_intent。")
+	}
+	if hasUpdate {
+		rules = append(rules, "用户明确说之后提醒、指定时间联系、安排后续跟进时，优先调用 update_intent 创建或更新 Intent；明确时间必须使用 RFC3339。", "先判断是否已有相关 Intent/OpenLoop，再决定创建还是更新；不要为没有明确时间的普通承诺创建定时 Intent。", "只使用 proactive_contact、follow_up、delivery_retry、check_open_loop 这几种动作，不把 Action 当作执行代码。")
+	}
+	if hasGetLoop {
+		rules = append(rules, "当当前问题涉及未回答问题、未解决问题或之前承诺的后续事项时，调用 get_open_loop。")
+	}
+	if hasUpdateLoop {
+		rules = append(rules, "没有明确时间的后续承诺记录为 OpenLoop；事项已解决或用户明确取消时调用 update_open_loop 关闭，不要把启发式候选当作已确认事实。")
 	}
 	return strings.Join(rules, "\n")
 }

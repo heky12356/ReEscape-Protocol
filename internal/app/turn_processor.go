@@ -291,7 +291,7 @@ func processMessageTurn(ctx context.Context, c *websocket.Conn, messageCtx handl
 
 	reply := strings.TrimSpace(agentResult.FinalReply.Content)
 	if agentResult.ShouldSend && reply != "" {
-		delivery := service.DeliverTurnReply(ctx, c, service.DeliveryRequest{TurnID: messageCtx.RequestID, SessionID: messageCtx.SessionID, UserID: messageCtx.UserID, Reply: reply})
+		delivery := service.DeliverTurnReply(ctx, c, service.DeliveryRequest{TurnID: messageCtx.RequestID, SourceTurnID: messageCtx.RequestID, SessionID: messageCtx.SessionID, UserID: messageCtx.UserID, Reply: reply})
 		agentResult.Events = append(agentResult.Events, deliveryEvents(delivery, messageCtx.UserID)...)
 		if delivery.Status != service.DeliveryResultDelivered && delivery.Status != service.DeliveryResultPartial {
 			if eventStore != nil {

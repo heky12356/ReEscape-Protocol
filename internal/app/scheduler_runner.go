@@ -8,6 +8,7 @@ import (
 
 	"project-yume/internal/agent"
 	"project-yume/internal/config"
+	"project-yume/internal/domain/intent"
 	"project-yume/internal/eventlog"
 	"project-yume/internal/scheduler"
 	"project-yume/internal/service"
@@ -31,7 +32,18 @@ func startScheduler(c *websocket.Conn, scheduler *scheduler.NaturalScheduler, ag
 			return
 		case <-ticker.C:
 			now := time.Now()
-			claimed, nextAt := scheduler.TryClaimDue(sessionID, now)
+			claimedIntent, intentClaimed := scheduler.TryClaimIntentDue(targetUserID, sessionID, now)
+			claimed, nextAt := intentClaimed, claimedIntent.DueAt
+			dueIntentExists := false
+			for _, candidate := range state.GetManager().ListIntents(targetUserID, sessionID, intent.StatusPending, intent.StatusDeferred) {
+				if intent.IsDue(candidate, now) {
+					dueIntentExists = true
+					break
+				}
+			}
+			if !claimed && !dueIntentExists {
+				claimed, nextAt = scheduler.TryClaimDue(sessionID, now)
+			}
 			due := !nextAt.IsZero() && !now.Before(nextAt)
 			utils.Info("自然调度检查: next=%s due=%t claimed=%t", nextAt.Format(time.RFC3339), due, claimed)
 			if !claimed {
@@ -42,7 +54,7 @@ func startScheduler(c *websocket.Conn, scheduler *scheduler.NaturalScheduler, ag
 				"next_at": nextAt.Format(time.RFC3339),
 			})
 			utils.Info("定时器触发")
-			err := sendScheduledTurn(ctx, c, scheduler, agentRuntime, eventStore, sessionID, targetUserID)
+			err := sendScheduledTurn(ctx, c, scheduler, agentRuntime, eventStore, sessionID, targetUserID, claimedIntent.ID)
 			if err != nil {
 				utils.Error("定时消息发送失败: %v", err)
 			} else {
@@ -54,32 +66,37 @@ func startScheduler(c *websocket.Conn, scheduler *scheduler.NaturalScheduler, ag
 
 func sendScheduledTurn(ctx context.Context, c *websocket.Conn, scheduler *scheduler.NaturalScheduler,
 	agentRuntime *agent.RuntimeHandle, eventStore eventlog.Store, sessionID string, targetUserID int64,
+	claimedIntentID string,
 ) error {
 	if agentRuntime == nil {
 		scheduler.ReleaseClaim(sessionID)
+		scheduler.ReleaseIntent(claimedIntentID)
 		return fmt.Errorf("ReAct proactive runtime handle is unavailable")
 	}
 	runtime := agentRuntime.Get()
 	if !config.GetConfig().EnableReactAgent || runtime == nil {
 		scheduler.ReleaseClaim(sessionID)
+		scheduler.ReleaseIntent(claimedIntentID)
 		return fmt.Errorf("ReAct proactive runtime is unavailable")
 	}
 
-	sentAt, sent, err := sendScheduledAgentMessage(ctx, c, scheduler, runtime, eventStore, sessionID, targetUserID)
+	sentAt, sent, err := sendScheduledAgentMessage(ctx, c, scheduler, runtime, eventStore, sessionID, targetUserID, claimedIntentID)
 	if err != nil {
 		scheduler.ReleaseClaim(sessionID)
+		scheduler.ReleaseIntent(claimedIntentID)
 		return err
 	}
 	if sent {
 		scheduler.CompleteClaim(sessionID, sentAt)
 	} else {
 		scheduler.ReleaseClaim(sessionID)
+		scheduler.ReleaseIntent(claimedIntentID)
 	}
 	return nil
 }
 
 func sendScheduledAgentMessage(ctx context.Context, c *websocket.Conn, scheduler *scheduler.NaturalScheduler,
-	agentRuntime *agent.Runtime, eventStore eventlog.Store, sessionID string, targetUserID int64,
+	agentRuntime *agent.Runtime, eventStore eventlog.Store, sessionID string, targetUserID int64, claimedIntentID string,
 ) (time.Time, bool, error) {
 	state.GetManager().EnsureSession(sessionID, targetUserID, 0, 1)
 	now := time.Now()
@@ -137,7 +154,12 @@ func sendScheduledAgentMessage(ctx context.Context, c *websocket.Conn, scheduler
 		utils.Info("主动消息发送前发现用户 turn pending，跳过 proactive")
 		return time.Time{}, false, nil
 	}
-	delivery := service.DeliverTurnReply(ctx, c, service.DeliveryRequest{TurnID: turn.RequestID(), SessionID: sessionID, UserID: targetUserID, Reply: reply, Proactive: true})
+	schedule := state.GetManager().GetProactiveSchedule(sessionID)
+	intentID := claimedIntentID
+	if intentID == "" {
+		intentID = schedule.IntentID
+	}
+	delivery := service.DeliverTurnReply(ctx, c, service.DeliveryRequest{TurnID: turn.RequestID(), SourceTurnID: turn.RequestID(), SessionID: sessionID, UserID: targetUserID, IntentID: intentID, Reply: reply, Proactive: true})
 	resultEvents := deliveryEvents(delivery, targetUserID)
 	result.Events = append(result.Events, resultEvents...)
 	if delivery.Status != service.DeliveryResultDelivered && delivery.Status != service.DeliveryResultPartial {
@@ -162,6 +184,15 @@ func sendScheduledAgentMessage(ctx context.Context, c *websocket.Conn, scheduler
 	nextAt := ""
 	if !next.IsZero() {
 		nextAt = next.Format(time.RFC3339)
+	}
+	if intentID != "" {
+		status := intent.StatusPending
+		if delivery.Status == service.DeliveryResultDelivered {
+			status = intent.StatusCompleted
+		}
+		if _, err := state.GetManager().IntentStore().Transition(intentID, status, sentAt); err != nil {
+			utils.Warn("update proactive intent after delivery failed: %v", err)
+		}
 	}
 	if delivery.Status == service.DeliveryResultDelivered {
 		result.Events = append(result.Events, eventlog.Event{

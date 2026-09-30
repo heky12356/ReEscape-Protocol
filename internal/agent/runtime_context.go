@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"project-yume/internal/config"
+	"project-yume/internal/domain/intent"
 	"project-yume/internal/eventlog"
 	"project-yume/internal/skill"
 	"project-yume/internal/state"
@@ -47,7 +48,34 @@ func buildCurrentTurnContext(turn *TurnContext) string {
 		}
 		sections = append(sections, strings.Join(section, "\n"))
 	}
+	if intents := state.GetManager().ListIntents(turn.UserID(), turn.SessionID(), intent.StatusPending, intent.StatusDeferred); len(intents) > 0 {
+		lines := []string{"【待执行 Intent】"}
+		for i, item := range intents {
+			if i >= 3 {
+				break
+			}
+			lines = append(lines, fmt.Sprintf("- %s（%s，时间：%s）", item.Summary, item.Action, formatRuntimeTime(item.DueAt)))
+		}
+		sections = append(sections, strings.Join(lines, "\n"))
+	}
+	if loops := state.GetManager().ListOpenLoops(turn.UserID(), turn.SessionID(), false); len(loops) > 0 {
+		lines := []string{"【未闭合事项】"}
+		for i, item := range loops {
+			if i >= 3 {
+				break
+			}
+			lines = append(lines, "- "+item.Description)
+		}
+		sections = append(sections, strings.Join(lines, "\n"))
+	}
 	return strings.Join(sections, "\n\n")
+}
+
+func formatRuntimeTime(value time.Time) string {
+	if value.IsZero() {
+		return "未定时间"
+	}
+	return value.Format(time.RFC3339)
 }
 
 func buildCurrentTurnEnvelope(turn *TurnContext, task string) string {

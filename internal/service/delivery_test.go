@@ -23,3 +23,16 @@ func TestDeliverReplyCancelledBeforeFirstItem(t *testing.T) {
 		t.Fatalf("expected all items cancelled: %#v", result.Items)
 	}
 }
+
+func TestDeliverReplyPreservesIntentAssociations(t *testing.T) {
+	result := DeliverReply(context.Background(), nil, DeliveryRequest{
+		TurnID: "turn-1", SourceTurnID: "source-1", SessionID: "private:42", UserID: 42,
+		IntentID: "intent-1", OpenLoopID: "loop-1", Reply: " ",
+	})
+	if result.Status != DeliveryResultEmpty {
+		t.Fatalf("unexpected status: %#v", result)
+	}
+	if result.IntentID != "intent-1" || result.OpenLoopID != "loop-1" || result.SourceTurnID != "source-1" {
+		t.Fatalf("delivery associations were lost: %#v", result)
+	}
+}

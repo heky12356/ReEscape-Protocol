@@ -53,8 +53,11 @@ type DeliveryItemResult struct {
 type DeliveryResult struct {
 	DeliveryID     string
 	TurnID         string
+	SourceTurnID   string
 	SessionID      string
 	UserID         int64
+	IntentID       string
+	OpenLoopID     string
 	Status         string
 	FirstCommitted bool
 	Items          []DeliveryItemResult
@@ -72,13 +75,16 @@ type DeliveryResult struct {
 }
 
 type DeliveryRequest struct {
-	TurnID     string
-	SessionID  string
-	UserID     int64
-	Reply      string
-	Proactive  bool
-	Cancel     <-chan struct{}
-	EventStore eventlog.Store
+	TurnID       string
+	SourceTurnID string
+	SessionID    string
+	UserID       int64
+	IntentID     string
+	OpenLoopID   string
+	Reply        string
+	Proactive    bool
+	Cancel       <-chan struct{}
+	EventStore   eventlog.Store
 }
 
 // DeliverTurnReply wraps one delivery with session-level cancellation and
@@ -147,12 +153,15 @@ func DeliverReply(ctx context.Context, conn *websocket.Conn, request DeliveryReq
 	started := time.Now()
 	items := ParseOutboundMessages(request.Reply)
 	result := DeliveryResult{
-		DeliveryID: request.TurnID,
-		TurnID:     request.TurnID,
-		SessionID:  request.SessionID,
-		UserID:     request.UserID,
-		Items:      make([]DeliveryItemResult, len(items)),
-		StartedAt:  started,
+		DeliveryID:   request.TurnID,
+		TurnID:       request.TurnID,
+		SourceTurnID: request.SourceTurnID,
+		SessionID:    request.SessionID,
+		UserID:       request.UserID,
+		IntentID:     request.IntentID,
+		OpenLoopID:   request.OpenLoopID,
+		Items:        make([]DeliveryItemResult, len(items)),
+		StartedAt:    started,
 	}
 	for i, item := range items {
 		result.Items[i] = DeliveryItemResult{Index: item.Index, Kind: item.Kind, Status: DeliveryPending, AssetID: item.AssetID}

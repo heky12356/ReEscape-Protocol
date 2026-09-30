@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	domainintent "project-yume/internal/domain/intent"
 	"project-yume/internal/eventlog"
 	"project-yume/internal/state"
 	"project-yume/internal/tools"
@@ -128,6 +129,10 @@ func (t *UpdateProactiveScheduleTool) Execute(ctx context.Context, turn tools.Tu
 	if summary == "" && args.Action == "cancel" {
 		summary = "用户取消近期主动触达"
 	}
+	intentSummary := summary
+	if intentSummary == "" {
+		intentSummary = "主动联系计划"
+	}
 
 	schedule := state.ProactiveSchedule{
 		SessionID:       turn.SessionID(),
@@ -138,6 +143,47 @@ func (t *UpdateProactiveScheduleTool) Execute(ctx context.Context, turn tools.Tu
 		Manual:          true,
 		UpdatedAt:       time.Now(),
 		UpdatedBy:       turn.Actor(),
+	}
+	intentStore := state.GetManager().IntentStore()
+	if turn.UserID() == 0 {
+		state.GetManager().SetProactiveSchedule(turn.SessionID(), schedule)
+		updated := state.GetManager().GetProactiveSchedule(turn.SessionID())
+		return tools.ToolResult{Content: fmt.Sprintf("proactive_schedule_updated action=%s next_scheduled_at=%s", args.Action, formatScheduleTime(updated.NextScheduledAt)), Data: scheduleData(updated), Mutated: true}, nil
+	}
+	if args.Action == "cancel" {
+		if existingID := state.GetManager().GetProactiveSchedule(turn.SessionID()).IntentID; existingID != "" {
+			if existing, ok := intentStore.Get(existingID); ok && existing.UserID == turn.UserID() {
+				if existing.Status == domainintent.StatusPending || existing.Status == domainintent.StatusClaimed {
+					_, _ = intentStore.Transition(existingID, domainintent.StatusDeferred, time.Now())
+				}
+			}
+		}
+	} else {
+		existingID := state.GetManager().GetProactiveSchedule(turn.SessionID()).IntentID
+		var scheduleIntent domainintent.Intent
+		if existingID != "" {
+			if existing, ok := intentStore.Get(existingID); ok && existing.UserID == turn.UserID() {
+				scheduleIntent = existing
+				scheduleIntent.DueAt = next
+				scheduleIntent.Summary = summary
+				scheduleIntent.Status = domainintent.StatusPending
+				scheduleIntent.UpdatedAt = time.Now()
+				if updated, updateErr := intentStore.Upsert(scheduleIntent); updateErr == nil {
+					scheduleIntent = updated
+				}
+			}
+		}
+		if scheduleIntent.ID == "" {
+			scheduleIntent = domainintent.NewProactiveContact(turn.UserID(), turn.SessionID(), intentSummary, next)
+			scheduleIntent.Source = "explicit"
+			scheduleIntent.SourceTurnID = turn.RequestID()
+			if created, createErr := intentStore.Upsert(scheduleIntent); createErr != nil {
+				return tools.ToolResult{}, createErr
+			} else {
+				scheduleIntent = created
+			}
+		}
+		schedule.IntentID = scheduleIntent.ID
 	}
 	state.GetManager().SetProactiveSchedule(turn.SessionID(), schedule)
 
@@ -158,6 +204,7 @@ func (t *UpdateProactiveScheduleTool) Execute(ctx context.Context, turn tools.Tu
 			"next_scheduled_at": formatScheduleTime(updated.NextScheduledAt),
 			"reason":            args.Reason,
 			"meta":              meta,
+			"intent_id":         updated.IntentID,
 		},
 	}
 

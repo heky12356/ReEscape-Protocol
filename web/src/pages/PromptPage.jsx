@@ -3,22 +3,12 @@ import { Panel } from "../components/common/Panel";
 import { InputField, SelectField, TextAreaField } from "../components/common/FormField";
 
 const BOOLEAN_OPTIONS = ["true", "false"];
-const IDENTITY_MODE_OPTIONS = ["product_identity", "legacy"];
 const BOOLEAN_OPTION_LABELS = {
   true: "允许",
   false: "不允许"
 };
-const IDENTITY_MODE_LABELS = {
-  product_identity: "产品内身份",
-  legacy: "旧版身份模式"
-};
-
 export function PromptPage({ panel }) {
   const cfg = panel.config;
-  const [personalityText, setPersonalityText] = useState("{}");
-  const [responsesText, setResponsesText] = useState("{}");
-  const [behaviorText, setBehaviorText] = useState("{}");
-  const [quotesText, setQuotesText] = useState("");
   const [vocabularyText, setVocabularyText] = useState("");
   const [avoidText, setAvoidText] = useState("");
   const [doNotRevealText, setDoNotRevealText] = useState("");
@@ -28,10 +18,6 @@ export function PromptPage({ panel }) {
   const [newFileName, setNewFileName] = useState("");
 
   useEffect(() => {
-    setPersonalityText(toPrettyJSON(panel.characterConfig.personality));
-    setResponsesText(toPrettyJSON(panel.characterConfig.responses));
-    setBehaviorText(toPrettyJSON(panel.characterConfig.behavior));
-    setQuotesText((panel.characterConfig.quotes || []).join("\n"));
     setVocabularyText((panel.characterConfig.voice?.vocabulary || []).join("\n"));
     setAvoidText((panel.characterConfig.voice?.avoid || []).join("\n"));
     setDoNotRevealText((panel.characterConfig.boundaries?.doNotReveal || []).join("\n"));
@@ -44,10 +30,6 @@ export function PromptPage({ panel }) {
     try {
       panel.setError("");
       const next = buildCharacterConfig(panel.characterConfig, {
-        personalityText,
-        responsesText,
-        behaviorText,
-        quotesText,
         vocabularyText,
         avoidText,
         doNotRevealText,
@@ -66,10 +48,6 @@ export function PromptPage({ panel }) {
     try {
       panel.setError("");
       const next = buildCharacterConfig(panel.characterConfig, {
-        personalityText,
-        responsesText,
-        behaviorText,
-        quotesText,
         vocabularyText,
         avoidText,
         doNotRevealText,
@@ -111,14 +89,6 @@ export function PromptPage({ panel }) {
               value={cfg.character}
               options={cfg.characterOptions}
               onChange={(v) => updateConfigField(panel, "character", v)}
-            />
-            <SelectField
-              label="身份模式"
-              value={cfg.characterIdentityMode}
-              options={IDENTITY_MODE_OPTIONS}
-              optionLabels={IDENTITY_MODE_LABELS}
-              hint="默认使用产品内身份，不把角色描述为临时扮演。"
-              onChange={(v) => updateConfigField(panel, "characterIdentityMode", v)}
             />
             <SelectField
               label="允许解释身份机制"
@@ -226,11 +196,6 @@ export function PromptPage({ panel }) {
             value={panel.characterConfig.voice?.style}
             onChange={(v) => updateNestedCharacterField(panel, "voice", "style", v)}
           />
-          <InputField
-            label="回复节奏（pacing）"
-            value={panel.characterConfig.voice?.pacing}
-            onChange={(v) => updateNestedCharacterField(panel, "voice", "pacing", v)}
-          />
           <TextAreaField
             label="常用词汇（每行一个）"
             value={vocabularyText}
@@ -243,12 +208,20 @@ export function PromptPage({ panel }) {
             rows={6}
             onChange={setAvoidText}
           />
-          <TextAreaField
-            label="经典语句（每行一句）"
-            value={quotesText}
-            rows={6}
-            onChange={setQuotesText}
+          <InputField
+            label="回复节奏（pacing）"
+            value={panel.characterConfig.voice?.pacing}
+            onChange={(v) => updateNestedCharacterField(panel, "voice", "pacing", v)}
           />
+        </div>
+
+        <div className="editor-grid">
+          <InputField label="年龄（age）" value={panel.characterConfig.background?.age} onChange={(v) => updateNestedCharacterField(panel, "background", "age", v)} />
+          <InputField label="专业/职业（occupation）" value={panel.characterConfig.background?.occupation} onChange={(v) => updateNestedCharacterField(panel, "background", "occupation", v)} />
+          <TextAreaField label="稳定特征（每行一个）" value={(panel.characterConfig.background?.traits || []).join("\n")} rows={5} onChange={(v) => updateNestedCharacterField(panel, "background", "traits", linesToArray(v))} />
+          <TextAreaField label="长期兴趣（每行一个）" value={(panel.characterConfig.background?.interests || []).join("\n")} rows={5} onChange={(v) => updateNestedCharacterField(panel, "background", "interests", linesToArray(v))} />
+          <TextAreaField label="生活习惯（每行一个）" value={(panel.characterConfig.background?.habits || []).join("\n")} rows={5} onChange={(v) => updateNestedCharacterField(panel, "background", "habits", linesToArray(v))} />
+          <TextAreaField label="稳定能力（每行一个）" value={(panel.characterConfig.background?.skills || []).join("\n")} rows={5} onChange={(v) => updateNestedCharacterField(panel, "background", "skills", linesToArray(v))} />
         </div>
 
         <div className="editor-grid">
@@ -295,27 +268,6 @@ export function PromptPage({ panel }) {
             rows={9}
             hint='格式：[{"situation":"安慰","user":"我好累","reply":"先停一下嘛$你已经撑很久了"}]'
             onChange={setExamplesText}
-          />
-        </div>
-
-        <div className="editor-grid">
-          <TextAreaField
-            label="旧版性格配置（JSON 对象）"
-            value={personalityText}
-            rows={10}
-            onChange={setPersonalityText}
-          />
-          <TextAreaField
-            label="旧版回复配置（JSON 对象）"
-            value={responsesText}
-            rows={10}
-            onChange={setResponsesText}
-          />
-          <TextAreaField
-            label="旧版行为配置（JSON 对象）"
-            value={behaviorText}
-            rows={10}
-            onChange={setBehaviorText}
           />
         </div>
 
@@ -411,19 +363,6 @@ function toPrettyJSON(value) {
   }
 }
 
-function parseJSONObject(text, label) {
-  let parsed;
-  try {
-    parsed = JSON.parse(text || "{}");
-  } catch (err) {
-    throw new Error(`${label} 不是合法 JSON: ${err instanceof Error ? err.message : String(err)}`);
-  }
-  if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
-    throw new Error(`${label} 必须是 JSON 对象`);
-  }
-  return parsed;
-}
-
 function parseExamples(text) {
   let parsed;
   try {
@@ -449,13 +388,6 @@ function linesToArray(text) {
 }
 
 function buildCharacterConfig(base, editor) {
-  const personalityRaw = parseJSONObject(editor.personalityText, "旧版性格配置");
-  const personality = Object.fromEntries(
-    Object.entries(personalityRaw).map(([key, value]) => [String(key), String(value)])
-  );
-  const responses = parseJSONObject(editor.responsesText, "旧版回复配置");
-  const behavior = parseJSONObject(editor.behaviorText, "旧版行为配置");
-
   return {
     ...base,
     identity: {
@@ -479,10 +411,6 @@ function buildCharacterConfig(base, editor) {
       safetyBoundaries: linesToArray(editor.safetyBoundariesText),
       relationshipRules: linesToArray(editor.relationshipRulesText)
     },
-    examples: parseExamples(editor.examplesText),
-    personality,
-    responses,
-    behavior,
-    quotes: linesToArray(editor.quotesText)
+    examples: parseExamples(editor.examplesText)
   };
 }

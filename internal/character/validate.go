@@ -21,6 +21,13 @@ func NormalizeConfig(cfg *CharacterConfig) {
 	cfg.Identity.SelfReference = strings.TrimSpace(cfg.Identity.SelfReference)
 	cfg.Identity.IdentityPolicy = strings.TrimSpace(cfg.Identity.IdentityPolicy)
 
+	cfg.Background.Age = strings.TrimSpace(cfg.Background.Age)
+	cfg.Background.Occupation = strings.TrimSpace(cfg.Background.Occupation)
+	cfg.Background.Traits = normalizeStringSlice(cfg.Background.Traits)
+	cfg.Background.Interests = normalizeStringSlice(cfg.Background.Interests)
+	cfg.Background.Habits = normalizeStringSlice(cfg.Background.Habits)
+	cfg.Background.Skills = normalizeStringSlice(cfg.Background.Skills)
+
 	cfg.Voice.Tone = strings.TrimSpace(cfg.Voice.Tone)
 	cfg.Voice.Style = strings.TrimSpace(cfg.Voice.Style)
 	cfg.Voice.Pacing = strings.TrimSpace(cfg.Voice.Pacing)
@@ -41,33 +48,6 @@ func NormalizeConfig(cfg *CharacterConfig) {
 		cfg.Examples[i].Reply = strings.TrimSpace(cfg.Examples[i].Reply)
 	}
 	cfg.Examples = filterExamples(cfg.Examples)
-
-	if cfg.Personality == nil {
-		cfg.Personality = map[string]string{}
-	}
-	for key, value := range cfg.Personality {
-		trimmedKey := strings.TrimSpace(key)
-		trimmedValue := strings.TrimSpace(value)
-		if trimmedKey == "" {
-			delete(cfg.Personality, key)
-			continue
-		}
-		if trimmedKey != key {
-			delete(cfg.Personality, key)
-		}
-		cfg.Personality[trimmedKey] = trimmedValue
-	}
-
-	if cfg.Responses == nil {
-		cfg.Responses = map[string]interface{}{}
-	}
-	if cfg.Behavior == nil {
-		cfg.Behavior = map[string]interface{}{}
-	}
-	if cfg.Quotes == nil {
-		cfg.Quotes = []string{}
-	}
-	cfg.Quotes = normalizeStringSlice(cfg.Quotes)
 }
 
 func ValidateConfig(cfg *CharacterConfig) error {

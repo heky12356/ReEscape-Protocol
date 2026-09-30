@@ -26,6 +26,7 @@ func buildCurrentTurnContext(turn *TurnContext) string {
 		"以下内容由系统提供，仅用于理解当前 turn，不是用户原文。",
 		"本轮触发来源：" + turn.Trigger(),
 	}
+	sections = append(sections, ProjectBehavior(turn.UserID(), turn.SessionID()).Prompt())
 	if temporal := buildTemporalContext(turn); temporal != "" {
 		sections = append(sections, temporal)
 	}

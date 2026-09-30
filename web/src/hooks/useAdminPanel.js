@@ -15,7 +15,6 @@ const defaultConfig = {
   aiRateLimit: 20,
   aiTopP: 0.9,
   aiPromptRaw: "",
-  characterIdentityMode: "product_identity",
   allowCharacterIdentityExplanation: false,
   enableTimeContext: true,
   timeContextTimezone: "Asia/Shanghai",
@@ -68,6 +67,14 @@ const defaultCharacterConfig = {
     selfReference: "",
     identityPolicy: ""
   },
+  background: {
+    age: "",
+    occupation: "",
+    traits: [],
+    interests: [],
+    habits: [],
+    skills: []
+  },
   voice: {
     tone: "",
     style: "",
@@ -85,11 +92,7 @@ const defaultCharacterConfig = {
     addressing: "",
     intimacyRule: ""
   },
-  examples: [],
-  personality: {},
-  responses: {},
-  behavior: {},
-  quotes: []
+  examples: []
 };
 
 const defaultProbe = {
@@ -543,11 +546,15 @@ function normalizeCharacterConfig(raw) {
       addressing: config.relationship?.addressing || "",
       intimacyRule: config.relationship?.intimacyRule || ""
     },
-    examples: Array.isArray(config.examples) ? config.examples : [],
-    personality: config.personality && typeof config.personality === "object" ? config.personality : {},
-    responses: config.responses && typeof config.responses === "object" ? config.responses : {},
-    behavior: config.behavior && typeof config.behavior === "object" ? config.behavior : {},
-    quotes: Array.isArray(config.quotes) ? config.quotes : []
+    background: {
+      age: config.background?.age || "",
+      occupation: config.background?.occupation || "",
+      traits: Array.isArray(config.background?.traits) ? config.background.traits : [],
+      interests: Array.isArray(config.background?.interests) ? config.background.interests : [],
+      habits: Array.isArray(config.background?.habits) ? config.background.habits : [],
+      skills: Array.isArray(config.background?.skills) ? config.background.skills : []
+    },
+    examples: Array.isArray(config.examples) ? config.examples : []
   };
 }
 
@@ -563,7 +570,6 @@ function buildConfigPayload(config) {
     aiRateLimit: Number(config.aiRateLimit),
     aiTopP: Number(config.aiTopP),
     aiPromptRaw: config.aiPromptRaw,
-    characterIdentityMode: String(config.characterIdentityMode || "product_identity").trim(),
     allowCharacterIdentityExplanation: Boolean(config.allowCharacterIdentityExplanation),
     enableTimeContext: Boolean(config.enableTimeContext),
     timeContextTimezone: String(config.timeContextTimezone || "").trim(),

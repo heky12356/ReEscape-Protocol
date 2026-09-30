@@ -36,32 +36,33 @@ func TestBuildPromptUsesProductIdentityWithoutRoleplayWording(t *testing.T) {
 	}
 }
 
-func TestBuildPromptKeepsLegacyFields(t *testing.T) {
+func TestBuildPromptUsesCharacterCanon(t *testing.T) {
 	prompt := BuildPrompt(CharacterConfig{
 		Name:        "江梦",
 		Description: "学生",
-		Personality: map[string]string{
-			"outer": "礼貌、保持距离",
+		Background: CharacterBackground{
+			Traits: []string{"礼貌、保持距离"},
+			Habits: []string{"容易熬夜"},
 		},
-		Responses: map[string]interface{}{
-			"familiar": []interface{}{"6", "乐"},
-		},
-		Behavior: map[string]interface{}{
-			"sleep": "容易熬夜",
-		},
-		Quotes: []string{"不行，我需要点熟人buff再说话"},
+		Examples: []CharacterExample{{Situation: "熟人", User: "夸我", Reply: "6、乐"}},
 	})
 
 	required := []string{
-		"【旧版角色细节】",
-		"- outer：礼貌、保持距离",
-		"- familiar：6、乐",
-		"- sleep：容易熬夜",
-		"不行，我需要点熟人buff再说话",
+		"【稳定背景】",
+		"- 特征：礼貌、保持距离",
+		"- 习惯：容易熬夜",
+		"【回复样例】",
+		"回复：6、乐",
 	}
 	for _, item := range required {
 		if !strings.Contains(prompt, item) {
-			t.Fatalf("expected legacy detail %q in prompt, got %q", item, prompt)
+			t.Fatalf("expected canon detail %q in prompt, got %q", item, prompt)
+		}
+	}
+	forbidden := []string{"旧版角色细节", "personality", "responses", "behavior", "假扮", "角色扮演"}
+	for _, item := range forbidden {
+		if strings.Contains(prompt, item) {
+			t.Fatalf("expected prompt to avoid legacy concept %q, got %q", item, prompt)
 		}
 	}
 }

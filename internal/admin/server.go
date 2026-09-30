@@ -51,7 +51,6 @@ type configResponse struct {
 	AIRateLimit                       int           `json:"aiRateLimit"`
 	AITopP                            float32       `json:"aiTopP"`
 	AIPromptRaw                       string        `json:"aiPromptRaw"`
-	CharacterIdentityMode             string        `json:"characterIdentityMode"`
 	AllowCharacterIdentityExplanation bool          `json:"allowCharacterIdentityExplanation"`
 	EnableTimeContext                 bool          `json:"enableTimeContext"`
 	TimeContextTimezone               string        `json:"timeContextTimezone"`
@@ -118,7 +117,6 @@ type updateConfigRequest struct {
 	AIRateLimit                       int     `json:"aiRateLimit"`
 	AITopP                            float32 `json:"aiTopP"`
 	AIPromptRaw                       string  `json:"aiPromptRaw"`
-	CharacterIdentityMode             string  `json:"characterIdentityMode"`
 	AllowCharacterIdentityExplanation bool    `json:"allowCharacterIdentityExplanation"`
 	EnableTimeContext                 bool    `json:"enableTimeContext"`
 	TimeContextTimezone               string  `json:"timeContextTimezone"`
@@ -409,7 +407,6 @@ func (s *server) handlePutConfig(c *gin.Context) {
 		"AI_CONFIG_FILE":                       aiConfigFile,
 		"AI_PROMPT":                            req.AIPromptRaw,
 		"CHARACTER":                            req.Character,
-		"CHARACTER_IDENTITY_MODE":              strings.ToLower(strings.TrimSpace(req.CharacterIdentityMode)),
 		"ALLOW_CHARACTER_IDENTITY_EXPLANATION": strconv.FormatBool(req.AllowCharacterIdentityExplanation),
 		"ENABLE_TIME_CONTEXT":                  strconv.FormatBool(req.EnableTimeContext),
 		"TIME_CONTEXT_TIMEZONE":                strings.TrimSpace(req.TimeContextTimezone),
@@ -444,7 +441,6 @@ func (s *server) handlePutConfig(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("update env failed: %v", err)})
 		return
 	}
-
 	for key, value := range updates {
 		_ = os.Setenv(key, value)
 	}
@@ -910,7 +906,6 @@ func (s *server) buildConfigResponse() (configResponse, error) {
 		AIRateLimit:                       cfg.AiRateLimit,
 		AITopP:                            cfg.AiTopP,
 		AIPromptRaw:                       cfg.UserPrompt,
-		CharacterIdentityMode:             cfg.CharacterIdentityMode,
 		AllowCharacterIdentityExplanation: cfg.AllowCharacterIdentityExplanation,
 		EnableTimeContext:                 cfg.EnableTimeContext,
 		TimeContextTimezone:               cfg.TimeContextTimezone,
@@ -1025,14 +1020,6 @@ func validateUpdateRequest(req updateConfigRequest) error {
 	}
 	if strings.TrimSpace(req.Character) == "" {
 		return fmt.Errorf("character is required")
-	}
-	if strings.TrimSpace(req.CharacterIdentityMode) == "" {
-		return fmt.Errorf("characterIdentityMode is required")
-	}
-	switch strings.ToLower(strings.TrimSpace(req.CharacterIdentityMode)) {
-	case "product_identity", "legacy":
-	default:
-		return fmt.Errorf("characterIdentityMode must be one of product_identity/legacy")
 	}
 	if req.AIMaxTokens <= 0 {
 		return fmt.Errorf("aiMaxTokens must be > 0")

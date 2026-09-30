@@ -57,11 +57,10 @@ AI 参数的优先级：
 - 连接：`HOSTADD`、`WsPort`、`HttpPort`、`Token`、`TARGETID`
 - AI profile：`AI_PROFILE`、`AI_CONFIG_FILE`
 - AI fallback：`AI_KEY`、`AI_BASEURL`、`AI_MODEL`
-- 角色：`CHARACTER`、`CHARACTER_IDENTITY_MODE`、`ALLOW_CHARACTER_IDENTITY_EXPLANATION`
+- 角色：`CHARACTER`、`ALLOW_CHARACTER_IDENTITY_EXPLANATION`
 - ReAct：`ENABLE_REACT_AGENT`、`REACT_MAX_STEPS`、`REACT_TOOL_TIMEOUT_MS`、`REACT_ALLOW_WRITE_TOOLS`、`REACT_TRACE_MODE`
 - ReAct skills：`ENABLE_SKILLS`、`SKILL_DIRS`、`SKILL_CANDIDATE_MIN_SCORE`、`SKILL_AUTO_LOAD_MIN_SCORE`、`SKILL_AUTO_LOAD_MIN_CONFIDENCE`、`SKILL_MAX_AUTO_LOADED`、`SKILL_RESOURCE_MAX_BYTES`
 - ReAct web tools：`ENABLE_WEB_TOOLS`、`WEB_SEARCH_PROVIDER`、`WEB_SEARCH_ENDPOINT`、`WEB_SEARCH_API_KEY`、`WEB_SEARCH_MAX_RESULTS`、`WEB_TOOL_TIMEOUT_MS`
-- 回复策略：`LIGHT_ACK_MODE`、`SHORT_REPLY_STRICTNESS`、`ENABLE_SPACE_SEGMENT_DELIMITER`
 - 聚合：`MESSAGE_AGGREGATE_IDLE_WINDOW_MS`、`MESSAGE_AGGREGATE_MAX_WINDOW_MS`、`MESSAGE_AGGREGATE_MAX_MESSAGES`
 - 主动触达保护：`PROACTIVE_CLAIM_LEASE_MS`、`PROACTIVE_SKIP_ON_PENDING_USER`、`PROACTIVE_USER_MESSAGE_GRACE_MS`
 - 上下文：`CONTEXT_RECENT_TURNS`、`CONTEXT_SUMMARY_MAX_TURNS`、`CONTEXT_OPEN_LOOP_LIMIT`
@@ -69,15 +68,6 @@ AI 参数的优先级：
 - 运行：`DATA_DIR`、`LOG_DIR`、`LOG_LEVEL`、`LOG_FORMAT`
 - 调试：`ENABLE_AI_RAW_LOG` 会把 AI 原始请求/响应写入 `LOG_DIR/ai_raw_YYYY-MM-DD.log`
 
-其中与对话回复风格直接相关的几个开关如下：
-
-- `LIGHT_ACK_MODE`
-  - `llm`：轻回应由模型直接生成。
-  - `template`：轻回应走本地模板库。
-- `SHORT_REPLY_STRICTNESS`
-  - `conservative`：更容易 `no_reply / light_ack`。
-  - `balanced`：折中，默认值。
-  - `reply_first`：更倾向 `full_reply`。
 - `ENABLE_SPACE_SEGMENT_DELIMITER`
   - 默认 `false`。
   - 关闭时仅把 `$` 识别为回复分段符。
@@ -96,7 +86,7 @@ OneBot event
   -> connect outbound send
 ```
 
-当 `ENABLE_REACT_AGENT=false` 时，系统仍可走旧的 handler/service 回复路径。该路径主要用于兼容和回退，新的能力应优先落在 `internal/agent`、`internal/tools` 或 `internal/domain`。
+ReAct Runtime 是唯一的消息处理链路。关闭 `ENABLE_REACT_AGENT` 时，系统会明确报告运行时不可用，不会静默切换到旧 handler/service 路径。
 
 ## ReAct Skills
 

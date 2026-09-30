@@ -23,8 +23,8 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
-func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
-	pipeline *inbound.Pipeline, processor *handler.MessageProcessor, agentRuntime *agent.RuntimeHandle, eventStore eventlog.Store,
+func startAgentMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
+	pipeline *inbound.Pipeline, agentRuntime *agent.RuntimeHandle, eventStore eventlog.Store,
 	naturalScheduler *scheduler.NaturalScheduler, ctx context.Context,
 ) {
 	cfg := config.GetConfig()
@@ -162,9 +162,9 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 				utils.Int("state", int(state.GetManager().GetState(sessionID))),
 			)
 
-			result, err := processMessageTurn(ctx, c, messageCtx, processor, agentRuntime, eventStore)
+			result, err := processMessageTurn(ctx, c, messageCtx, agentRuntime, eventStore)
 			if err != nil {
-				utils.Errorw("message processing failed",
+				utils.Errorw("agent turn processing failed",
 					utils.String("request_id", messageCtx.RequestID),
 					utils.String("session_id", sessionID),
 					utils.Int64("user_id", msg.User_id),
@@ -175,12 +175,12 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 				metrics.IncCounter(
 					"bot_ws_messages_total",
 					"Total WebSocket messages by lifecycle result.",
-					map[string]string{"result": "handler_error"},
+					map[string]string{"result": "agent_error"},
 				)
 				endUserTurn()
 				appendTurnGateEvent(ctx, eventStore, "user_turn_completed", sessionID, msg.User_id, map[string]any{
 					"request_id": messageCtx.RequestID,
-					"result":     "handler_error",
+					"result":     "agent_error",
 				})
 				continue
 			}
@@ -239,69 +239,84 @@ func startMessageProcessor(c *websocket.Conn, msgChan chan model.Msg,
 }
 
 func processMessageTurn(ctx context.Context, c *websocket.Conn, messageCtx handler.MessageContext,
-	processor *handler.MessageProcessor, agentRuntime *agent.RuntimeHandle, eventStore eventlog.Store,
+	agentRuntime *agent.RuntimeHandle, eventStore eventlog.Store,
 ) (*handler.ProcessResult, error) {
 	cfg := config.GetConfig()
+	if !cfg.EnableReactAgent {
+		return nil, fmt.Errorf("ReAct agent is disabled; no message runtime is configured")
+	}
+	if agentRuntime == nil {
+		return nil, fmt.Errorf("ReAct runtime handle is unavailable")
+	}
 	runtime := agentRuntime.Get()
-	if cfg.EnableReactAgent && runtime != nil {
-		turn := agent.NewTurnContext(agent.TurnInput{
-			RequestID:                  messageCtx.RequestID,
-			SessionID:                  messageCtx.SessionID,
-			UserID:                     messageCtx.UserID,
-			GroupID:                    messageCtx.GroupID,
-			ChatType:                   messageCtx.ChatType,
-			Message:                    messageCtx.Message,
-			Parts:                      messageCtx.Parts,
-			ReferenceTime:              messageCtx.ReceivedAt,
-			StartedAt:                  messageCtx.StartedAt,
-			EndedAt:                    messageCtx.EndedAt,
-			Aggregated:                 messageCtx.Aggregated,
-			SegmentCount:               messageCtx.SegmentCount,
-			RawSegments:                messageCtx.RawSegments,
-			RawSegmentTimes:            messageCtx.RawSegmentTimes,
-			PreviousUserMessageAt:      messageCtx.PreviousUserMessageAt,
-			PreviousAssistantMessageAt: messageCtx.PreviousAssistantMessageAt,
-			PreviousInteractionAt:      messageCtx.PreviousInteractionAt,
-			Trigger:                    agent.TriggerMessage,
-			Actor:                      agent.ActorUser,
-		})
+	if runtime == nil {
+		return nil, fmt.Errorf("ReAct runtime is unavailable")
+	}
 
-		agentResult, err := runtime.RunTurn(ctx, turn)
-		if err == nil {
-			reply := strings.TrimSpace(agentResult.FinalReply.Content)
-			if agentResult.ShouldSend && reply != "" {
-				delivery := service.DeliverTurnReply(ctx, c, service.DeliveryRequest{TurnID: messageCtx.RequestID, SessionID: messageCtx.SessionID, UserID: messageCtx.UserID, Reply: reply})
-				agentResult.Events = append(agentResult.Events, deliveryEvents(delivery, messageCtx.UserID)...)
-				if delivery.Status != service.DeliveryResultDelivered && delivery.Status != service.DeliveryResultPartial {
-					if eventStore != nil {
-						if appendErr := eventStore.Append(ctx, agentResult.Events...); appendErr != nil {
-							utils.Warn("append agent events failed: %v", appendErr)
-						}
-					}
-					return &handler.ProcessResult{Handled: agentResult.Handled, MemoryManaged: true, ScheduleManaged: agentResult.ScheduleManaged, ReplyMode: service.ReplyModeFullReply}, nil
-				}
-				agentResult.FinalReply.Content = delivery.DeliveredContent
-				reply = delivery.DeliveredContent
+	turn := agent.NewTurnContext(agent.TurnInput{
+		RequestID:                  messageCtx.RequestID,
+		SessionID:                  messageCtx.SessionID,
+		UserID:                     messageCtx.UserID,
+		GroupID:                    messageCtx.GroupID,
+		ChatType:                   messageCtx.ChatType,
+		Message:                    messageCtx.Message,
+		Parts:                      messageCtx.Parts,
+		ReferenceTime:              messageCtx.ReceivedAt,
+		StartedAt:                  messageCtx.StartedAt,
+		EndedAt:                    messageCtx.EndedAt,
+		Aggregated:                 messageCtx.Aggregated,
+		SegmentCount:               messageCtx.SegmentCount,
+		RawSegments:                messageCtx.RawSegments,
+		RawSegmentTimes:            messageCtx.RawSegmentTimes,
+		PreviousUserMessageAt:      messageCtx.PreviousUserMessageAt,
+		PreviousAssistantMessageAt: messageCtx.PreviousAssistantMessageAt,
+		PreviousInteractionAt:      messageCtx.PreviousInteractionAt,
+		Trigger:                    agent.TriggerMessage,
+		Actor:                      agent.ActorUser,
+	})
+
+	agentResult, err := runtime.RunTurn(ctx, turn)
+	if err != nil {
+		if eventStore != nil {
+			appendErr := eventStore.Append(ctx, eventlog.Event{
+				Type: "agent_turn_failed", SessionID: messageCtx.SessionID, UserID: messageCtx.UserID,
+				Actor: "runtime", Message: err.Error(), CreatedAt: time.Now(),
+			})
+			if appendErr != nil {
+				utils.Warn("append agent failure event failed: %v", appendErr)
 			}
+		}
+		return nil, fmt.Errorf("ReAct turn failed: %w", err)
+	}
+
+	reply := strings.TrimSpace(agentResult.FinalReply.Content)
+	if agentResult.ShouldSend && reply != "" {
+		delivery := service.DeliverTurnReply(ctx, c, service.DeliveryRequest{TurnID: messageCtx.RequestID, SessionID: messageCtx.SessionID, UserID: messageCtx.UserID, Reply: reply})
+		agentResult.Events = append(agentResult.Events, deliveryEvents(delivery, messageCtx.UserID)...)
+		if delivery.Status != service.DeliveryResultDelivered && delivery.Status != service.DeliveryResultPartial {
 			if eventStore != nil {
 				if appendErr := eventStore.Append(ctx, agentResult.Events...); appendErr != nil {
 					utils.Warn("append agent events failed: %v", appendErr)
 				}
 			}
-			return &handler.ProcessResult{
-				Handled:         agentResult.Handled,
-				Replied:         agentResult.ShouldSend && reply != "",
-				MemoryManaged:   true,
-				ScheduleManaged: agentResult.ScheduleManaged,
-				ReplyMode:       service.ReplyModeFullReply,
-				Reply:           service.BuildAssistantTranscript(reply),
-			}, nil
+			return &handler.ProcessResult{Handled: agentResult.Handled, MemoryManaged: true, ScheduleManaged: agentResult.ScheduleManaged, ReplyMode: service.ReplyModeFullReply}, nil
 		}
-
-		utils.Warn("React agent failed, fallback to legacy handler: %v", err)
+		agentResult.FinalReply.Content = delivery.DeliveredContent
+		reply = delivery.DeliveredContent
 	}
-
-	return processor.Process(c, messageCtx)
+	if eventStore != nil {
+		if appendErr := eventStore.Append(ctx, agentResult.Events...); appendErr != nil {
+			utils.Warn("append agent events failed: %v", appendErr)
+		}
+	}
+	return &handler.ProcessResult{
+		Handled:         agentResult.Handled,
+		Replied:         agentResult.ShouldSend && reply != "",
+		MemoryManaged:   true,
+		ScheduleManaged: agentResult.ScheduleManaged,
+		ReplyMode:       service.ReplyModeFullReply,
+		Reply:           service.BuildAssistantTranscript(reply),
+	}, nil
 }
 
 func deliveryEvents(result service.DeliveryResult, userID int64) []eventlog.Event {

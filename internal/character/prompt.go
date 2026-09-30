@@ -2,7 +2,6 @@ package character
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 )
 
@@ -31,12 +30,12 @@ func BuildPrompt(config CharacterConfig) string {
 	if config.Description != "" {
 		sections = append(sections, "【角色背景】\n"+config.Description)
 	}
+	if background := buildBackgroundSection(config.Background); background != "" {
+		sections = append(sections, background)
+	}
 
 	if voice := buildVoiceSection(config); voice != "" {
 		sections = append(sections, voice)
-	}
-	if legacy := buildLegacyDetailSection(config); legacy != "" {
-		sections = append(sections, legacy)
 	}
 	if boundaries := buildBoundarySection(config); boundaries != "" {
 		sections = append(sections, boundaries)
@@ -69,6 +68,12 @@ func BuildToneSummary(config CharacterConfig) string {
 	if config.Description != "" {
 		lines = append(lines, "- 背景："+config.Description)
 	}
+	if config.Background.Age != "" {
+		lines = append(lines, "- 年龄："+config.Background.Age)
+	}
+	if config.Background.Occupation != "" {
+		lines = append(lines, "- 身份/专业："+config.Background.Occupation)
+	}
 	if config.Voice.Tone != "" {
 		lines = append(lines, "- 语气："+config.Voice.Tone)
 	}
@@ -81,13 +86,37 @@ func BuildToneSummary(config CharacterConfig) string {
 	if len(config.Voice.Avoid) > 0 {
 		lines = append(lines, "- 避免："+strings.Join(config.Voice.Avoid, "、"))
 	}
-	if len(config.Personality) > 0 {
-		lines = append(lines, "- 旧版性格："+formatStringMapInline(config.Personality))
+	if len(config.Background.Traits) > 0 {
+		lines = append(lines, "- 特征："+strings.Join(config.Background.Traits, "、"))
 	}
-	if len(config.Quotes) > 0 {
-		lines = append(lines, "- 语感参考："+strings.Join(config.Quotes, " / "))
+	if len(config.Background.Interests) > 0 {
+		lines = append(lines, "- 兴趣："+strings.Join(config.Background.Interests, "、"))
+	}
+	if len(config.Background.Habits) > 0 {
+		lines = append(lines, "- 习惯："+strings.Join(config.Background.Habits, "、"))
+	}
+	if len(config.Background.Skills) > 0 {
+		lines = append(lines, "- 能力："+strings.Join(config.Background.Skills, "、"))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func buildBackgroundSection(background CharacterBackground) string {
+	lines := make([]string, 0, 6)
+	if background.Age != "" {
+		lines = append(lines, "- 年龄："+background.Age)
+	}
+	if background.Occupation != "" {
+		lines = append(lines, "- 身份/专业："+background.Occupation)
+	}
+	appendListLines(&lines, "特征", background.Traits)
+	appendListLines(&lines, "兴趣", background.Interests)
+	appendListLines(&lines, "习惯", background.Habits)
+	appendListLines(&lines, "能力", background.Skills)
+	if len(lines) == 0 {
+		return ""
+	}
+	return "【稳定背景】\n" + strings.Join(lines, "\n")
 }
 
 func buildVoiceSection(config CharacterConfig) string {
@@ -158,99 +187,9 @@ func buildExampleSection(examples []CharacterExample) string {
 	return "【回复样例】\n" + strings.Join(blocks, "\n\n")
 }
 
-func buildLegacyDetailSection(config CharacterConfig) string {
-	lines := make([]string, 0, 8)
-	if len(config.Personality) > 0 {
-		lines = append(lines, "性格特征：")
-		lines = append(lines, formatStringMap(config.Personality)...)
-	}
-	if len(config.Behavior) > 0 {
-		lines = append(lines, "行为特征：")
-		lines = append(lines, formatAnyMap(config.Behavior)...)
-	}
-	if len(config.Responses) > 0 {
-		lines = append(lines, "旧版回复示例：")
-		lines = append(lines, formatAnyMap(config.Responses)...)
-	}
-	if len(config.Quotes) > 0 {
-		lines = append(lines, "经典语感：")
-		for _, quote := range config.Quotes {
-			lines = append(lines, "- "+quote)
-		}
-	}
-	if len(lines) == 0 {
-		return ""
-	}
-	return "【旧版角色细节】\n" + strings.Join(lines, "\n")
-}
-
 func appendListLines(lines *[]string, label string, items []string) {
 	for _, item := range items {
 		*lines = append(*lines, fmt.Sprintf("- %s：%s", label, item))
-	}
-}
-
-func formatStringMap(values map[string]string) []string {
-	keys := sortedStringKeys(values)
-	lines := make([]string, 0, len(keys))
-	for _, key := range keys {
-		lines = append(lines, fmt.Sprintf("- %s：%s", key, values[key]))
-	}
-	return lines
-}
-
-func formatStringMapInline(values map[string]string) string {
-	keys := sortedStringKeys(values)
-	parts := make([]string, 0, len(keys))
-	for _, key := range keys {
-		parts = append(parts, fmt.Sprintf("%s=%s", key, values[key]))
-	}
-	return strings.Join(parts, "；")
-}
-
-func formatAnyMap(values map[string]interface{}) []string {
-	keys := sortedAnyKeys(values)
-	lines := make([]string, 0, len(keys))
-	for _, key := range keys {
-		lines = append(lines, fmt.Sprintf("- %s：%s", key, stringifyValue(values[key])))
-	}
-	return lines
-}
-
-func sortedStringKeys(values map[string]string) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-func sortedAnyKeys(values map[string]interface{}) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-func stringifyValue(value interface{}) string {
-	switch typed := value.(type) {
-	case string:
-		return typed
-	case []interface{}:
-		items := make([]string, 0, len(typed))
-		for _, item := range typed {
-			items = append(items, fmt.Sprint(item))
-		}
-		return strings.Join(items, "、")
-	case []string:
-		return strings.Join(typed, "、")
-	case map[string]interface{}:
-		return strings.Join(formatAnyMap(typed), "；")
-	default:
-		return fmt.Sprint(value)
 	}
 }
 

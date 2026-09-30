@@ -9,7 +9,6 @@ import (
 	"project-yume/internal/agent"
 	"project-yume/internal/config"
 	"project-yume/internal/eventlog"
-	legacyscheduler "project-yume/internal/legacy/scheduler"
 	"project-yume/internal/scheduler"
 	"project-yume/internal/service"
 	"project-yume/internal/state"
@@ -56,44 +55,26 @@ func startScheduler(c *websocket.Conn, scheduler *scheduler.NaturalScheduler, ag
 func sendScheduledTurn(ctx context.Context, c *websocket.Conn, scheduler *scheduler.NaturalScheduler,
 	agentRuntime *agent.RuntimeHandle, eventStore eventlog.Store, sessionID string, targetUserID int64,
 ) error {
-	runtime := agentRuntime.Get()
-	if config.GetConfig().EnableReactAgent && runtime != nil {
-		sentAt, sent, err := sendScheduledAgentMessage(ctx, c, scheduler, runtime, eventStore, sessionID, targetUserID)
-		if err == nil {
-			if sent {
-				scheduler.CompleteClaim(sessionID, sentAt)
-			} else {
-				scheduler.ReleaseClaim(sessionID)
-			}
-			return nil
-		}
-
-		if !scheduler.IsIdleForProactive(sessionID, time.Now()) {
-			scheduler.ReleaseClaim(sessionID)
-			appendTurnGateEvent(ctx, eventStore, "proactive_skipped", sessionID, targetUserID, map[string]any{
-				"reason": "user_turn_pending_after_agent_error",
-				"error":  err.Error(),
-			})
-			utils.Info("主动消息 fallback 前发现用户 turn pending，跳过 legacy 主动回复")
-			return nil
-		}
-
-		utils.Warn("React proactive agent failed, fallback to legacy scheduler: %v", err)
-	}
-	if !scheduler.IsIdleForProactive(sessionID, time.Now()) {
+	if agentRuntime == nil {
 		scheduler.ReleaseClaim(sessionID)
-		appendTurnGateEvent(ctx, eventStore, "proactive_skipped", sessionID, targetUserID, map[string]any{
-			"reason": "user_turn_pending_before_legacy_send",
-		})
-		utils.Info("主动消息发送前发现用户 turn pending，跳过 proactive")
-		return nil
+		return fmt.Errorf("ReAct proactive runtime handle is unavailable")
 	}
-	err := legacyscheduler.SendScheduledMessage(c, scheduler, sessionID, targetUserID)
+	runtime := agentRuntime.Get()
+	if !config.GetConfig().EnableReactAgent || runtime == nil {
+		scheduler.ReleaseClaim(sessionID)
+		return fmt.Errorf("ReAct proactive runtime is unavailable")
+	}
+
+	sentAt, sent, err := sendScheduledAgentMessage(ctx, c, scheduler, runtime, eventStore, sessionID, targetUserID)
 	if err != nil {
 		scheduler.ReleaseClaim(sessionID)
 		return err
 	}
-	scheduler.CompleteClaim(sessionID, time.Now())
+	if sent {
+		scheduler.CompleteClaim(sessionID, sentAt)
+	} else {
+		scheduler.ReleaseClaim(sessionID)
+	}
 	return nil
 }
 

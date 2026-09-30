@@ -116,7 +116,7 @@ go run ./cmd/bot
 启动后会同时拉起：
 
 - OneBot WebSocket 机器人主逻辑
-- ReAct/legacy 回复运行时
+- ReAct 回复运行时
 - 自然调度器
 - 管理后台 HTTP 服务
 - 健康检查和指标接口
@@ -132,7 +132,7 @@ go run ./cmd/bot
 当前可以通过 `.env` 控制是否启用 ReAct Agent：
 
 ```env
-ENABLE_REACT_AGENT=false
+ENABLE_REACT_AGENT=true
 REACT_MAX_STEPS=4
 REACT_TOOL_TIMEOUT_MS=3000
 REACT_ALLOW_WRITE_TOOLS=false
@@ -140,7 +140,7 @@ REACT_TRACE_MODE=basic
 REACT_TOTAL_TIMEOUT_MS=30000
 ```
 
-建议第一次启动先保持 `ENABLE_REACT_AGENT=false`，确认 OneBot、AI 和管理后台都正常后，再改为：
+ReAct Runtime 是唯一消息处理链路，启动前应保持：
 
 ```env
 ENABLE_REACT_AGENT=true
@@ -285,7 +285,6 @@ Invoke-WebRequest http://127.0.0.1:8088/metrics
 
 - `CHARACTER`
 - `config/character/default.json`
-- `CHARACTER_IDENTITY_MODE`
 
 ### ReAct
 
@@ -313,7 +312,6 @@ Invoke-WebRequest http://127.0.0.1:8088/metrics
 
 - `ENABLE_EMOTIONAL_MEMORY`
 - `ENABLE_NATURAL_SCHEDULER`
-- `ENABLE_ONLY_LONG_CHAT`
 
 ### 消息聚合
 

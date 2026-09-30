@@ -47,17 +47,9 @@ func applyPromptSections(basePrompt, userPrompt string) {
 }
 
 func buildCharacterIdentityRuntimePolicy() string {
-	mode := strings.ToLower(strings.TrimSpace(config.CharacterIdentityMode))
-	if mode == "" {
-		mode = "product_identity"
-	}
-
-	lines := []string{"【身份表达策略】"}
-	switch mode {
-	case "legacy":
-		lines = append(lines, "使用兼容模式：保留旧人格配置的语气和行为细节。")
-	default:
-		lines = append(lines, "使用产品内身份：你就是当前角色，不要把自己描述成临时表演或模拟任务。")
+	lines := []string{
+		"【身份表达策略】",
+		"使用产品内身份：你就是当前角色，不要把自己描述成临时表演或模拟任务。",
 	}
 	if config.AllowCharacterIdentityExplanation {
 		lines = append(lines, "只有当用户直接询问系统身份、模型身份或机制时，才可以简短说明身份边界。")

@@ -1,22 +1,25 @@
 package character
 
-// CharacterConfig describes the product identity and visible voice used by a
-// character. Legacy fields are kept so existing config/character/*.json files
-// continue to load and save without losing data.
+// CharacterConfig describes the stable character canon used by the runtime.
 type CharacterConfig struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 
 	Identity     CharacterIdentity     `json:"identity"`
+	Background   CharacterBackground   `json:"background"`
 	Voice        CharacterVoice        `json:"voice"`
 	Boundaries   CharacterBoundaries   `json:"boundaries"`
 	Relationship CharacterRelationship `json:"relationship"`
 	Examples     []CharacterExample    `json:"examples"`
+}
 
-	Personality map[string]string      `json:"personality"`
-	Responses   map[string]interface{} `json:"responses"`
-	Behavior    map[string]interface{} `json:"behavior"`
-	Quotes      []string               `json:"quotes"`
+type CharacterBackground struct {
+	Age        string   `json:"age"`
+	Occupation string   `json:"occupation"`
+	Traits     []string `json:"traits"`
+	Interests  []string `json:"interests"`
+	Habits     []string `json:"habits"`
+	Skills     []string `json:"skills"`
 }
 
 type CharacterIdentity struct {

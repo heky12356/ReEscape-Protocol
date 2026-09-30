@@ -60,7 +60,6 @@
 - `AI_MODEL`
 - `ENABLE_EMOTIONAL_MEMORY`
 - `ENABLE_NATURAL_SCHEDULER`
-- `ENABLE_ONLY_LONG_CHAT`
 - `MESSAGE_AGGREGATE_IDLE_WINDOW_MS`
 - `MESSAGE_AGGREGATE_MAX_WINDOW_MS`
 - `MESSAGE_AGGREGATE_MAX_MESSAGES`
@@ -87,8 +86,7 @@
 
 - `TARGETID` 是否匹配
 - 是否是私聊消息
-- `ENABLE_ONLY_LONG_CHAT` 是否把流程切到长对话
-- 日志里是否有 `pipeline_error` 或 `handler_error`
+- 日志里是否有 `pipeline_error` 或 `agent_error`
 
 ### 机器人回复太频繁
 

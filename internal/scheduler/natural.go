@@ -9,7 +9,7 @@ import (
 
 const defaultSchedulerSweepInterval = 15 * time.Second
 
-// NaturalScheduler owns proactive timing only. Message selection lives in legacy scheduler fallback.
+// NaturalScheduler owns proactive timing only. ReAct owns proactive message selection and delivery.
 type NaturalScheduler struct {
 	baseInterval time.Duration
 	randomFactor float64

@@ -28,7 +28,6 @@ type Config struct {
 	AiConfigFile                      string
 	EnvFile                           string
 	Character                         string
-	CharacterIdentityMode             string
 	AllowCharacterIdentityExplanation bool
 	Token                             string
 
@@ -69,7 +68,6 @@ type Config struct {
 	LogDir  string // 日志目录
 
 	// 功能开关
-	EnableOnlyLongChat           bool // 仅长对话模式
 	MessageAggregateIdleWindowMs int  // 消息聚合空闲窗口(毫秒)
 	MessageAggregateMaxWindowMs  int  // 消息聚合最大窗口(毫秒)
 	MessageAggregateMaxMessages  int  // 单次消息聚合最大条数
@@ -83,8 +81,6 @@ type Config struct {
 	ImageAssetDir                string // 图片素材目录
 	ImageAssetIndexFile          string // 图片素材索引文件
 	EnableSpaceSegmentDelimiter  bool   // 允许将空格视为回复分段符
-	LightAckMode                 string // 轻回应模式: llm/template
-	ShortReplyStrictness         string // 短回复严格度: conservative/balanced/reply_first
 	ContextRecentTurns           int    // prompt 中保留的最近 turn 数
 	ContextSummaryMaxTurns       int    // rolling summary 覆盖的历史 turn 上限
 	ContextOpenLoopLimit         int    // prompt 中注入的 open loop 数量
@@ -157,7 +153,6 @@ func init() {
 	config.AiProfile = getStringEnv("AI_PROFILE", "default")
 	config.AiConfigFile = GetAIConfigFilePath()
 	config.Character = getStringEnv("CHARACTER", "default")
-	config.CharacterIdentityMode = normalizeCharacterIdentityMode(getStringEnv("CHARACTER_IDENTITY_MODE", "product_identity"))
 	config.AllowCharacterIdentityExplanation = getBoolEnv("ALLOW_CHARACTER_IDENTITY_EXPLANATION", false)
 	config.Token = os.Getenv("Token")
 
@@ -200,7 +195,6 @@ func init() {
 	config.LogDir = getStringEnv("LOG_DIR", "./logs")
 
 	// 功能开关
-	config.EnableOnlyLongChat = getBoolEnv("ENABLE_ONLY_LONG_CHAT", false)
 	config.MessageAggregateIdleWindowMs = getIntEnv("MESSAGE_AGGREGATE_IDLE_WINDOW_MS", 2000)
 	config.MessageAggregateMaxWindowMs = getIntEnv("MESSAGE_AGGREGATE_MAX_WINDOW_MS", 10000)
 	config.MessageAggregateMaxMessages = getIntEnv("MESSAGE_AGGREGATE_MAX_MESSAGES", 5)
@@ -213,8 +207,6 @@ func init() {
 	config.EnableImageAssetReply = getBoolEnv("ENABLE_IMAGE_ASSET_REPLY", true)
 	config.ImageAssetDir = getStringEnv("IMAGE_ASSET_DIR", "./assets/images")
 	config.ImageAssetIndexFile = getStringEnv("IMAGE_ASSET_INDEX_FILE", "./assets/images/index.json")
-	config.LightAckMode = normalizeLightAckMode(getStringEnv("LIGHT_ACK_MODE", "llm"))
-	config.ShortReplyStrictness = normalizeShortReplyStrictness(getStringEnv("SHORT_REPLY_STRICTNESS", "balanced"))
 	config.ContextRecentTurns = getIntEnv("CONTEXT_RECENT_TURNS", 8)
 	config.ContextSummaryMaxTurns = getIntEnv("CONTEXT_SUMMARY_MAX_TURNS", 24)
 	config.ContextOpenLoopLimit = getIntEnv("CONTEXT_OPEN_LOOP_LIMIT", 4)
@@ -230,7 +222,7 @@ func init() {
 	config.SkillAllowScripts = getBoolEnv("SKILL_ALLOW_SCRIPTS", false)
 	config.SkillLoadSystem = getBoolEnv("SKILL_LOAD_SYSTEM", false)
 	reloadSkillsFromConfig()
-	config.EnableReactAgent = getBoolEnv("ENABLE_REACT_AGENT", false)
+	config.EnableReactAgent = getBoolEnv("ENABLE_REACT_AGENT", true)
 	config.ReactMaxSteps = getIntEnv("REACT_MAX_STEPS", 4)
 	config.ReactToolTimeoutMs = getIntEnv("REACT_TOOL_TIMEOUT_MS", 3000)
 	config.ReactAllowWriteTools = getBoolEnv("REACT_ALLOW_WRITE_TOOLS", false)
@@ -350,26 +342,6 @@ func getStringArrayEnv(key string, defaultValue []string) []string {
 	return result
 }
 
-func normalizeLightAckMode(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "template":
-		return "template"
-	default:
-		return "llm"
-	}
-}
-
-func normalizeShortReplyStrictness(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "conservative":
-		return "conservative"
-	case "reply_first":
-		return "reply_first"
-	default:
-		return "balanced"
-	}
-}
-
 func normalizeReactTraceMode(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "off", "full":
@@ -394,15 +366,6 @@ func normalizeTavilyTopic(value string) string {
 		return "news"
 	default:
 		return "general"
-	}
-}
-
-func normalizeCharacterIdentityMode(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "legacy":
-		return "legacy"
-	default:
-		return "product_identity"
 	}
 }
 

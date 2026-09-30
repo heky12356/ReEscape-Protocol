@@ -11,7 +11,6 @@ import (
 	"project-yume/internal/config"
 	"project-yume/internal/domain/affection"
 	"project-yume/internal/eventlog"
-	"project-yume/internal/handler"
 	"project-yume/internal/inbound"
 	"project-yume/internal/memory"
 	"project-yume/internal/model"
@@ -28,7 +27,6 @@ import (
 )
 
 type Components struct {
-	MessageProcessor *handler.MessageProcessor
 	MessagePipeline  *inbound.Pipeline
 	NaturalScheduler *scheduler.NaturalScheduler
 	AgentRuntime     *agent.RuntimeHandle
@@ -41,7 +39,6 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 
 	runtimeHandle := agent.NewRuntimeHandle(NewAgentRuntime())
 	components := &Components{
-		MessageProcessor: handler.NewMessageProcessor(),
 		MessagePipeline: inbound.NewPipeline(
 			inbound.NewDedupeStage(5*time.Minute),
 			inbound.NewFilterStage(),
@@ -57,9 +54,6 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 	}
 	if cfg.EnableEmotionalMemory {
 		utils.Info("情感记忆系统已启用")
-	}
-	if cfg.EnableOnlyLongChat {
-		utils.Info("仅长聊天模式已启用")
 	}
 	if cfg.EnableSkills {
 		errs := skill.GetManager().LoadDirsWithOptions(cfg.SkillDirs, skill.LoadOptions{
@@ -139,11 +133,10 @@ func StartWorkers(ctx context.Context, conn *websocket.Conn, components *Compone
 
 	go startMessageReceiver(conn, rawMsgChan, ctx)
 	go inbound.NewMessageAggregator().Run(ctx, rawMsgChan, aggregatedMsgChan)
-	go startMessageProcessor(
+	go startAgentMessageProcessor(
 		conn,
 		aggregatedMsgChan,
 		components.MessagePipeline,
-		components.MessageProcessor,
 		components.AgentRuntime,
 		components.EventStore,
 		components.NaturalScheduler,

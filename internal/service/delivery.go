@@ -12,6 +12,7 @@ import (
 
 	"project-yume/internal/assets"
 	"project-yume/internal/connect"
+	"project-yume/internal/domain/intent"
 	"project-yume/internal/eventlog"
 	"project-yume/internal/model"
 	"project-yume/internal/state"
@@ -85,6 +86,28 @@ type DeliveryRequest struct {
 	Proactive    bool
 	Cancel       <-chan struct{}
 	EventStore   eventlog.Store
+}
+
+// ApplyDeliveryToIntent records the business outcome of a delivery without
+// letting the scheduler decide whether an intent is complete. A partial,
+// failed, or cancelled delivery remains pending so it can be retried or
+// explicitly handled later.
+func ApplyDeliveryToIntent(result DeliveryResult, at time.Time) error {
+	if result.IntentID == "" {
+		return nil
+	}
+	if at.IsZero() {
+		at = result.FinishedAt
+	}
+	if at.IsZero() {
+		at = time.Now()
+	}
+	status := intent.StatusPending
+	if result.Status == DeliveryResultDelivered {
+		status = intent.StatusCompleted
+	}
+	_, err := state.GetManager().IntentStore().Transition(result.IntentID, status, at)
+	return err
 }
 
 // DeliverTurnReply wraps one delivery with session-level cancellation and

@@ -159,7 +159,13 @@ func sendScheduledAgentMessage(ctx context.Context, c *websocket.Conn, scheduler
 	if intentID == "" {
 		intentID = schedule.IntentID
 	}
-	delivery := service.DeliverTurnReply(ctx, c, service.DeliveryRequest{TurnID: turn.RequestID(), SourceTurnID: turn.RequestID(), SessionID: sessionID, UserID: targetUserID, IntentID: intentID, Reply: reply, Proactive: true})
+	openLoopID := ""
+	if intentID != "" {
+		if claimedIntent, ok := state.GetManager().GetIntent(intentID); ok {
+			openLoopID = claimedIntent.OpenLoopID
+		}
+	}
+	delivery := service.DeliverTurnReply(ctx, c, service.DeliveryRequest{TurnID: turn.RequestID(), SourceTurnID: turn.RequestID(), SessionID: sessionID, UserID: targetUserID, IntentID: intentID, OpenLoopID: openLoopID, Reply: reply, Proactive: true})
 	resultEvents := deliveryEvents(delivery, targetUserID)
 	result.Events = append(result.Events, resultEvents...)
 	if delivery.Status != service.DeliveryResultDelivered && delivery.Status != service.DeliveryResultPartial {
@@ -186,11 +192,7 @@ func sendScheduledAgentMessage(ctx context.Context, c *websocket.Conn, scheduler
 		nextAt = next.Format(time.RFC3339)
 	}
 	if intentID != "" {
-		status := intent.StatusPending
-		if delivery.Status == service.DeliveryResultDelivered {
-			status = intent.StatusCompleted
-		}
-		if _, err := state.GetManager().IntentStore().Transition(intentID, status, sentAt); err != nil {
+		if err := service.ApplyDeliveryToIntent(delivery, sentAt); err != nil {
 			utils.Warn("update proactive intent after delivery failed: %v", err)
 		}
 	}

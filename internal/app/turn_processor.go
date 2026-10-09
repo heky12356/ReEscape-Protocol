@@ -322,7 +322,7 @@ func processMessageTurn(ctx context.Context, c *websocket.Conn, messageCtx handl
 func deliveryEvents(result service.DeliveryResult, userID int64) []eventlog.Event {
 	events := make([]eventlog.Event, 0, len(result.Items)+2)
 	events = append(events, eventlog.Event{Type: "delivery_started", SessionID: result.SessionID, UserID: userID, Actor: "runtime", CreatedAt: result.StartedAt, Data: map[string]any{
-		"delivery_id": result.DeliveryID, "turn_id": result.TurnID, "item_count": len(result.Items),
+		"delivery_id": result.DeliveryID, "turn_id": result.TurnID, "intent_id": result.IntentID, "open_loop_id": result.OpenLoopID, "item_count": len(result.Items),
 	}})
 	for _, item := range result.Items {
 		createdAt := item.DeliveredAt
@@ -333,7 +333,7 @@ func deliveryEvents(result service.DeliveryResult, userID int64) []eventlog.Even
 			createdAt = result.FinishedAt
 		}
 		events = append(events, eventlog.Event{Type: "delivery_item_" + string(item.Status), SessionID: result.SessionID, UserID: userID, Actor: "runtime", CreatedAt: createdAt, Data: map[string]any{
-			"delivery_id": result.DeliveryID, "turn_id": result.TurnID, "item_index": item.Index, "kind": item.Kind, "status": string(item.Status), "message_id": item.MessageID, "asset_id": item.AssetID, "error": item.Error,
+			"delivery_id": result.DeliveryID, "turn_id": result.TurnID, "intent_id": result.IntentID, "open_loop_id": result.OpenLoopID, "item_index": item.Index, "kind": item.Kind, "status": string(item.Status), "message_id": item.MessageID, "asset_id": item.AssetID, "error": item.Error,
 		}})
 	}
 	typ := "reply_delivery_failed"
@@ -347,7 +347,7 @@ func deliveryEvents(result service.DeliveryResult, userID int64) []eventlog.Even
 		typ = "reply_cancelled"
 	}
 	events = append(events, eventlog.Event{Type: typ, SessionID: result.SessionID, UserID: userID, Actor: "runtime", Message: result.DeliveredContent, CreatedAt: result.FinishedAt, Data: map[string]any{
-		"delivery_id": result.DeliveryID, "turn_id": result.TurnID, "status": result.Status, "first_committed": result.FirstCommitted, "delivered_count": result.DeliveredCount, "failed_count": result.FailedCount, "cancelled_count": result.CancelledCount, "error": result.Error,
+		"delivery_id": result.DeliveryID, "turn_id": result.TurnID, "intent_id": result.IntentID, "open_loop_id": result.OpenLoopID, "status": result.Status, "first_committed": result.FirstCommitted, "delivered_count": result.DeliveredCount, "failed_count": result.FailedCount, "cancelled_count": result.CancelledCount, "error": result.Error,
 	}})
 	return events
 }

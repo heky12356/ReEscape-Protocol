@@ -31,6 +31,13 @@ func (ns *NaturalScheduler) ReleaseIntent(id string) {
 	if id == "" {
 		return
 	}
+	if current, ok := state.GetManager().IntentStore().Get(id); ok {
+		// Delivery failures are already recorded as deferred or paused. Do not
+		// erase retry metadata when the scheduler unwinds its claim lease.
+		if current.Status != intent.StatusClaimed {
+			return
+		}
+	}
 	_, _ = state.GetManager().IntentStore().Transition(id, intent.StatusPending, time.Now())
 }
 

@@ -29,6 +29,27 @@ func TestNaturalSchedulerClaimsDueIntentOnlyOnce(t *testing.T) {
 	}
 }
 
+func TestNaturalSchedulerClaimsDeferredIntentWhenRetryDue(t *testing.T) {
+	sm := state.GetManager()
+	sm.ClearAllSessions()
+	t.Cleanup(sm.ClearAllSessions)
+	sessionID := state.PrivateSessionID(42)
+	now := time.Now()
+	item := intent.NewProactiveContact(42, sessionID, "重试提醒", now.Add(time.Minute))
+	item.Status = intent.StatusDeferred
+	if _, err := sm.IntentStore().Upsert(item); err != nil {
+		t.Fatal(err)
+	}
+	ns := NewNaturalScheduler()
+	if _, ok := ns.TryClaimIntentDue(42, sessionID, now); ok {
+		t.Fatal("deferred intent should not be claimed before DueAt")
+	}
+	claimed, ok := ns.TryClaimIntentDue(42, sessionID, item.DueAt)
+	if !ok || claimed.ID != item.ID || claimed.Status != intent.StatusClaimed {
+		t.Fatalf("due deferred intent was not claimed: %#v %v", claimed, ok)
+	}
+}
+
 func TestNaturalSchedulerTryClaimDueClaimsOnlyOnce(t *testing.T) {
 	sm := state.GetManager()
 	sm.ClearAllSessions()

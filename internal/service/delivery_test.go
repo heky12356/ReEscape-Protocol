@@ -30,8 +30,11 @@ func TestApplyDeliveryToIntentCompletesOnlyFullDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	updated, _ := sm.GetIntent(item.ID)
-	if updated.Status != intent.StatusPending {
-		t.Fatalf("partial delivery status = %s, want pending", updated.Status)
+	if updated.Status != intent.StatusDeferred {
+		t.Fatalf("partial delivery status = %s, want deferred", updated.Status)
+	}
+	if updated.RetryCount != 1 || updated.DueAt.Before(now) {
+		t.Fatalf("partial delivery retry metadata = %+v", updated)
 	}
 	if err := ApplyDeliveryToIntent(DeliveryResult{IntentID: item.ID, Status: DeliveryResultDelivered}, now.Add(time.Second)); err != nil {
 		t.Fatal(err)
@@ -39,6 +42,26 @@ func TestApplyDeliveryToIntentCompletesOnlyFullDelivery(t *testing.T) {
 	updated, _ = sm.GetIntent(item.ID)
 	if updated.Status != intent.StatusCompleted {
 		t.Fatalf("full delivery status = %s, want completed", updated.Status)
+	}
+}
+
+func TestApplyDeliveryToIntentPausesAfterRetryLimit(t *testing.T) {
+	sm := state.GetManager()
+	sm.ClearAllSessions()
+	t.Cleanup(sm.ClearAllSessions)
+	now := time.Now()
+	item := intent.NewProactiveContact(42, state.PrivateSessionID(42), "提醒", now.Add(-time.Minute))
+	item.Status = intent.StatusClaimed
+	item.MaxRetries = 1
+	if _, err := sm.IntentStore().Upsert(item); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyDeliveryToIntent(DeliveryResult{IntentID: item.ID, Status: DeliveryResultFailed, Error: "offline"}, now); err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := sm.GetIntent(item.ID)
+	if updated.Status != intent.StatusPaused || updated.RetryCount != 1 || updated.LastDeliveryError != "offline" {
+		t.Fatalf("retry exhaustion metadata = %+v", updated)
 	}
 }
 

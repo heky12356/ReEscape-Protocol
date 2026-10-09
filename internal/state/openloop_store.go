@@ -54,16 +54,27 @@ func (sm *StateManager) UpsertOpenLoop(item openloop.OpenLoop) (openloop.OpenLoo
 	return item, nil
 }
 
-func (sm *StateManager) CloseOpenLoop(id, actor string, now time.Time) (openloop.OpenLoop, error) {
+func (sm *StateManager) CloseOpenLoop(id, reason, actor string, now time.Time) (openloop.OpenLoop, error) {
 	sm.mu.Lock()
 	item, ok := sm.openLoops[strings.TrimSpace(id)]
 	if !ok {
 		sm.mu.Unlock()
 		return openloop.OpenLoop{}, fmt.Errorf("open loop not found")
 	}
-	updated, err := openloop.Transition(item, openloop.StatusResolved, actor, now)
+	updated, err := openloop.TransitionWithReason(item, openloop.StatusResolved, reason, actor, now)
 	if err == nil {
 		sm.openLoops[updated.ID] = updated
+		// Closing an OpenLoop makes every linked execution obsolete, including
+		// links that were created from the Intent side only.
+		for intentID, linked := range sm.intents {
+			linked = intent.Normalize(linked)
+			if (linked.OpenLoopID != updated.ID && updated.IntentID != intentID) || (linked.Status != intent.StatusPending && linked.Status != intent.StatusDeferred && linked.Status != intent.StatusClaimed) {
+				continue
+			}
+			if cancelled, transitionErr := intent.Transition(linked, intent.StatusCancelled, now); transitionErr == nil {
+				sm.intents[intentID] = cancelled
+			}
+		}
 	}
 	sm.mu.Unlock()
 	if err == nil {
@@ -84,6 +95,20 @@ func (sm *StateManager) DeferOpenLoop(id string, dueAt time.Time, actor string, 
 		updated.DueAt = dueAt
 		updated.UpdatedAt = now
 		sm.openLoops[updated.ID] = updated
+		for intentID, linked := range sm.intents {
+			linked = intent.Normalize(linked)
+			if (linked.OpenLoopID != updated.ID && updated.IntentID != intentID) || (linked.Status != intent.StatusPending && linked.Status != intent.StatusDeferred && linked.Status != intent.StatusClaimed) {
+				continue
+			}
+			if linked.Status != intent.StatusDeferred {
+				if deferred, transitionErr := intent.Transition(linked, intent.StatusDeferred, now); transitionErr == nil {
+					linked = deferred
+				}
+			}
+			linked.DueAt = dueAt
+			linked.UpdatedAt = now
+			sm.intents[intentID] = intent.Normalize(linked)
+		}
 	}
 	sm.mu.Unlock()
 	if err == nil {
@@ -220,8 +245,8 @@ func (s *StateOpenLoopStore) Get(id string) (openloop.OpenLoop, bool) {
 func (s *StateOpenLoopStore) Upsert(item openloop.OpenLoop) (openloop.OpenLoop, error) {
 	return s.manager.UpsertOpenLoop(item)
 }
-func (s *StateOpenLoopStore) Close(id, actor string, now time.Time) (openloop.OpenLoop, error) {
-	return s.manager.CloseOpenLoop(id, actor, now)
+func (s *StateOpenLoopStore) Close(id, reason, actor string, now time.Time) (openloop.OpenLoop, error) {
+	return s.manager.CloseOpenLoop(id, reason, actor, now)
 }
 func (s *StateOpenLoopStore) Defer(id string, dueAt time.Time, actor string, now time.Time) (openloop.OpenLoop, error) {
 	return s.manager.DeferOpenLoop(id, dueAt, actor, now)

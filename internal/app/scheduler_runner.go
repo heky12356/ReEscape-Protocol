@@ -41,7 +41,8 @@ func startScheduler(c *websocket.Conn, scheduler *scheduler.NaturalScheduler, ag
 					break
 				}
 			}
-			if !claimed && !dueIntentExists {
+			schedule := state.GetManager().GetProactiveSchedule(sessionID)
+			if !claimed && !dueIntentExists && schedule.IntentID == "" {
 				claimed, nextAt = scheduler.TryClaimDue(sessionID, now)
 			}
 			due := !nextAt.IsZero() && !now.Before(nextAt)
@@ -166,6 +167,11 @@ func sendScheduledAgentMessage(ctx context.Context, c *websocket.Conn, scheduler
 		}
 	}
 	delivery := service.DeliverTurnReply(ctx, c, service.DeliveryRequest{TurnID: turn.RequestID(), SourceTurnID: turn.RequestID(), SessionID: sessionID, UserID: targetUserID, IntentID: intentID, OpenLoopID: openLoopID, Reply: reply, Proactive: true})
+	if intentID != "" {
+		if err := service.ApplyDeliveryToIntent(delivery, delivery.FinishedAt); err != nil {
+			utils.Warn("update proactive intent after delivery failed: %v", err)
+		}
+	}
 	resultEvents := deliveryEvents(delivery, targetUserID)
 	result.Events = append(result.Events, resultEvents...)
 	if delivery.Status != service.DeliveryResultDelivered && delivery.Status != service.DeliveryResultPartial {
@@ -190,11 +196,6 @@ func sendScheduledAgentMessage(ctx context.Context, c *websocket.Conn, scheduler
 	nextAt := ""
 	if !next.IsZero() {
 		nextAt = next.Format(time.RFC3339)
-	}
-	if intentID != "" {
-		if err := service.ApplyDeliveryToIntent(delivery, sentAt); err != nil {
-			utils.Warn("update proactive intent after delivery failed: %v", err)
-		}
 	}
 	if delivery.Status == service.DeliveryResultDelivered {
 		result.Events = append(result.Events, eventlog.Event{

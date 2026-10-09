@@ -46,7 +46,12 @@ func TestResolveImageAssetCQFileUsesAbsolutePathForRelativeAssetDir(t *testing.T
 	if parsed.Scheme != "file" || !strings.Contains(filepath.FromSlash(parsed.Path), fileName) {
 		t.Fatalf("unexpected file URL: %s", fileValue)
 	}
-	if !filepath.IsAbs(filepath.FromSlash(strings.TrimPrefix(parsed.Path, "/"))) {
-		t.Fatalf("expected absolute file path in URL: %s", fileValue)
+	actualPath := filepath.FromSlash(parsed.Path)
+	expectedPath := filepath.Join(tempDir, fileName)
+	if filepath.VolumeName(expectedPath) != "" {
+		actualPath = strings.TrimPrefix(actualPath, string(filepath.Separator))
+	}
+	if !filepath.IsAbs(actualPath) || filepath.Clean(actualPath) != filepath.Clean(expectedPath) {
+		t.Fatalf("expected absolute file path %q in URL: %s", expectedPath, fileValue)
 	}
 }

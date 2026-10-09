@@ -38,14 +38,14 @@ func (t *GetIntentTool) Execute(ctx context.Context, turn tools.TurnView, input 
 			return tools.ToolResult{}, err
 		}
 	}
-	statuses := []domain.Status{domain.StatusPending, domain.StatusClaimed, domain.StatusDeferred}
+	statuses := []domain.Status{domain.StatusPending, domain.StatusClaimed, domain.StatusDeferred, domain.StatusPaused}
 	if args.IncludeCompleted {
 		statuses = nil
 	}
 	items := stateIntentStore().List(turn.UserID(), turn.SessionID(), statuses...)
 	data := make([]map[string]any, 0, len(items))
 	for _, item := range items {
-		data = append(data, map[string]any{"id": item.ID, "kind": item.Kind, "summary": item.Summary, "action": item.Action, "due_at": formatTime(item.DueAt), "status": item.Status, "priority": item.Priority, "open_loop_id": item.OpenLoopID})
+		data = append(data, map[string]any{"id": item.ID, "kind": item.Kind, "summary": item.Summary, "action": item.Action, "due_at": formatTime(item.DueAt), "status": item.Status, "priority": item.Priority, "open_loop_id": item.OpenLoopID, "retry_count": item.RetryCount, "max_retries": item.EffectiveMaxRetries(), "last_delivery_status": item.LastDeliveryStatus, "last_delivery_error": item.LastDeliveryError})
 	}
 	return tools.ToolResult{Content: fmt.Sprintf("intents=%v", data), Data: data}, nil
 }

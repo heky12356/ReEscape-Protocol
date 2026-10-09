@@ -9,6 +9,7 @@ import (
 
 	"project-yume/internal/agent"
 	"project-yume/internal/config"
+	"project-yume/internal/domain/intent"
 	"project-yume/internal/eventlog"
 	"project-yume/internal/handler"
 	"project-yume/internal/inbound"
@@ -349,6 +350,19 @@ func deliveryEvents(result service.DeliveryResult, userID int64) []eventlog.Even
 	events = append(events, eventlog.Event{Type: typ, SessionID: result.SessionID, UserID: userID, Actor: "runtime", Message: result.DeliveredContent, CreatedAt: result.FinishedAt, Data: map[string]any{
 		"delivery_id": result.DeliveryID, "turn_id": result.TurnID, "intent_id": result.IntentID, "open_loop_id": result.OpenLoopID, "status": result.Status, "first_committed": result.FirstCommitted, "delivered_count": result.DeliveredCount, "failed_count": result.FailedCount, "cancelled_count": result.CancelledCount, "error": result.Error,
 	}})
+	if result.IntentID != "" {
+		intentEvent := "intent_delivery_completed"
+		switch result.Status {
+		case service.DeliveryResultPartial, service.DeliveryResultFailed, service.DeliveryResultCancelled:
+			intentEvent = "intent_delivery_deferred"
+		}
+		if item, ok := state.GetManager().GetIntent(result.IntentID); ok && item.Status == intent.StatusPaused {
+			intentEvent = "intent_delivery_retry_exhausted"
+		}
+		events = append(events, eventlog.Event{Type: intentEvent, SessionID: result.SessionID, UserID: userID, Actor: "runtime", CreatedAt: result.FinishedAt, Data: map[string]any{
+			"intent_id": result.IntentID, "delivery_id": result.DeliveryID, "status": result.Status, "retryable": result.Retryable, "error": result.Error,
+		}})
+	}
 	return events
 }
 

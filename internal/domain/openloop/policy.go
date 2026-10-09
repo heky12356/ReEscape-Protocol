@@ -14,6 +14,7 @@ func Normalize(loop OpenLoop) OpenLoop {
 	loop.SourceTurnID = strings.TrimSpace(loop.SourceTurnID)
 	loop.IntentID = strings.TrimSpace(loop.IntentID)
 	loop.ClosedBy = strings.TrimSpace(loop.ClosedBy)
+	loop.ClosedReason = strings.TrimSpace(loop.ClosedReason)
 	loop.Status = Status(strings.TrimSpace(string(loop.Status)))
 	if loop.Status == "" {
 		loop.Status = StatusOpen
@@ -55,6 +56,10 @@ func CanTransition(from, to Status) bool {
 }
 
 func Transition(loop OpenLoop, to Status, actor string, now time.Time) (OpenLoop, error) {
+	return TransitionWithReason(loop, to, "", actor, now)
+}
+
+func TransitionWithReason(loop OpenLoop, to Status, reason, actor string, now time.Time) (OpenLoop, error) {
 	loop = Normalize(loop)
 	to = Status(strings.TrimSpace(string(to)))
 	if to == "" {
@@ -71,9 +76,11 @@ func Transition(loop OpenLoop, to Status, actor string, now time.Time) (OpenLoop
 	if to == StatusResolved || to == StatusCancelled {
 		loop.ClosedAt = now
 		loop.ClosedBy = strings.TrimSpace(actor)
+		loop.ClosedReason = strings.TrimSpace(reason)
 	} else {
 		loop.ClosedAt = time.Time{}
 		loop.ClosedBy = ""
+		loop.ClosedReason = ""
 	}
 	return loop, nil
 }

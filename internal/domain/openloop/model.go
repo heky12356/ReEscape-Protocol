@@ -38,4 +38,5 @@ type OpenLoop struct {
 	DueAt        time.Time `json:"due_at,omitempty"`
 	ClosedAt     time.Time `json:"closed_at,omitempty"`
 	ClosedBy     string    `json:"closed_by,omitempty"`
+	ClosedReason string    `json:"closed_reason,omitempty"`
 }

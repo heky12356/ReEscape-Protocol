@@ -102,12 +102,69 @@ func ApplyDeliveryToIntent(result DeliveryResult, at time.Time) error {
 	if at.IsZero() {
 		at = time.Now()
 	}
-	status := intent.StatusPending
-	if result.Status == DeliveryResultDelivered {
-		status = intent.StatusCompleted
+	store := state.GetManager().IntentStore()
+	item, ok := store.Get(result.IntentID)
+	if !ok {
+		return fmt.Errorf("intent not found: %s", result.IntentID)
 	}
-	_, err := state.GetManager().IntentStore().Transition(result.IntentID, status, at)
+	if result.Status == DeliveryResultEmpty {
+		return nil
+	}
+	item.LastDeliveryStatus = result.Status
+	item.LastDeliveryError = strings.TrimSpace(result.Error)
+	item.LastDeliveryAt = at
+	if result.Status == DeliveryResultDelivered {
+		if item.Status == intent.StatusCompleted {
+			return nil
+		}
+		updated, err := store.Transition(item.ID, intent.StatusCompleted, at)
+		if err != nil {
+			return err
+		}
+		updated.LastDeliveryStatus = result.Status
+		updated.LastDeliveryError = item.LastDeliveryError
+		updated.LastDeliveryAt = at
+		_, err = store.Upsert(updated)
+		return err
+	}
+	if item.Status == intent.StatusCompleted || item.Status == intent.StatusCancelled {
+		return nil
+	}
+	item.RetryCount++
+	item.MaxRetries = item.EffectiveMaxRetries()
+	if item.RetryCount >= item.MaxRetries {
+		updated, err := store.Transition(item.ID, intent.StatusPaused, at)
+		if err != nil {
+			return err
+		}
+		updated.RetryCount, updated.MaxRetries = item.RetryCount, item.MaxRetries
+		updated.LastDeliveryStatus, updated.LastDeliveryError, updated.LastDeliveryAt = item.LastDeliveryStatus, item.LastDeliveryError, item.LastDeliveryAt
+		_, err = store.Upsert(updated)
+		return err
+	}
+	item.DueAt = at.Add(deliveryRetryDelay(item.RetryCount))
+	updated, err := store.Transition(item.ID, intent.StatusDeferred, at)
+	if err != nil {
+		return err
+	}
+	updated.DueAt = item.DueAt
+	updated.RetryCount, updated.MaxRetries = item.RetryCount, item.MaxRetries
+	updated.LastDeliveryStatus, updated.LastDeliveryError, updated.LastDeliveryAt = item.LastDeliveryStatus, item.LastDeliveryError, item.LastDeliveryAt
+	_, err = store.Upsert(updated)
 	return err
+}
+
+func deliveryRetryDelay(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	// Keep retries bounded so a repeatedly unavailable endpoint does not create
+	// an unbounded delay while still avoiding an immediate duplicate send.
+	delay := time.Minute * time.Duration(1<<(attempt-1))
+	if delay > time.Hour {
+		return time.Hour
+	}
+	return delay
 }
 
 // DeliverTurnReply wraps one delivery with session-level cancellation and

@@ -20,6 +20,7 @@ type updateOpenLoopInput struct {
 	Kind        string `json:"kind"`
 	Description string `json:"description"`
 	DueAt       string `json:"due_at"`
+	Resolution  string `json:"resolution"`
 }
 
 func NewUpdateOpenLoopTool() *UpdateOpenLoopTool { return &UpdateOpenLoopTool{} }
@@ -30,7 +31,7 @@ func (t *UpdateOpenLoopTool) Description() string {
 func (t *UpdateOpenLoopTool) Schema() tools.Schema {
 	return tools.Schema{Type: "object", Properties: map[string]tools.Property{
 		"action": {Type: "string", Enum: []string{"create", "resolve", "defer"}}, "open_loop_id": {Type: "string"},
-		"kind": {Type: "string", Enum: []string{"unanswered_question", "unresolved_problem", "assistant_follow_up", "pending_user_thread"}}, "description": {Type: "string"}, "due_at": {Type: "string"},
+		"kind": {Type: "string", Enum: []string{"unanswered_question", "unresolved_problem", "assistant_follow_up", "pending_user_thread"}}, "description": {Type: "string"}, "due_at": {Type: "string"}, "resolution": {Type: "string", Description: "关闭事项时的明确解决说明。"},
 	}, Required: []string{"action"}, AdditionalProperties: false}
 }
 func (t *UpdateOpenLoopTool) ReadOnly() bool { return false }
@@ -44,7 +45,7 @@ func (t *UpdateOpenLoopTool) Execute(ctx context.Context, turn tools.TurnView, i
 	if err := json.Unmarshal(input, &args); err != nil {
 		return tools.ToolResult{}, err
 	}
-	args.Action, args.OpenLoopID, args.Kind, args.Description, args.DueAt = strings.TrimSpace(args.Action), strings.TrimSpace(args.OpenLoopID), strings.TrimSpace(args.Kind), strings.TrimSpace(args.Description), strings.TrimSpace(args.DueAt)
+	args.Action, args.OpenLoopID, args.Kind, args.Description, args.DueAt, args.Resolution = strings.TrimSpace(args.Action), strings.TrimSpace(args.OpenLoopID), strings.TrimSpace(args.Kind), strings.TrimSpace(args.Description), strings.TrimSpace(args.DueAt), strings.TrimSpace(args.Resolution)
 	now := turn.ReferenceTime()
 	if now.IsZero() {
 		now = time.Now()
@@ -73,11 +74,14 @@ func (t *UpdateOpenLoopTool) Execute(ctx context.Context, turn tools.TurnView, i
 		if args.OpenLoopID == "" {
 			return tools.ToolResult{}, fmt.Errorf("open_loop_id is required")
 		}
+		if args.Resolution == "" {
+			return tools.ToolResult{}, fmt.Errorf("resolution is required when resolving an open loop")
+		}
 		item, ok := store.Get(args.OpenLoopID)
 		if !ok || item.UserID != turn.UserID() {
 			return tools.ToolResult{}, fmt.Errorf("open loop not found")
 		}
-		item, err = store.Close(item.ID, turn.Actor(), now)
+		item, err = store.Close(item.ID, args.Resolution, turn.Actor(), now)
 	case "defer":
 		if args.OpenLoopID == "" || args.DueAt == "" {
 			return tools.ToolResult{}, fmt.Errorf("open_loop_id and due_at are required")

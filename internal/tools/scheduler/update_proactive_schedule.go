@@ -153,8 +153,11 @@ func (t *UpdateProactiveScheduleTool) Execute(ctx context.Context, turn tools.Tu
 	if args.Action == "cancel" {
 		if existingID := state.GetManager().GetProactiveSchedule(turn.SessionID()).IntentID; existingID != "" {
 			if existing, ok := intentStore.Get(existingID); ok && existing.UserID == turn.UserID() {
-				if existing.Status == domainintent.StatusPending || existing.Status == domainintent.StatusClaimed {
-					_, _ = intentStore.Transition(existingID, domainintent.StatusDeferred, time.Now())
+				if existing.Status == domainintent.StatusPending || existing.Status == domainintent.StatusClaimed || existing.Status == domainintent.StatusDeferred {
+					existing.DueAt = next
+					existing.Status = domainintent.StatusDeferred
+					existing.UpdatedAt = time.Now()
+					_, _ = intentStore.Upsert(existing)
 				}
 			}
 		}
@@ -163,13 +166,15 @@ func (t *UpdateProactiveScheduleTool) Execute(ctx context.Context, turn tools.Tu
 		var scheduleIntent domainintent.Intent
 		if existingID != "" {
 			if existing, ok := intentStore.Get(existingID); ok && existing.UserID == turn.UserID() {
-				scheduleIntent = existing
-				scheduleIntent.DueAt = next
-				scheduleIntent.Summary = summary
-				scheduleIntent.Status = domainintent.StatusPending
-				scheduleIntent.UpdatedAt = time.Now()
-				if updated, updateErr := intentStore.Upsert(scheduleIntent); updateErr == nil {
-					scheduleIntent = updated
+				if existing.Status == domainintent.StatusPending || existing.Status == domainintent.StatusDeferred || existing.Status == domainintent.StatusClaimed {
+					scheduleIntent = existing
+					scheduleIntent.DueAt = next
+					scheduleIntent.Summary = summary
+					scheduleIntent.Status = domainintent.StatusPending
+					scheduleIntent.UpdatedAt = time.Now()
+					if updated, updateErr := intentStore.Upsert(scheduleIntent); updateErr == nil {
+						scheduleIntent = updated
+					}
 				}
 			}
 		}

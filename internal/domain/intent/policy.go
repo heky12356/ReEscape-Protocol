@@ -40,11 +40,13 @@ func CanTransition(from, to Status) bool {
 	}
 	switch from {
 	case StatusPending:
-		return to == StatusClaimed || to == StatusCompleted || to == StatusDeferred || to == StatusCancelled
+		return to == StatusClaimed || to == StatusCompleted || to == StatusDeferred || to == StatusCancelled || to == StatusPaused
 	case StatusClaimed:
-		return to == StatusPending || to == StatusCompleted || to == StatusDeferred || to == StatusCancelled
+		return to == StatusPending || to == StatusCompleted || to == StatusDeferred || to == StatusCancelled || to == StatusPaused
 	case StatusDeferred:
-		return to == StatusPending || to == StatusClaimed || to == StatusCancelled
+		return to == StatusPending || to == StatusClaimed || to == StatusCompleted || to == StatusCancelled || to == StatusPaused
+	case StatusPaused:
+		return to == StatusPending || to == StatusDeferred || to == StatusCompleted || to == StatusCancelled
 	default:
 		return false
 	}

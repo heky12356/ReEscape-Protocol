@@ -80,3 +80,19 @@ func TestIntentStorePersistsInSessionSnapshot(t *testing.T) {
 		t.Fatalf("intent missing from snapshot: %s", string(data))
 	}
 }
+
+func TestLoadSessionsReleasesClaimedIntentAfterRestart(t *testing.T) {
+	sm := &StateManager{}
+	data := []byte(`{"sessions":{"private:42":{"id":"private:42","user_id":42,"chat_type":1,"conversation":[]}},"intents":{"intent:claimed":{"id":"intent:claimed","user_id":42,"session_id":"private:42","kind":"follow_up","summary":"重启后继续提醒","due_at":"2026-08-01T01:00:00Z","status":"claimed","updated_at":"2026-08-01T00:00:00Z"}}}`)
+	if err := sm.loadSessionsFromBytes(data); err != nil {
+		t.Fatalf("load sessions failed: %v", err)
+	}
+	item, ok := sm.GetIntent("intent:claimed")
+	if !ok || item.Status != intent.StatusPending {
+		t.Fatalf("claimed intent was not released on restart: %#v %v", item, ok)
+	}
+	claimed, ok := sm.IntentStore().ClaimDue(42, PrivateSessionID(42), time.Date(2026, 8, 1, 2, 0, 0, 0, time.UTC))
+	if !ok || claimed.ID != "intent:claimed" || claimed.Status != intent.StatusClaimed {
+		t.Fatalf("recovered intent cannot be claimed: %#v %v", claimed, ok)
+	}
+}

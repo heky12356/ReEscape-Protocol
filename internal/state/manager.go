@@ -1053,7 +1053,24 @@ func (sm *StateManager) normalizeSessions() {
 		}
 		sm.normalizeSession(sessionID, session)
 	}
+	sm.recoverClaimedIntents()
 	sm.migrateLegacyScheduleIntents()
+}
+
+// recoverClaimedIntents releases execution leases that were persisted while
+// a process was running. A claim has no durable worker ownership, so keeping
+// it after restart would make the intent permanently invisible to Scheduler.
+func (sm *StateManager) recoverClaimedIntents() {
+	now := time.Now()
+	for id, item := range sm.intents {
+		item = intent.Normalize(item)
+		if item.Status != intent.StatusClaimed {
+			continue
+		}
+		item.Status = intent.StatusPending
+		item.UpdatedAt = now
+		sm.intents[id] = item
+	}
 }
 
 // migrateLegacyScheduleIntents upgrades manual schedule projections from

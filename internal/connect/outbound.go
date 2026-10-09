@@ -28,21 +28,35 @@ type outboundWriter struct {
 	queue    chan queuedMessage
 	stopCh   chan struct{}
 	doneCh   chan struct{}
+	closedCh chan struct{}
 	stopOnce sync.Once
 }
 
 func newOutboundWriter() *outboundWriter {
 	return &outboundWriter{
-		queue:  make(chan queuedMessage, outboundQueueSize),
-		stopCh: make(chan struct{}),
-		doneCh: make(chan struct{}),
+		queue:    make(chan queuedMessage, outboundQueueSize),
+		stopCh:   make(chan struct{}),
+		doneCh:   make(chan struct{}),
+		closedCh: make(chan struct{}),
 	}
 }
 
 func (w *outboundWriter) stop() {
 	w.stopOnce.Do(func() {
 		close(w.stopCh)
+		close(w.closedCh)
 	})
+}
+
+func ConnectionDone(conn *websocket.Conn) <-chan struct{} {
+	if conn != nil {
+		if value, ok := outboundWriters.Load(conn); ok {
+			return value.(*outboundWriter).closedCh
+		}
+	}
+	ch := make(chan struct{})
+	close(ch)
+	return ch
 }
 
 func (w *outboundWriter) run(conn *websocket.Conn) {

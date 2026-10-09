@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -26,6 +28,10 @@ type FlushWorker struct {
 	stopCh   chan struct{}
 	doneCh   chan struct{}
 	stopOnce sync.Once
+	runOnce  sync.Once
+	started  bool
+	stopped  bool
+	stopErr  error
 }
 
 func NewFlushWorker(interval time.Duration) *FlushWorker {
@@ -65,7 +71,25 @@ func (w *FlushWorker) MarkDirty(name string) {
 }
 
 func (w *FlushWorker) Run(ctx context.Context) {
-	defer close(w.doneCh)
+	started := false
+	w.runOnce.Do(func() {
+		w.mu.Lock()
+		if !w.stopped {
+			w.started = true
+			started = true
+		}
+		w.mu.Unlock()
+	})
+	if !started {
+		return
+	}
+	defer func() {
+		w.mu.Lock()
+		w.started = false
+		w.stopped = true
+		w.mu.Unlock()
+		close(w.doneCh)
+	}()
 
 	var timer *time.Timer
 	var timerCh <-chan time.Time
@@ -102,11 +126,11 @@ func (w *FlushWorker) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			stopTimer()
-			w.flushDirty()
+			w.setStopError(w.flushDirty())
 			return
 		case <-w.stopCh:
 			stopTimer()
-			w.flushDirty()
+			w.setStopError(w.flushDirty())
 			return
 		case <-w.signal:
 			resetTimer()
@@ -117,14 +141,42 @@ func (w *FlushWorker) Run(ctx context.Context) {
 	}
 }
 
-func (w *FlushWorker) Stop() {
+func (w *FlushWorker) Stop() error {
 	w.stopOnce.Do(func() {
-		close(w.stopCh)
-		<-w.doneCh
+		w.mu.Lock()
+		started := w.started
+		alreadyStopped := w.stopped
+		if !started {
+			w.stopped = true
+		}
+		w.mu.Unlock()
+		if alreadyStopped {
+			return
+		}
+		if started {
+			close(w.stopCh)
+			<-w.doneCh
+			return
+		}
+		w.setStopError(w.flushDirty())
+		close(w.doneCh)
 	})
+	<-w.doneCh
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.stopErr
 }
 
-func (w *FlushWorker) flushDirty() {
+func (w *FlushWorker) setStopError(err error) {
+	if err == nil {
+		return
+	}
+	w.mu.Lock()
+	w.stopErr = errors.Join(w.stopErr, err)
+	w.mu.Unlock()
+}
+
+func (w *FlushWorker) flushDirty() error {
 	w.mu.Lock()
 	tasks := make([]*flushTask, 0, len(w.tasks))
 	for _, task := range w.tasks {
@@ -135,6 +187,7 @@ func (w *FlushWorker) flushDirty() {
 	}
 	w.mu.Unlock()
 
+	var flushErrors []error
 	for _, task := range tasks {
 		if err := task.flush(); err != nil {
 			utils.Error("flush %s failed: %v", task.name, err)
@@ -148,6 +201,7 @@ func (w *FlushWorker) flushDirty() {
 				existing.dirty = true
 			}
 			w.mu.Unlock()
+			flushErrors = append(flushErrors, fmt.Errorf("flush %s: %w", task.name, err))
 			continue
 		}
 		metrics.IncCounter(
@@ -156,4 +210,5 @@ func (w *FlushWorker) flushDirty() {
 			map[string]string{"name": task.name, "result": "ok"},
 		)
 	}
+	return errors.Join(flushErrors...)
 }

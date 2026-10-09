@@ -16,20 +16,19 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func startMessageReceiver(c *websocket.Conn, msgChan chan model.Msg, ctx context.Context) {
+func startMessageReceiver(c *websocket.Conn, msgChan chan model.Msg, ctx context.Context) error {
 	defer close(msgChan)
 
 	for {
 		select {
 		case <-ctx.Done():
 			utils.Info("消息接收器已停止")
-			return
+			return ctx.Err()
 		default:
 			_, message, err := c.ReadMessage()
 			if err != nil {
 				utils.Error("读取消息失败: %v", err)
-				time.Sleep(time.Second)
-				continue
+				return err
 			}
 
 			utils.Info("接收到消息: %s", message)

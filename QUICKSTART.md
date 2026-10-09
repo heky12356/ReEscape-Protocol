@@ -25,6 +25,16 @@ Copy-Item .env.example .env
 - `Token`
 - `TARGETID`
 
+生产环境还应设置管理后台密钥。`/api/admin/*` 默认要求 `ADMIN_API_KEY`，管理服务默认只监听 `127.0.0.1`：
+
+```env
+ADMIN_LISTEN_HOST=127.0.0.1
+ADMIN_API_KEY=请替换为随机长密钥
+ADMIN_CORS_ORIGINS=http://127.0.0.1:8088,http://localhost:5173
+```
+
+OneBot 连接断开后会自动退避重连，可通过 `ONEBOT_RECONNECT_INITIAL_MS`、`ONEBOT_RECONNECT_MAX_MS`、`ONEBOT_HEARTBEAT_INTERVAL_MS` 和 `ONEBOT_READ_TIMEOUT_MS` 调整。
+
 `TARGETID` 是机器人主要响应的目标 ID。当前逻辑通常会先用它判断消息是否属于目标会话。
 
 ## 3. 初始化 AI profile

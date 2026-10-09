@@ -110,6 +110,15 @@ func ReloadRuntimeConfig() error {
 
 	config.Character = getStringEnv("CHARACTER", "default")
 	config.Token = os.Getenv("Token")
+	config.AdminListenHost = getStringEnv("ADMIN_LISTEN_HOST", config.AdminListenHost)
+	config.AdminAPIKey = os.Getenv("ADMIN_API_KEY")
+	config.AdminCORSOrigins = getStringArrayEnv("ADMIN_CORS_ORIGINS", config.AdminCORSOrigins)
+	config.OneBotDialTimeoutMs = getIntEnv("ONEBOT_DIAL_TIMEOUT_MS", config.OneBotDialTimeoutMs)
+	config.OneBotReconnectInitialMs = getIntEnv("ONEBOT_RECONNECT_INITIAL_MS", config.OneBotReconnectInitialMs)
+	config.OneBotReconnectMaxMs = getIntEnv("ONEBOT_RECONNECT_MAX_MS", config.OneBotReconnectMaxMs)
+	config.OneBotHeartbeatIntervalMs = getIntEnv("ONEBOT_HEARTBEAT_INTERVAL_MS", config.OneBotHeartbeatIntervalMs)
+	config.OneBotReadTimeoutMs = getIntEnv("ONEBOT_READ_TIMEOUT_MS", config.OneBotReadTimeoutMs)
+	config.ShutdownTimeoutMs = getIntEnv("SHUTDOWN_TIMEOUT_MS", config.ShutdownTimeoutMs)
 
 	characterManager, err := character.NewCharacterManager(getCharacterConfigDir(), config.Character)
 	if err != nil {

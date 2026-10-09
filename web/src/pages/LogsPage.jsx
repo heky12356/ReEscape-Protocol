@@ -5,6 +5,7 @@ import {
   useMemo,
   useState
 } from "react";
+import { getAdminAPIKeyForStream } from "../api/adminApi";
 import { Panel } from "../components/common/Panel";
 import { InputField, SelectField } from "../components/common/FormField";
 import { LiveTerminal } from "../components/logs/LiveTerminal";
@@ -51,59 +52,76 @@ export function LogsPage({ panel }) {
       return undefined;
     }
 
-    const source = new EventSource(streamUrl);
+    const controller = new AbortController();
     setStreamState("connecting...");
 
-    source.onopen = () => {
-      setConnected(true);
-      setStreamState("streaming");
+    const handleEvent = (type, data) => {
+      const payload = parseSSEData({ data });
+      if (type === "init" || type === "reset") {
+        startTransition(() => {
+          setTerminalContent(compactContent(payload.content || ""));
+        });
+        if (payload.file && payload.file !== selectedLogFile) {
+          setSelectedLogFile(payload.file);
+        }
+      } else if (type === "append" && payload.content) {
+        startTransition(() => {
+          setTerminalContent((prev) => compactContent(prev + payload.content));
+        });
+      } else if (type === "error") {
+        setStreamState(payload.error ? `error: ${payload.error}` : "stream error");
+        setConnected(false);
+      }
     };
 
-    source.onerror = () => {
-      setConnected(false);
-      setStreamState("reconnecting...");
-    };
-
-    source.addEventListener("init", (event) => {
-      const payload = parseSSEData(event);
-      startTransition(() => {
-        setTerminalContent(compactContent(payload.content || ""));
-      });
-      if (payload.file && payload.file !== selectedLogFile) {
-        setSelectedLogFile(payload.file);
+    async function consumeStream() {
+      while (!controller.signal.aborted) {
+        try {
+        const headers = {};
+        const apiKey = getAdminAPIKeyForStream();
+        if (apiKey) {
+          headers.Authorization = `Bearer ${apiKey}`;
+        }
+        const response = await fetch(streamUrl, { headers, signal: controller.signal });
+        if (!response.ok || !response.body) {
+          throw new Error(`stream request failed (${response.status})`);
+        }
+        setConnected(true);
+        setStreamState("streaming");
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (!controller.signal.aborted) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const events = buffer.split("\n\n");
+          buffer = events.pop() || "";
+          for (const event of events) {
+            let type = "message";
+            let data = "";
+            for (const line of event.split("\n")) {
+              if (line.startsWith("event:")) type = line.slice(6).trim();
+              if (line.startsWith("data:")) data += line.slice(5).trim();
+            }
+            if (data) handleEvent(type, data);
+          }
+        }
+        } catch (error) {
+          if (controller.signal.aborted) break;
+          setConnected(false);
+          setStreamState(error?.message || "reconnecting...");
+        }
+        if (!controller.signal.aborted) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          setStreamState("reconnecting...");
+        }
       }
-    });
-
-    source.addEventListener("append", (event) => {
-      const payload = parseSSEData(event);
-      const delta = payload.content || "";
-      if (!delta) {
-        return;
-      }
-      startTransition(() => {
-        setTerminalContent((prev) => compactContent(prev + delta));
-      });
-    });
-
-    source.addEventListener("reset", (event) => {
-      const payload = parseSSEData(event);
-      startTransition(() => {
-        setTerminalContent(compactContent(payload.content || ""));
-      });
-      if (payload.file && payload.file !== selectedLogFile) {
-        setSelectedLogFile(payload.file);
-      }
-    });
-
-    source.addEventListener("error", (event) => {
-      const payload = parseSSEData(event);
-      const message = payload.error ? `error: ${payload.error}` : "stream error";
-      setStreamState(message);
-      setConnected(false);
-    });
+    }
+    void consumeStream();
 
     return () => {
-      source.close();
+      controller.abort();
       setConnected(false);
     };
   }, [selectedLogFile, setSelectedLogFile, streamEnabled, streamUrl]);

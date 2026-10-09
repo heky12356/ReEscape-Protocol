@@ -1,5 +1,10 @@
 async function fetchJSON(url, options) {
-  const resp = await fetch(url, options);
+  const request = options ? { ...options, headers: { ...(options.headers || {}) } } : { headers: {} };
+  const apiKey = getAdminAPIKey();
+  if (apiKey) {
+    request.headers.Authorization = `Bearer ${apiKey}`;
+  }
+  const resp = await fetch(url, request);
   const contentType = resp.headers.get("content-type") || "";
   const isJSON = contentType.includes("application/json");
   const data = isJSON ? await resp.json() : await resp.text();
@@ -11,6 +16,22 @@ async function fetchJSON(url, options) {
     throw new Error(typeof data === "string" ? data : "request failed");
   }
   return data;
+}
+
+function getAdminAPIKey() {
+  const buildKey = typeof import.meta !== "undefined" ? import.meta.env?.VITE_ADMIN_API_KEY : "";
+  if (buildKey) {
+    return buildKey;
+  }
+  try {
+    return window.localStorage.getItem("adminApiKey") || "";
+  } catch {
+    return "";
+  }
+}
+
+export function getAdminAPIKeyForStream() {
+  return getAdminAPIKey();
 }
 
 export const adminApi = {

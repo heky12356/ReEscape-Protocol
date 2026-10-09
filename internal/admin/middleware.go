@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"os"
@@ -140,12 +141,58 @@ func latestLogFileName(logDir string) (string, error) {
 
 func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
+		origin := strings.TrimSpace(c.GetHeader("Origin"))
+		if origin != "" {
+			c.Writer.Header().Add("Vary", "Origin")
+		}
+		if origin != "" && allowedOrigin(origin, config.GetConfig().AdminCORSOrigins) {
+			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+			c.Writer.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-API-Key, X-Request-ID")
+			c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+		}
 
 		if c.Request.Method == http.MethodOptions {
+			if origin != "" && !allowedOrigin(origin, config.GetConfig().AdminCORSOrigins) {
+				c.AbortWithStatus(http.StatusForbidden)
+				return
+			}
 			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+		c.Next()
+	}
+}
+
+func allowedOrigin(origin string, configured []string) bool {
+	for _, candidate := range configured {
+		if strings.TrimSpace(candidate) == origin {
+			return true
+		}
+	}
+	return false
+}
+
+func adminAuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg := config.GetConfig()
+		if cfg == nil || strings.TrimSpace(cfg.AdminAPIKey) == "" {
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "admin API key is not configured"})
+			return
+		}
+
+		provided := strings.TrimSpace(c.GetHeader("X-API-Key"))
+		if provided == "" {
+			authorization := strings.TrimSpace(c.GetHeader("Authorization"))
+			if scheme, value, ok := strings.Cut(authorization, " "); ok && strings.EqualFold(scheme, "Bearer") {
+				provided = strings.TrimSpace(value)
+			}
+		}
+		if provided == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "admin API key is required"})
+			return
+		}
+		if len(provided) != len(cfg.AdminAPIKey) || subtle.ConstantTimeCompare([]byte(provided), []byte(cfg.AdminAPIKey)) != 1 {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid admin API key"})
 			return
 		}
 		c.Next()

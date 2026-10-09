@@ -56,6 +56,8 @@ func CallAPI(conn *websocket.Conn, action string, params interface{}) (model.API
 		return resp, nil
 	case <-timer.C:
 		return model.APIResponse{}, fmt.Errorf("onebot api %s timeout", action)
+	case <-ConnectionDone(conn):
+		return model.APIResponse{}, fmt.Errorf("onebot api %s connection closed", action)
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 	"project-yume/internal/assets"
 	"project-yume/internal/character"
 	"project-yume/internal/config"
+	"project-yume/internal/connect"
 	"project-yume/internal/domain/affection"
 	"project-yume/internal/eventlog"
 	"project-yume/internal/metrics"
@@ -210,21 +211,30 @@ func Start(ctx context.Context, reloadRuntimeConfig func() error) {
 	if strings.TrimSpace(httpPort) == "" {
 		httpPort = defaultHTTPPort
 	}
+	listenHost := strings.TrimSpace(config.GetConfig().AdminListenHost)
+	if listenHost == "" {
+		listenHost = "127.0.0.1"
+	}
+	listenAddr := listenHost + ":" + httpPort
 
 	engine := s.routes()
 	httpServer := &http.Server{
-		Addr:    ":" + httpPort,
+		Addr:    listenAddr,
 		Handler: engine,
 	}
 
 	go func() {
 		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		shutdownTimeout := time.Duration(config.GetConfig().ShutdownTimeoutMs) * time.Millisecond
+		if shutdownTimeout <= 0 {
+			shutdownTimeout = 3 * time.Second
+		}
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 		_ = httpServer.Shutdown(shutdownCtx)
 	}()
 
-	utils.Info("admin web server listening on :%s", httpPort)
+	utils.Info("admin web server listening on %s", listenAddr)
 	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		utils.Error("admin web server error: %v", err)
 	}
@@ -255,6 +265,7 @@ func (s *server) routes() *gin.Engine {
 	}
 
 	adminGroup := engine.Group("/api/admin")
+	adminGroup.Use(adminAuthMiddleware())
 	{
 		adminGroup.GET("/config", s.handleGetConfig)
 		adminGroup.PUT("/config", s.handlePutConfig)
@@ -315,6 +326,12 @@ func (s *server) handleReady(c *gin.Context) {
 		return
 	}
 	resp.Checks["config"] = "ok"
+	if !connect.IsConnected() {
+		resp.Status = "degraded"
+		resp.Checks["onebot"] = "disconnected"
+	} else {
+		resp.Checks["onebot"] = "ok"
+	}
 
 	if err := ensureDirWritable(cfg.DataDir); err != nil {
 		resp.Status = "degraded"

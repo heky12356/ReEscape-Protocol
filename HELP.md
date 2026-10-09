@@ -33,6 +33,10 @@
 - `GET /readyz`
 - `GET /metrics`
 
+管理 API 需要 `Authorization: Bearer <ADMIN_API_KEY>` 或 `X-API-Key`。未配置 `ADMIN_API_KEY` 时，写入和读取管理 API 会返回不可用；这是生产默认安全行为。跨域来源由 `ADMIN_CORS_ORIGINS` 白名单控制。
+
+OneBot 连接读写失败会结束当前连接会话并自动重连。查看 `/metrics` 中的 `bot_onebot_connection_events_total` 和日志中的连接状态，可确认重连过程。
+
 ## 2. 目录里最常用的文件
 
 - `README.md`：项目总览

@@ -30,6 +30,15 @@ type Config struct {
 	Character                         string
 	AllowCharacterIdentityExplanation bool
 	Token                             string
+	AdminListenHost                   string
+	AdminAPIKey                       string
+	AdminCORSOrigins                  []string
+	OneBotDialTimeoutMs               int
+	OneBotReconnectInitialMs          int
+	OneBotReconnectMaxMs              int
+	OneBotHeartbeatIntervalMs         int
+	OneBotReadTimeoutMs               int
+	ShutdownTimeoutMs                 int
 
 	// 调度器配置
 	EnableNaturalScheduler      bool    // 启用自然定时器
@@ -155,6 +164,15 @@ func init() {
 	config.Character = getStringEnv("CHARACTER", "default")
 	config.AllowCharacterIdentityExplanation = getBoolEnv("ALLOW_CHARACTER_IDENTITY_EXPLANATION", false)
 	config.Token = os.Getenv("Token")
+	config.AdminListenHost = getStringEnv("ADMIN_LISTEN_HOST", "127.0.0.1")
+	config.AdminAPIKey = os.Getenv("ADMIN_API_KEY")
+	config.AdminCORSOrigins = getStringArrayEnv("ADMIN_CORS_ORIGINS", []string{"http://127.0.0.1:8088", "http://localhost:8088", "http://localhost:5173"})
+	config.OneBotDialTimeoutMs = getIntEnv("ONEBOT_DIAL_TIMEOUT_MS", 10000)
+	config.OneBotReconnectInitialMs = getIntEnv("ONEBOT_RECONNECT_INITIAL_MS", 1000)
+	config.OneBotReconnectMaxMs = getIntEnv("ONEBOT_RECONNECT_MAX_MS", 30000)
+	config.OneBotHeartbeatIntervalMs = getIntEnv("ONEBOT_HEARTBEAT_INTERVAL_MS", 15000)
+	config.OneBotReadTimeoutMs = getIntEnv("ONEBOT_READ_TIMEOUT_MS", 45000)
+	config.ShutdownTimeoutMs = getIntEnv("SHUTDOWN_TIMEOUT_MS", 10000)
 
 	// 调度器配置
 	config.EnableNaturalScheduler = getBoolEnv("ENABLE_NATURAL_SCHEDULER", true)

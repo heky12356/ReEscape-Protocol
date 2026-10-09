@@ -9,6 +9,7 @@ import (
 	"project-yume/internal/agent"
 	"project-yume/internal/aifunction"
 	"project-yume/internal/config"
+	"project-yume/internal/connect"
 	"project-yume/internal/domain/affection"
 	"project-yume/internal/eventlog"
 	"project-yume/internal/inbound"
@@ -116,22 +117,25 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 	return components, nil
 }
 
-func (c *Components) Stop() {
+func (c *Components) Stop() error {
 	if c == nil || c.FlushWorker == nil {
-		return
+		return nil
 	}
-	c.FlushWorker.Stop()
+	return c.FlushWorker.Stop()
 }
 
-func StartWorkers(ctx context.Context, conn *websocket.Conn, components *Components) {
+func StartWorkers(ctx context.Context, conn *websocket.Conn, components *Components) <-chan error {
+	done := make(chan error, 1)
 	if components == nil {
-		return
+		done <- fmt.Errorf("components are nil")
+		return done
 	}
 
 	rawMsgChan := make(chan model.Msg, 100)
 	aggregatedMsgChan := make(chan model.Msg, 100)
 
-	go startMessageReceiver(conn, rawMsgChan, ctx)
+	go func() { done <- startMessageReceiver(conn, rawMsgChan, ctx) }()
+	connect.StartKeepalive(ctx, conn)
 	go inbound.NewMessageAggregator().Run(ctx, rawMsgChan, aggregatedMsgChan)
 	go startAgentMessageProcessor(
 		conn,
@@ -149,6 +153,7 @@ func StartWorkers(ctx context.Context, conn *websocket.Conn, components *Compone
 		go startScheduler(conn, components.NaturalScheduler, components.AgentRuntime, components.EventStore, ctx, sessionID, cfg.TargetId)
 	}
 	go StartStatusMonitor(ctx, sessionID)
+	return done
 }
 
 func NewAgentRuntime() *agent.Runtime {

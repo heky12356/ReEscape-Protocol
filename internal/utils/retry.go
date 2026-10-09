@@ -13,7 +13,7 @@ func CheckDirWritable(dir string) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("无法创建目录 %s: %v", dir, err)
 	}
-	
+
 	// 尝试创建临时文件
 	testFile := filepath.Join(dir, ".write_test")
 	file, err := os.Create(testFile)
@@ -21,7 +21,7 @@ func CheckDirWritable(dir string) error {
 		return fmt.Errorf("目录 %s 不可写: %v", dir, err)
 	}
 	file.Close()
-	
+
 	// 删除临时文件
 	os.Remove(testFile)
 	return nil
@@ -48,23 +48,23 @@ type RetryFunc func() error
 func Retry(fn RetryFunc, config RetryConfig) error {
 	var lastErr error
 	delay := config.Delay
-	
+
 	for i := 0; i <= config.MaxRetries; i++ {
 		if i > 0 {
 			Info("🔄 重试第 %d 次，延迟 %v", i, delay)
 			time.Sleep(delay)
 			delay = time.Duration(float64(delay) * config.Backoff)
 		}
-		
+
 		if err := fn(); err != nil {
 			lastErr = err
 			Error("⚠️ 执行失败: %v", err)
 			continue
 		}
-		
+
 		return nil // 成功执行
 	}
-	
+
 	return fmt.Errorf("重试 %d 次后仍然失败: %v", config.MaxRetries, lastErr)
 }
 
@@ -75,7 +75,7 @@ func SafeExecute(fn func() error, context string) error {
 			Error("❌ %s 发生panic: %v", context, r)
 		}
 	}()
-	
+
 	return fn()
 }
 
@@ -91,17 +91,17 @@ func NewRateLimiter(rate int, interval time.Duration) *RateLimiter {
 		tokens:   make(chan struct{}, rate),
 		interval: interval,
 	}
-	
+
 	// 初始化令牌
 	for i := 0; i < rate; i++ {
 		rl.tokens <- struct{}{}
 	}
-	
+
 	// 定期补充令牌
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		
+
 		for range ticker.C {
 			select {
 			case rl.tokens <- struct{}{}:
@@ -110,7 +110,7 @@ func NewRateLimiter(rate int, interval time.Duration) *RateLimiter {
 			}
 		}
 	}()
-	
+
 	return rl
 }
 

@@ -136,6 +136,23 @@ func (sm *StateManager) UpsertIntent(item intent.Intent) (intent.Intent, error) 
 		sm.mu.Unlock()
 		return intent.Intent{}, fmt.Errorf("intent belongs to another user")
 	}
+	if item.OpenLoopID != "" {
+		loop, ok := sm.openLoops[item.OpenLoopID]
+		if !ok || loop.UserID != item.UserID {
+			sm.mu.Unlock()
+			return intent.Intent{}, fmt.Errorf("open loop not found or belongs to another user")
+		}
+		loop.IntentID = item.ID
+		loop.UpdatedAt = item.UpdatedAt
+		sm.openLoops[item.OpenLoopID] = openloop.Normalize(loop)
+	}
+	if previous, ok := sm.intents[item.ID]; ok && previous.OpenLoopID != "" && previous.OpenLoopID != item.OpenLoopID {
+		if loop, exists := sm.openLoops[previous.OpenLoopID]; exists && loop.IntentID == item.ID {
+			loop.IntentID = ""
+			loop.UpdatedAt = item.UpdatedAt
+			sm.openLoops[previous.OpenLoopID] = openloop.Normalize(loop)
+		}
+	}
 	sm.intents[item.ID] = item
 	sm.mu.Unlock()
 	sm.markDirty()

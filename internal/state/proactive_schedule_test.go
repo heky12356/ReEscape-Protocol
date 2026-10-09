@@ -164,3 +164,35 @@ func TestLoadSessionsWithoutProactiveScheduleFields(t *testing.T) {
 		t.Fatalf("unexpected schedule for legacy session: %#v", schedule)
 	}
 }
+
+func TestLoadSessionsMigratesManualScheduleToLegacyIntent(t *testing.T) {
+	sm := &StateManager{}
+	data := []byte(`{"sessions":{"private:old":{"id":"private:old","user_id":7,"chat_type":1,"conversation":[],"next_scheduled_at":"2026-08-01T01:00:00Z","proactive_schedule_summary":"继续跟进项目","proactive_schedule_manual":true,"proactive_schedule_updated_at":"2026-08-01T00:00:00Z"}}}`)
+
+	if err := sm.loadSessionsFromBytes(data); err != nil {
+		t.Fatalf("load sessions failed: %v", err)
+	}
+	schedule := sm.GetProactiveSchedule("private:old")
+	if schedule.IntentID != "intent:legacy-schedule:private:old" {
+		t.Fatalf("unexpected migrated intent id: %#v", schedule)
+	}
+	item, ok := sm.GetIntent(schedule.IntentID)
+	if !ok || item.Source != "legacy_schedule" || item.Summary != "继续跟进项目" || !item.DueAt.Equal(schedule.NextScheduledAt) {
+		t.Fatalf("unexpected migrated intent: %#v %v", item, ok)
+	}
+}
+
+func TestAutomaticScheduleClearsLegacyIntentProjection(t *testing.T) {
+	sm := GetManager()
+	sm.ClearAllSessions()
+	t.Cleanup(sm.ClearAllSessions)
+	sessionID := "private:42"
+	sm.SetProactiveSchedule(sessionID, ProactiveSchedule{
+		IntentID: "intent:legacy-schedule:private:42", NextScheduledAt: time.Now().Add(time.Hour),
+		Summary: "手动计划", Manual: true,
+	})
+	sm.SetNextScheduledAt(sessionID, time.Now().Add(2*time.Hour))
+	if schedule := sm.GetProactiveSchedule(sessionID); schedule.IntentID != "" || schedule.Manual {
+		t.Fatalf("automatic schedule retained legacy intent projection: %#v", schedule)
+	}
+}

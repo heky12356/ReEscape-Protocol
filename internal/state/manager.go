@@ -579,6 +579,7 @@ func (sm *StateManager) SetNextScheduledAt(sessionID string, at time.Time) {
 	now := time.Now()
 	session.NextScheduledAt = at
 	session.ProactiveScheduleSummary = ""
+	session.ProactiveScheduleIntentID = ""
 	session.ProactiveScheduleReason = "automatic_reschedule"
 	session.ProactiveScheduleMeta = nil
 	session.ProactiveScheduleManual = false
@@ -1005,13 +1006,13 @@ func (sm *StateManager) loadSessionsFromBytes(data []byte) error {
 		if raw, exists := envelope["intents"]; exists {
 			_ = json.Unmarshal(raw, &sm.intents)
 		}
-		sm.normalizeSessions()
 		if sm.openLoops == nil {
 			sm.openLoops = make(map[string]openloop.OpenLoop)
 		}
 		if sm.intents == nil {
 			sm.intents = make(map[string]intent.Intent)
 		}
+		sm.normalizeSessions()
 		sm.mu.Unlock()
 		return nil
 	}
@@ -1051,6 +1052,52 @@ func (sm *StateManager) normalizeSessions() {
 			continue
 		}
 		sm.normalizeSession(sessionID, session)
+	}
+	sm.migrateLegacyScheduleIntents()
+}
+
+// migrateLegacyScheduleIntents upgrades manual schedule projections from
+// snapshots written before Intent became the source of truth. Automatic
+// scheduler wakeups are deliberately excluded because they are not business
+// commitments and should not create durable intents.
+func (sm *StateManager) migrateLegacyScheduleIntents() {
+	for sessionID, session := range sm.sessions {
+		if session == nil || session.UserID == 0 {
+			continue
+		}
+		if !session.ProactiveScheduleManual && session.ProactiveScheduleSummary == "" {
+			continue
+		}
+		if session.NextScheduledAt.IsZero() {
+			continue
+		}
+		id := strings.TrimSpace(session.ProactiveScheduleIntentID)
+		if id == "" {
+			id = fmt.Sprintf("intent:legacy-schedule:%s", sessionID)
+		}
+		if existing, ok := sm.intents[id]; ok {
+			session.ProactiveScheduleIntentID = existing.ID
+			continue
+		}
+		updatedAt := session.ProactiveScheduleUpdatedAt
+		if updatedAt.IsZero() {
+			updatedAt = session.LastUpdated
+		}
+		if updatedAt.IsZero() {
+			updatedAt = time.Now()
+		}
+		summary := strings.TrimSpace(session.ProactiveScheduleSummary)
+		if summary == "" {
+			summary = "兼容旧版主动触达计划"
+		}
+		sm.intents[id] = intent.Normalize(intent.Intent{
+			ID: id, UserID: session.UserID, SessionID: sessionID,
+			Kind: intent.KindProactiveContact, Summary: summary,
+			Action: string(intent.KindProactiveContact), DueAt: session.NextScheduledAt,
+			Status: intent.StatusPending, Source: "legacy_schedule",
+			CreatedAt: updatedAt, UpdatedAt: updatedAt,
+		})
+		session.ProactiveScheduleIntentID = id
 	}
 }
 

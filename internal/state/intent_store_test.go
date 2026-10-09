@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"project-yume/internal/domain/intent"
+	"project-yume/internal/domain/openloop"
 )
 
 func TestIntentStoreClaimsDueIntentOnlyOnce(t *testing.T) {
@@ -27,6 +28,35 @@ func TestIntentStoreClaimsDueIntentOnlyOnce(t *testing.T) {
 	completed, err := sm.IntentStore().Transition(claimed.ID, intent.StatusCompleted, now)
 	if err != nil || completed.Status != intent.StatusCompleted {
 		t.Fatalf("complete failed: %+v %v", completed, err)
+	}
+}
+
+func TestIntentStoreMaintainsOpenLoopAssociation(t *testing.T) {
+	sm := GetManager()
+	sm.ClearAllSessions()
+	t.Cleanup(sm.ClearAllSessions)
+	now := time.Now()
+	loop := openloop.NewExplicit(42, PrivateSessionID(42), string(openloop.KindFollowUp), "待跟进事项", "turn-1", now)
+	if _, err := sm.OpenLoopStore().Upsert(loop); err != nil {
+		t.Fatal(err)
+	}
+	item := intent.NewProactiveContact(42, PrivateSessionID(42), "提醒跟进", now.Add(time.Hour))
+	item.OpenLoopID = loop.ID
+	if _, err := sm.IntentStore().Upsert(item); err != nil {
+		t.Fatal(err)
+	}
+	updated, ok := sm.GetOpenLoop(loop.ID)
+	if !ok || updated.IntentID != item.ID {
+		t.Fatalf("open loop association missing: %#v %v", updated, ok)
+	}
+
+	item.OpenLoopID = ""
+	if _, err := sm.IntentStore().Upsert(item); err != nil {
+		t.Fatal(err)
+	}
+	updated, _ = sm.GetOpenLoop(loop.ID)
+	if updated.IntentID != "" {
+		t.Fatalf("stale open loop association retained: %#v", updated)
 	}
 }
 

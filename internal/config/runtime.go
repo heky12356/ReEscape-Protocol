@@ -18,7 +18,23 @@ func GetEnvFilePath() string {
 	return envFile
 }
 
-func ReloadRuntimeConfig() error {
+func ReloadRuntimeConfig() (err error) {
+	previousConfig := *config
+	previousConfig.ActiveHours = append([]int(nil), config.ActiveHours...)
+	previousConfig.SleepHours = append([]int(nil), config.SleepHours...)
+	previousConfig.AdminCORSOrigins = append([]string(nil), config.AdminCORSOrigins...)
+	previousConfig.SkillDirs = append([]string(nil), config.SkillDirs...)
+	previousCharacterManager := cm
+	previousSystemBasePrompt := systemBasePrompt
+	defer func() {
+		if err == nil {
+			return
+		}
+		*config = previousConfig
+		cm = previousCharacterManager
+		systemBasePrompt = previousSystemBasePrompt
+	}()
+
 	config.EnvFile = GetEnvFilePath()
 	config.Hostadd = getStringEnv("HOSTADD", config.Hostadd)
 	config.WsPort = getStringEnv("WsPort", config.WsPort)

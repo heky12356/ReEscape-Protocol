@@ -5,7 +5,7 @@
 ## 1. 环境要求
 
 - Go `1.23.6+`
-- Node.js `18+`
+- Node.js `20.19+`（公开文档构建使用 VitePress 2）
 - 一个可用的 OneBot WebSocket 服务端
 - 一个 OpenAI-compatible AI 接口
 

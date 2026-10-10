@@ -37,52 +37,55 @@ const (
 )
 
 type configResponse struct {
-	TargetID                          int64         `json:"targetId"`
-	AIBaseURL                         string        `json:"aiBaseUrl"`
-	AIModel                           string        `json:"aiModel"`
-	AIKeyMasked                       string        `json:"aiKeyMasked"`
-	AIKeySet                          bool          `json:"aiKeySet"`
-	AIProfile                         string        `json:"aiProfile"`
-	AIProfiles                        []string      `json:"aiProfiles"`
-	AIConfigFile                      string        `json:"aiConfigFile"`
-	AITemperature                     float32       `json:"aiTemperature"`
-	AIMaxTokens                       int           `json:"aiMaxTokens"`
-	AITimeout                         int           `json:"aiTimeout"`
-	AIRetryCount                      int           `json:"aiRetryCount"`
-	AIRateLimit                       int           `json:"aiRateLimit"`
-	AITopP                            float32       `json:"aiTopP"`
-	AIPromptRaw                       string        `json:"aiPromptRaw"`
-	AllowCharacterIdentityExplanation bool          `json:"allowCharacterIdentityExplanation"`
-	EnableTimeContext                 bool          `json:"enableTimeContext"`
-	TimeContextTimezone               string        `json:"timeContextTimezone"`
-	TimeContextFormat                 string        `json:"timeContextFormat"`
-	EnableVisionInput                 bool          `json:"enableVisionInput"`
-	VisionImageDetail                 string        `json:"visionImageDetail"`
-	EnableImageOCRFallback            bool          `json:"enableImageOCRFallback"`
-	EnableImageAssetReply             bool          `json:"enableImageAssetReply"`
-	ImageAssetDir                     string        `json:"imageAssetDir"`
-	ImageAssetIndexFile               string        `json:"imageAssetIndexFile"`
-	Character                         string        `json:"character"`
-	CharacterOptions                  []string      `json:"characterOptions"`
-	EffectivePrompt                   string        `json:"effectivePrompt"`
-	PromptPreview                     PromptPreview `json:"promptPreview"`
-	EnvironmentConfig                 string        `json:"environmentConfig"`
-	EnableReactAgent                  bool          `json:"enableReactAgent"`
-	ReactMaxSteps                     int           `json:"reactMaxSteps"`
-	ReactToolTimeoutMs                int           `json:"reactToolTimeoutMs"`
-	ReactAllowWriteTools              bool          `json:"reactAllowWriteTools"`
-	ReactTraceMode                    string        `json:"reactTraceMode"`
-	ReactTotalTimeoutMs               int           `json:"reactTotalTimeoutMs"`
-	EnableWebTools                    bool          `json:"enableWebTools"`
-	WebSearchProvider                 string        `json:"webSearchProvider"`
-	WebSearchEndpoint                 string        `json:"webSearchEndpoint"`
-	WebSearchAPIKeyMasked             string        `json:"webSearchApiKeyMasked"`
-	WebSearchAPIKeySet                bool          `json:"webSearchApiKeySet"`
-	WebSearchMaxResults               int           `json:"webSearchMaxResults"`
-	WebToolTimeoutMs                  int           `json:"webToolTimeoutMs"`
-	WebFetchMaxBytes                  int           `json:"webFetchMaxBytes"`
-	WebFetchMaxChars                  int           `json:"webFetchMaxChars"`
-	WebFetchUserAgent                 string        `json:"webFetchUserAgent"`
+	ConfigVersion                     uint64               `json:"configVersion"`
+	ConfigUpdatedAt                   time.Time            `json:"configUpdatedAt"`
+	ConfigReloadScopes                []config.ConfigScope `json:"configReloadScopes"`
+	TargetID                          int64                `json:"targetId"`
+	AIBaseURL                         string               `json:"aiBaseUrl"`
+	AIModel                           string               `json:"aiModel"`
+	AIKeyMasked                       string               `json:"aiKeyMasked"`
+	AIKeySet                          bool                 `json:"aiKeySet"`
+	AIProfile                         string               `json:"aiProfile"`
+	AIProfiles                        []string             `json:"aiProfiles"`
+	AIConfigFile                      string               `json:"aiConfigFile"`
+	AITemperature                     float32              `json:"aiTemperature"`
+	AIMaxTokens                       int                  `json:"aiMaxTokens"`
+	AITimeout                         int                  `json:"aiTimeout"`
+	AIRetryCount                      int                  `json:"aiRetryCount"`
+	AIRateLimit                       int                  `json:"aiRateLimit"`
+	AITopP                            float32              `json:"aiTopP"`
+	AIPromptRaw                       string               `json:"aiPromptRaw"`
+	AllowCharacterIdentityExplanation bool                 `json:"allowCharacterIdentityExplanation"`
+	EnableTimeContext                 bool                 `json:"enableTimeContext"`
+	TimeContextTimezone               string               `json:"timeContextTimezone"`
+	TimeContextFormat                 string               `json:"timeContextFormat"`
+	EnableVisionInput                 bool                 `json:"enableVisionInput"`
+	VisionImageDetail                 string               `json:"visionImageDetail"`
+	EnableImageOCRFallback            bool                 `json:"enableImageOCRFallback"`
+	EnableImageAssetReply             bool                 `json:"enableImageAssetReply"`
+	ImageAssetDir                     string               `json:"imageAssetDir"`
+	ImageAssetIndexFile               string               `json:"imageAssetIndexFile"`
+	Character                         string               `json:"character"`
+	CharacterOptions                  []string             `json:"characterOptions"`
+	EffectivePrompt                   string               `json:"effectivePrompt"`
+	PromptPreview                     PromptPreview        `json:"promptPreview"`
+	EnvironmentConfig                 string               `json:"environmentConfig"`
+	EnableReactAgent                  bool                 `json:"enableReactAgent"`
+	ReactMaxSteps                     int                  `json:"reactMaxSteps"`
+	ReactToolTimeoutMs                int                  `json:"reactToolTimeoutMs"`
+	ReactAllowWriteTools              bool                 `json:"reactAllowWriteTools"`
+	ReactTraceMode                    string               `json:"reactTraceMode"`
+	ReactTotalTimeoutMs               int                  `json:"reactTotalTimeoutMs"`
+	EnableWebTools                    bool                 `json:"enableWebTools"`
+	WebSearchProvider                 string               `json:"webSearchProvider"`
+	WebSearchEndpoint                 string               `json:"webSearchEndpoint"`
+	WebSearchAPIKeyMasked             string               `json:"webSearchApiKeyMasked"`
+	WebSearchAPIKeySet                bool                 `json:"webSearchApiKeySet"`
+	WebSearchMaxResults               int                  `json:"webSearchMaxResults"`
+	WebToolTimeoutMs                  int                  `json:"webToolTimeoutMs"`
+	WebFetchMaxBytes                  int                  `json:"webFetchMaxBytes"`
+	WebFetchMaxChars                  int                  `json:"webFetchMaxChars"`
+	WebFetchUserAgent                 string               `json:"webFetchUserAgent"`
 }
 
 type PromptPreview struct {
@@ -908,6 +911,9 @@ func (s *server) buildConfigResponse() (configResponse, error) {
 	}
 
 	return configResponse{
+		ConfigVersion:                     cfg.Version,
+		ConfigUpdatedAt:                   cfg.UpdatedAt,
+		ConfigReloadScopes:                append([]config.ConfigScope(nil), cfg.LastReloadScopes...),
 		TargetID:                          cfg.TargetId,
 		AIBaseURL:                         cfg.AiBaseUrl,
 		AIModel:                           cfg.AiModel,

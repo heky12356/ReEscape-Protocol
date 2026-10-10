@@ -24,6 +24,8 @@ Linux CI 还会运行 `go test -race ./...`。
 
 新增功能应优先放入现有模块边界，跨模块行为使用临时目录、内存对象或 `httptest.Server` 测试，不依赖本机数据、日志或真实 API key。
 
+配置重载应通过 `config.ReloadRuntimeConfig` 处理。它会先构造并校验候选配置，再原子替换运行时配置；不要在业务代码中直接修改全局配置后触发副作用。需要响应配置作用域变化时，使用 `config.RegisterReloadCallback` 注册 callback，并保证 callback 可快速失败、可重复执行且不会阻塞消息主流程。
+
 ## 提交规范
 
 提交信息使用中文 Conventional Commits，例如：

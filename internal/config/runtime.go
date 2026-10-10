@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"project-yume/internal/character"
 	"project-yume/internal/skill"
@@ -19,20 +20,31 @@ func GetEnvFilePath() string {
 }
 
 func ReloadRuntimeConfig() (err error) {
-	previousConfig := *config
-	previousConfig.ActiveHours = append([]int(nil), config.ActiveHours...)
-	previousConfig.SleepHours = append([]int(nil), config.SleepHours...)
-	previousConfig.AdminCORSOrigins = append([]string(nil), config.AdminCORSOrigins...)
-	previousConfig.SkillDirs = append([]string(nil), config.SkillDirs...)
+	configMu.Lock()
+	lockHeld := true
+	previousConfig := config
+	config = cloneConfig(previousConfig)
 	previousCharacterManager := cm
 	previousSystemBasePrompt := systemBasePrompt
-	defer func() {
-		if err == nil {
-			return
-		}
-		*config = previousConfig
+	previousSkills := skill.GetManager().List()
+	previousVersion := previousConfig.Version
+	rollback := func() {
+		config = previousConfig
 		cm = previousCharacterManager
 		systemBasePrompt = previousSystemBasePrompt
+		skill.GetManager().ReplacePackages(previousSkills)
+	}
+	defer func() {
+		if err != nil {
+			if !lockHeld {
+				configMu.Lock()
+				lockHeld = true
+			}
+			rollback()
+		}
+		if lockHeld {
+			configMu.Unlock()
+		}
 	}()
 
 	config.EnvFile = GetEnvFilePath()
@@ -99,7 +111,6 @@ func ReloadRuntimeConfig() (err error) {
 	config.SkillResourceMaxBytes = getIntEnv("SKILL_RESOURCE_MAX_BYTES", config.SkillResourceMaxBytes)
 	config.SkillAllowScripts = getBoolEnv("SKILL_ALLOW_SCRIPTS", config.SkillAllowScripts)
 	config.SkillLoadSystem = getBoolEnv("SKILL_LOAD_SYSTEM", config.SkillLoadSystem)
-	reloadSkillsFromConfig()
 	config.EnableReactAgent = getBoolEnv("ENABLE_REACT_AGENT", config.EnableReactAgent)
 	config.ReactMaxSteps = getIntEnv("REACT_MAX_STEPS", config.ReactMaxSteps)
 	config.ReactToolTimeoutMs = getIntEnv("REACT_TOOL_TIMEOUT_MS", config.ReactToolTimeoutMs)
@@ -123,8 +134,7 @@ func ReloadRuntimeConfig() (err error) {
 	config.TavilyIncludeRawContent = getBoolEnv("TAVILY_INCLUDE_RAW_CONTENT", config.TavilyIncludeRawContent)
 	config.TavilySafeSearch = getBoolEnv("TAVILY_SAFE_SEARCH", config.TavilySafeSearch)
 	config.AllowCharacterIdentityExplanation = getBoolEnv("ALLOW_CHARACTER_IDENTITY_EXPLANATION", config.AllowCharacterIdentityExplanation)
-
-	config.Character = getStringEnv("CHARACTER", "default")
+	config.Character = getStringEnv("CHARACTER", config.Character)
 	config.Token = os.Getenv("Token")
 	config.AdminListenHost = getStringEnv("ADMIN_LISTEN_HOST", config.AdminListenHost)
 	config.AdminAPIKey = os.Getenv("ADMIN_API_KEY")
@@ -135,6 +145,25 @@ func ReloadRuntimeConfig() (err error) {
 	config.OneBotHeartbeatIntervalMs = getIntEnv("ONEBOT_HEARTBEAT_INTERVAL_MS", config.OneBotHeartbeatIntervalMs)
 	config.OneBotReadTimeoutMs = getIntEnv("ONEBOT_READ_TIMEOUT_MS", config.OneBotReadTimeoutMs)
 	config.ShutdownTimeoutMs = getIntEnv("SHUTDOWN_TIMEOUT_MS", config.ShutdownTimeoutMs)
+	if err := validateConfig(config); err != nil {
+		return fmt.Errorf("validate runtime config failed: %w", err)
+	}
+
+	changed := changedScopes(previousConfig, config)
+	if containsScope(changed, ScopeSkill) {
+		if !config.EnableSkills {
+			skill.GetManager().ReplacePackages(nil)
+		} else {
+			packages, loadErrs := skill.LoadDirs(config.SkillDirs, skill.LoadOptions{
+				Scope:         skill.ScopeProject,
+				IncludeHidden: config.SkillLoadSystem,
+			})
+			if len(loadErrs) > 0 {
+				return fmt.Errorf("load configured skills failed: %v", loadErrs[0])
+			}
+			skill.GetManager().ReplacePackages(packages)
+		}
+	}
 
 	characterManager, err := character.NewCharacterManager(getCharacterConfigDir(), config.Character)
 	if err != nil {
@@ -144,6 +173,24 @@ func ReloadRuntimeConfig() (err error) {
 	systemBasePrompt = buildBasePrompt(config.EnableSpaceSegmentDelimiter)
 	applyPromptSections(systemBasePrompt, os.Getenv("AI_PROMPT"))
 
+	config.Version = previousVersion + 1
+	config.UpdatedAt = time.Now()
+	config.LastReloadScopes = append([]ConfigScope(nil), changed...)
+	change := ReloadChange{
+		PreviousVersion: previousVersion,
+		Version:         config.Version,
+		Scopes:          append([]ConfigScope(nil), changed...),
+		AppliedAt:       config.UpdatedAt,
+	}
+	for _, callback := range reloadCallbacksFor(changed) {
+		if lockHeld {
+			configMu.Unlock()
+			lockHeld = false
+		}
+		if err := callback(change); err != nil {
+			return fmt.Errorf("apply configuration reload callback failed: %w", err)
+		}
+	}
 	if err := utils.ConfigureDefaultLogger(
 		utils.ParseLogLevel(config.LogLevel),
 		config.LogToFile,
@@ -158,6 +205,15 @@ func ReloadRuntimeConfig() (err error) {
 	}
 
 	return nil
+}
+
+func containsScope(scopes []ConfigScope, target ConfigScope) bool {
+	for _, scope := range scopes {
+		if scope == target {
+			return true
+		}
+	}
+	return false
 }
 
 func reloadSkillsFromConfig() {

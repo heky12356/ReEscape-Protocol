@@ -37,6 +37,19 @@ func (m *Manager) LoadDirsWithOptions(dirs []string, opts LoadOptions) []error {
 	return errs
 }
 
+// ReplacePackages swaps the active package index after a caller has finished
+// validating a candidate configuration. Packages are cloned so later caller
+// mutations cannot alter the manager's runtime view.
+func (m *Manager) ReplacePackages(packages []Package) {
+	next := make(map[string]Package, len(packages))
+	for _, pkg := range packages {
+		next[pkg.Name] = clonePackage(pkg)
+	}
+	m.mu.Lock()
+	m.packages = next
+	m.mu.Unlock()
+}
+
 func (m *Manager) List() []Package {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

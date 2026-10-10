@@ -14,11 +14,12 @@ type PromptSections struct {
 }
 
 func CurrentPromptSections() PromptSections {
+	cfg := GetConfig()
 	return PromptSections{
-		BasePrompt:      config.BasePrompt,
-		UserPrompt:      config.UserPrompt,
-		CharacterPrompt: config.CharacterPrompt,
-		EffectivePrompt: config.AiPrompt,
+		BasePrompt:      cfg.BasePrompt,
+		UserPrompt:      cfg.UserPrompt,
+		CharacterPrompt: cfg.CharacterPrompt,
+		EffectivePrompt: cfg.AiPrompt,
 	}
 }
 

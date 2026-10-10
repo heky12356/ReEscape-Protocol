@@ -4,6 +4,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"project-yume/internal/character"
 	"project-yume/internal/utils"
@@ -12,6 +14,11 @@ import (
 )
 
 type Config struct {
+	// Version and reload metadata are updated only after a validated runtime
+	// configuration has been committed.
+	Version          uint64
+	UpdatedAt        time.Time
+	LastReloadScopes []ConfigScope
 	// 基础配置
 	Hostadd                           string
 	WsPort                            string
@@ -130,11 +137,33 @@ type Config struct {
 	TavilySafeSearch        bool
 }
 
-var config = &Config{}
+type ConfigScope string
+
+const (
+	ScopeBot     ConfigScope = "bot"
+	ScopeModel   ConfigScope = "model"
+	ScopeSkill   ConfigScope = "skill"
+	ScopeLogging ConfigScope = "logging"
+	ScopeRuntime ConfigScope = "runtime"
+)
+
+type ReloadChange struct {
+	PreviousVersion uint64
+	Version         uint64
+	Scopes          []ConfigScope
+	AppliedAt       time.Time
+}
+
+type ReloadCallback func(ReloadChange) error
+
+var config = &Config{Version: 1, UpdatedAt: time.Now()}
 
 var (
-	cm               *character.CharacterManager
-	systemBasePrompt string
+	cm                *character.CharacterManager
+	systemBasePrompt  string
+	configMu          sync.RWMutex
+	reloadCallbacksMu sync.RWMutex
+	reloadCallbacks   = make(map[ConfigScope][]ReloadCallback)
 )
 
 func init() {
@@ -271,7 +300,37 @@ func init() {
 }
 
 func GetConfig() *Config {
+	configMu.RLock()
+	defer configMu.RUnlock()
 	return config
+}
+
+// RegisterReloadCallback registers a callback for a changed configuration
+// scope. Callbacks run after candidate validation and before the new version is
+// committed. Returning an error aborts the reload.
+func RegisterReloadCallback(scope ConfigScope, callback ReloadCallback) {
+	if callback == nil {
+		return
+	}
+	reloadCallbacksMu.Lock()
+	reloadCallbacks[scope] = append(reloadCallbacks[scope], callback)
+	reloadCallbacksMu.Unlock()
+}
+
+func reloadCallbacksFor(scopes []ConfigScope) []ReloadCallback {
+	reloadCallbacksMu.RLock()
+	defer reloadCallbacksMu.RUnlock()
+	callbacks := make([]ReloadCallback, 0)
+	for _, scope := range scopes {
+		callbacks = append(callbacks, reloadCallbacks[scope]...)
+	}
+	return callbacks
+}
+
+func clearReloadCallbacks() {
+	reloadCallbacksMu.Lock()
+	reloadCallbacks = make(map[ConfigScope][]ReloadCallback)
+	reloadCallbacksMu.Unlock()
 }
 
 func getStringEnv(key string, defaultValue string) string {

@@ -1,11 +1,40 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func setupRuntimeReloadTest(t *testing.T) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "ai_profiles.json")
+	set := AIProfileSet{
+		Active: "default",
+		Profiles: map[string]AIProfile{
+			"default": {
+				AIBaseURL:     "https://example.test/v1",
+				AIModel:       "test-model",
+				AIMaxTokens:   2000,
+				AITimeout:     30,
+				AIRetryCount:  0,
+				AIRateLimit:   20,
+				AITemperature: 1,
+				AITopP:        0.9,
+			},
+		},
+	}
+	data, err := json.Marshal(set)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AI_CONFIG_FILE", path)
+}
 
 func TestValidateConfigRejectsInvalidRuntimeLimits(t *testing.T) {
 	cfg := cloneConfig(GetConfig())
@@ -16,6 +45,7 @@ func TestValidateConfigRejectsInvalidRuntimeLimits(t *testing.T) {
 }
 
 func TestReloadRuntimeConfigCommitsVersionAndScope(t *testing.T) {
+	setupRuntimeReloadTest(t)
 	clearReloadCallbacks()
 	t.Cleanup(clearReloadCallbacks)
 	callbackCalled := false
@@ -51,6 +81,7 @@ func TestReloadRuntimeConfigCommitsVersionAndScope(t *testing.T) {
 }
 
 func TestReloadRuntimeConfigCallbackFailureKeepsPreviousConfig(t *testing.T) {
+	setupRuntimeReloadTest(t)
 	clearReloadCallbacks()
 	t.Cleanup(clearReloadCallbacks)
 	RegisterReloadCallback(ScopeBot, func(ReloadChange) error {
@@ -74,6 +105,7 @@ func TestReloadRuntimeConfigCallbackFailureKeepsPreviousConfig(t *testing.T) {
 }
 
 func TestReloadRuntimeConfigSkillFailureKeepsPreviousState(t *testing.T) {
+	setupRuntimeReloadTest(t)
 	previousEnv := os.Getenv("SKILL_DIRS")
 	t.Setenv("SKILL_DIRS", filepath.Join(t.TempDir(), "missing-skills"))
 	t.Cleanup(func() {

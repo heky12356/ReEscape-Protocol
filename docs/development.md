@@ -30,6 +30,8 @@ Linux CI 还会运行 `go test -race ./...`。
 
 新增耗时或结果观测时使用 `internal/metrics.Registry` 的 counter 和 duration API，标签只使用低基数维度（例如工具名、来源、结果、模型和投递状态），不要将用户输入、请求 ID 或错误全文作为标签。
 
+配置重载测试会在临时目录创建最小合法的 AI profile，不依赖本地 `.env`、真实 API key 或被忽略的运行时配置文件。新增配置测试也应显式准备自己的 profile 和环境变量，避免在 CI 中读取开发机状态。
+
 ## 提交规范
 
 提交信息使用中文 Conventional Commits，例如：

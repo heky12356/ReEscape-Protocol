@@ -13,7 +13,7 @@ func TestFileStoreAppendListAndFlushRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new store: %v", err)
 	}
-	if err := fs.Append(context.Background(), Event{}, Event{Type: "message", SessionID: "s1"}); err != nil {
+	if err := fs.Append(context.Background(), Event{}, Event{Type: "message", RequestID: "req-1", TurnID: "turn-1", DeliveryID: "delivery-1", IntentID: "intent-1", SessionID: "s1", ToolName: "search", Model: "model-a"}); err != nil {
 		t.Fatalf("append: %v", err)
 	}
 	if err := fs.Flush(); err != nil {
@@ -27,7 +27,7 @@ func TestFileStoreAppendListAndFlushRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(events) != 1 || events[0].Type != "message" || events[0].ID == "" {
+	if len(events) != 1 || events[0].Type != "message" || events[0].ID == "" || events[0].RequestID != "req-1" || events[0].TurnID != "turn-1" || events[0].DeliveryID != "delivery-1" || events[0].IntentID != "intent-1" || events[0].ToolName != "search" || events[0].Model != "model-a" {
 		t.Fatalf("unexpected events: %#v", events)
 	}
 }

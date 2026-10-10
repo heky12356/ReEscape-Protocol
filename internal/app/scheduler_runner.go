@@ -138,7 +138,7 @@ func sendScheduledAgentMessage(ctx context.Context, c *websocket.Conn, scheduler
 	}
 	if !scheduler.IsIdleForProactive(sessionID, time.Now()) {
 		result.Events = append(result.Events, eventlog.Event{
-			Type:      "proactive_skipped",
+			Type: "proactive_skipped", RequestID: turn.RequestID(), TurnID: turn.TurnID(),
 			SessionID: sessionID,
 			UserID:    targetUserID,
 			Actor:     "runtime",
@@ -199,7 +199,7 @@ func sendScheduledAgentMessage(ctx context.Context, c *websocket.Conn, scheduler
 	}
 	if delivery.Status == service.DeliveryResultDelivered {
 		result.Events = append(result.Events, eventlog.Event{
-			Type: "reply_sent", SessionID: sessionID, UserID: targetUserID,
+			Type: "reply_sent", RequestID: delivery.TurnID, TurnID: delivery.TurnID, DeliveryID: delivery.DeliveryID, IntentID: delivery.IntentID, SessionID: sessionID, UserID: targetUserID,
 			Actor: "runtime", Message: transcript, CreatedAt: sentAt,
 			Data: map[string]any{"trigger": "proactive", "next_at": nextAt},
 		})

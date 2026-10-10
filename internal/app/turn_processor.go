@@ -280,7 +280,8 @@ func processMessageTurn(ctx context.Context, c *websocket.Conn, messageCtx handl
 	if err != nil {
 		if eventStore != nil {
 			appendErr := eventStore.Append(ctx, eventlog.Event{
-				Type: "agent_turn_failed", SessionID: messageCtx.SessionID, UserID: messageCtx.UserID,
+				Type: "agent_turn_failed", RequestID: messageCtx.RequestID, TurnID: messageCtx.RequestID,
+				SessionID: messageCtx.SessionID, UserID: messageCtx.UserID,
 				Actor: "runtime", Message: err.Error(), CreatedAt: time.Now(),
 			})
 			if appendErr != nil {
@@ -322,8 +323,8 @@ func processMessageTurn(ctx context.Context, c *websocket.Conn, messageCtx handl
 
 func deliveryEvents(result service.DeliveryResult, userID int64) []eventlog.Event {
 	events := make([]eventlog.Event, 0, len(result.Items)+2)
-	events = append(events, eventlog.Event{Type: "delivery_started", SessionID: result.SessionID, UserID: userID, Actor: "runtime", CreatedAt: result.StartedAt, Data: map[string]any{
-		"delivery_id": result.DeliveryID, "turn_id": result.TurnID, "intent_id": result.IntentID, "open_loop_id": result.OpenLoopID, "item_count": len(result.Items),
+	events = append(events, eventlog.Event{Type: "delivery_started", RequestID: result.TurnID, TurnID: result.TurnID, DeliveryID: result.DeliveryID, IntentID: result.IntentID, SessionID: result.SessionID, UserID: userID, Actor: "runtime", CreatedAt: result.StartedAt, Data: map[string]any{
+		"open_loop_id": result.OpenLoopID, "item_count": len(result.Items),
 	}})
 	for _, item := range result.Items {
 		createdAt := item.DeliveredAt
@@ -333,8 +334,8 @@ func deliveryEvents(result service.DeliveryResult, userID int64) []eventlog.Even
 		if createdAt.IsZero() {
 			createdAt = result.FinishedAt
 		}
-		events = append(events, eventlog.Event{Type: "delivery_item_" + string(item.Status), SessionID: result.SessionID, UserID: userID, Actor: "runtime", CreatedAt: createdAt, Data: map[string]any{
-			"delivery_id": result.DeliveryID, "turn_id": result.TurnID, "intent_id": result.IntentID, "open_loop_id": result.OpenLoopID, "item_index": item.Index, "kind": item.Kind, "status": string(item.Status), "message_id": item.MessageID, "asset_id": item.AssetID, "error": item.Error,
+		events = append(events, eventlog.Event{Type: "delivery_item_" + string(item.Status), RequestID: result.TurnID, TurnID: result.TurnID, DeliveryID: result.DeliveryID, IntentID: result.IntentID, SessionID: result.SessionID, UserID: userID, Actor: "runtime", CreatedAt: createdAt, Data: map[string]any{
+			"open_loop_id": result.OpenLoopID, "item_index": item.Index, "kind": item.Kind, "status": string(item.Status), "message_id": item.MessageID, "asset_id": item.AssetID, "error": item.Error,
 		}})
 	}
 	typ := "reply_delivery_failed"
@@ -347,8 +348,8 @@ func deliveryEvents(result service.DeliveryResult, userID int64) []eventlog.Even
 	if result.Status == service.DeliveryResultCancelled {
 		typ = "reply_cancelled"
 	}
-	events = append(events, eventlog.Event{Type: typ, SessionID: result.SessionID, UserID: userID, Actor: "runtime", Message: result.DeliveredContent, CreatedAt: result.FinishedAt, Data: map[string]any{
-		"delivery_id": result.DeliveryID, "turn_id": result.TurnID, "intent_id": result.IntentID, "open_loop_id": result.OpenLoopID, "status": result.Status, "first_committed": result.FirstCommitted, "delivered_count": result.DeliveredCount, "failed_count": result.FailedCount, "cancelled_count": result.CancelledCount, "error": result.Error,
+	events = append(events, eventlog.Event{Type: typ, RequestID: result.TurnID, TurnID: result.TurnID, DeliveryID: result.DeliveryID, IntentID: result.IntentID, SessionID: result.SessionID, UserID: userID, Actor: "runtime", Message: result.DeliveredContent, CreatedAt: result.FinishedAt, Data: map[string]any{
+		"open_loop_id": result.OpenLoopID, "status": result.Status, "first_committed": result.FirstCommitted, "delivered_count": result.DeliveredCount, "failed_count": result.FailedCount, "cancelled_count": result.CancelledCount, "error": result.Error,
 	}})
 	if result.IntentID != "" {
 		intentEvent := "intent_delivery_completed"
@@ -359,8 +360,8 @@ func deliveryEvents(result service.DeliveryResult, userID int64) []eventlog.Even
 		if item, ok := state.GetManager().GetIntent(result.IntentID); ok && item.Status == intent.StatusPaused {
 			intentEvent = "intent_delivery_retry_exhausted"
 		}
-		events = append(events, eventlog.Event{Type: intentEvent, SessionID: result.SessionID, UserID: userID, Actor: "runtime", CreatedAt: result.FinishedAt, Data: map[string]any{
-			"intent_id": result.IntentID, "delivery_id": result.DeliveryID, "status": result.Status, "retryable": result.Retryable, "error": result.Error,
+		events = append(events, eventlog.Event{Type: intentEvent, RequestID: result.TurnID, TurnID: result.TurnID, DeliveryID: result.DeliveryID, IntentID: result.IntentID, SessionID: result.SessionID, UserID: userID, Actor: "runtime", CreatedAt: result.FinishedAt, Data: map[string]any{
+			"status": result.Status, "retryable": result.Retryable, "error": result.Error,
 		}})
 	}
 	return events

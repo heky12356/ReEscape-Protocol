@@ -32,6 +32,7 @@ type Components struct {
 	NaturalScheduler *scheduler.NaturalScheduler
 	AgentRuntime     *agent.RuntimeHandle
 	EventStore       eventlog.Store
+	EventHooks       *eventlog.Dispatcher
 	FlushWorker      *storage.FlushWorker
 }
 
@@ -93,8 +94,9 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 	if err != nil {
 		return nil, fmt.Errorf("configure event log persistence: %w", err)
 	}
-	components.EventStore = eventStore
-	eventlog.SetDefault(eventStore)
+	components.EventHooks = eventlog.NewDispatcher(eventlog.HookOptions{})
+	components.EventStore = eventlog.NewHookedStore(eventStore, components.EventHooks)
+	eventlog.SetDefault(components.EventStore)
 
 	components.FlushWorker.Register(memory.FlushTaskName, memory.GetManager().Flush)
 	components.FlushWorker.Register(memory.ProfileFlushTaskName, memory.GetProfileManager().Flush)

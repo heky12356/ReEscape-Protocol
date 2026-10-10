@@ -26,6 +26,8 @@ Linux CI 还会运行 `go test -race ./...`。
 
 配置重载应通过 `config.ReloadRuntimeConfig` 处理。它会先构造并校验候选配置，再原子替换运行时配置；不要在业务代码中直接修改全局配置后触发副作用。需要响应配置作用域变化时，使用 `config.RegisterReloadCallback` 注册 callback，并保证 callback 可快速失败、可重复执行且不会阻塞消息主流程。
 
+事件扩展应使用 `eventlog.NewHookedStore`。blocking Hook 只用于需要在落盘前拒绝事件的策略，必须遵守传入 context 的超时；observe Hook 只用于通知、指标或派生读模型，不能依赖其成功来判断事实事件是否写入。事件关联信息优先使用 `eventlog.Event` 的顶层字段，兼容历史数据时保留旧字段读取路径。
+
 ## 提交规范
 
 提交信息使用中文 Conventional Commits，例如：

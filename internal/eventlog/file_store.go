@@ -62,8 +62,26 @@ func (s *FileStore) Append(ctx context.Context, events ...Event) error {
 	default:
 	}
 
-	now := time.Now()
+	prepared := normalizeEvents(events)
+	if len(prepared) == 0 {
+		return nil
+	}
 	s.mu.Lock()
+	for _, event := range prepared {
+		s.events = append(s.events, event)
+	}
+	s.trimLocked()
+	s.mu.Unlock()
+
+	if s.dirty != nil {
+		s.dirty.MarkDirty(FlushTaskName)
+	}
+	return nil
+}
+
+func normalizeEvents(events []Event) []Event {
+	now := time.Now()
+	prepared := make([]Event, 0, len(events))
 	for _, event := range events {
 		if event.Type == "" {
 			continue
@@ -74,15 +92,15 @@ func (s *FileStore) Append(ctx context.Context, events ...Event) error {
 		if event.CreatedAt.IsZero() {
 			event.CreatedAt = now
 		}
-		s.events = append(s.events, event)
+		if event.ToolName == "" {
+			event.ToolName = event.Tool
+		}
+		if event.Tool == "" {
+			event.Tool = event.ToolName
+		}
+		prepared = append(prepared, event)
 	}
-	s.trimLocked()
-	s.mu.Unlock()
-
-	if s.dirty != nil {
-		s.dirty.MarkDirty(FlushTaskName)
-	}
-	return nil
+	return prepared
 }
 
 func (s *FileStore) List(ctx context.Context, limit int) ([]Event, error) {

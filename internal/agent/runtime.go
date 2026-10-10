@@ -43,16 +43,24 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 	defer cancel()
 
 	state.GetManager().EnsureSession(turn.SessionID(), turn.UserID(), turn.GroupID(), turn.ChatType())
-	events := resolveTurnSkills(turn)
 	messages := r.buildMessages(turn)
 	toolPolicy := r.toolPolicy()
 	openAITools := tools.ToOpenAIToolsWithPolicy(r.registry, toolPolicy)
 	trace := Trace{RequestID: turn.RequestID(), SessionID: turn.SessionID()}
+	cfg := config.GetConfig()
+	correlation := eventlog.Correlation{
+		RequestID: turn.RequestID(), TurnID: turn.TurnID(), SessionID: turn.SessionID(),
+		UserID: turn.UserID(), Actor: turn.Actor(), Model: cfg.AiModel,
+	}
+	events := make([]eventlog.Event, 0)
+	for _, event := range resolveTurnSkills(turn) {
+		events = append(events, event.WithCorrelation(correlation))
+	}
 	scheduleManaged := false
 
 	for step := 0; step < budget.MaxSteps; step++ {
 		req := openai.ChatCompletionRequest{
-			Model:             config.GetConfig().AiModel,
+			Model:             cfg.AiModel,
 			Messages:          messages,
 			Tools:             openAITools,
 			ToolChoice:        r.toolChoiceForStep(turn, step),
@@ -85,7 +93,7 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 				Actor:     turn.Actor(),
 				Message:   reply,
 				CreatedAt: time.Now(),
-			})
+			}.WithCorrelation(correlation))
 			return TurnResult{
 				Handled:         true,
 				ShouldSend:      true,
@@ -105,7 +113,9 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 			stepTrace := stepTraceFromExecution(step, call, execution)
 			trace.Steps = append(trace.Steps, stepTrace)
 			events = append(events, eventFromStepTrace(turn, stepTrace))
-			events = append(events, execution.Result.Events...)
+			for _, event := range execution.Result.Events {
+				events = append(events, event.WithCorrelation(correlation))
+			}
 			messages = append(messages, openai.ChatCompletionMessage{
 				Role:       openai.ChatMessageRoleTool,
 				Name:       execution.ToolName,
@@ -404,12 +414,18 @@ func eventFromStepTrace(turn *TurnContext, step StepTrace) eventlog.Event {
 		data["observation"] = step.Observation
 	}
 	return eventlog.Event{
-		Type:      "tool_called",
-		SessionID: turn.SessionID(),
-		UserID:    turn.UserID(),
-		Actor:     turn.Actor(),
-		Tool:      step.ToolName,
-		Data:      data,
-		CreatedAt: step.FinishedAt,
-	}
+		Type:       "tool_called",
+		SessionID:  turn.SessionID(),
+		UserID:     turn.UserID(),
+		Actor:      turn.Actor(),
+		Tool:       step.ToolName,
+		ToolName:   step.ToolName,
+		ToolCallID: step.ToolCallID,
+		Data:       data,
+		CreatedAt:  step.FinishedAt,
+	}.WithCorrelation(eventlog.Correlation{
+		RequestID: turn.RequestID(), TurnID: turn.TurnID(), SessionID: turn.SessionID(),
+		UserID: turn.UserID(), Actor: turn.Actor(), ToolName: step.ToolName,
+		ToolCallID: step.ToolCallID, Model: config.GetConfig().AiModel,
+	})
 }

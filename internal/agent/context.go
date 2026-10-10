@@ -24,6 +24,7 @@ const (
 
 type TurnContext struct {
 	requestID                  string
+	turnID                     string
 	sessionID                  string
 	userID                     int64
 	groupID                    int64
@@ -50,6 +51,7 @@ type TurnContext struct {
 
 type TurnInput struct {
 	RequestID                  string
+	TurnID                     string
 	SessionID                  string
 	UserID                     int64
 	GroupID                    int64
@@ -88,6 +90,7 @@ func NewTurnContext(input TurnInput) *TurnContext {
 	}
 	return &TurnContext{
 		requestID:                  input.RequestID,
+		turnID:                     firstNonEmpty(input.TurnID, input.RequestID),
 		sessionID:                  input.SessionID,
 		userID:                     input.UserID,
 		groupID:                    input.GroupID,
@@ -109,8 +112,24 @@ func NewTurnContext(input TurnInput) *TurnContext {
 	}
 }
 
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
 func (t *TurnContext) RequestID() string {
 	return t.requestID
+}
+
+func (t *TurnContext) TurnID() string {
+	if t == nil {
+		return ""
+	}
+	return t.turnID
 }
 
 func (t *TurnContext) SessionID() string {

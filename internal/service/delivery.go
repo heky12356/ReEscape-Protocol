@@ -14,6 +14,7 @@ import (
 	"project-yume/internal/connect"
 	"project-yume/internal/domain/intent"
 	"project-yume/internal/eventlog"
+	"project-yume/internal/metrics"
 	"project-yume/internal/model"
 	"project-yume/internal/state"
 	"project-yume/internal/utils"
@@ -243,6 +244,23 @@ func DeliverReply(ctx context.Context, conn *websocket.Conn, request DeliveryReq
 		Items:        make([]DeliveryItemResult, len(items)),
 		StartedAt:    started,
 	}
+	defer func() {
+		// Delivery metrics are recorded once at the aggregate boundary so a
+		// partial result is visible without double-counting individual sends.
+		metrics.IncCounter("bot_delivery_attempts_total", "Delivery outcomes.", map[string]string{
+			"status":    result.Status,
+			"proactive": strconv.FormatBool(request.Proactive),
+		})
+		metrics.ObserveDuration("bot_delivery_duration", "Delivery duration.", time.Since(started), map[string]string{
+			"status":    result.Status,
+			"proactive": strconv.FormatBool(request.Proactive),
+		})
+		for _, item := range result.Items {
+			metrics.IncCounter("bot_delivery_items_total", "Delivery item outcomes.", map[string]string{
+				"kind": item.Kind, "status": string(item.Status),
+			})
+		}
+	}()
 	for i, item := range items {
 		result.Items[i] = DeliveryItemResult{Index: item.Index, Kind: item.Kind, Status: DeliveryPending, AssetID: item.AssetID}
 	}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"project-yume/internal/config"
+	"project-yume/internal/metrics"
 	"project-yume/internal/utils"
 
 	openai "github.com/sashabaranov/go-openai"
@@ -164,6 +165,16 @@ func createChatCompletionWithPolicy(ctx context.Context, request openai.ChatComp
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	startedAt := time.Now()
+	result := "error"
+	defer func() {
+		metrics.IncCounter("bot_ai_requests_total", "AI completion request outcomes.", map[string]string{
+			"kind": trace.Kind, "model": request.Model, "result": result,
+		})
+		metrics.ObserveDuration("bot_ai_request_duration", "AI completion request duration.", time.Since(startedAt), map[string]string{
+			"kind": trace.Kind, "model": request.Model,
+		})
+	}()
 
 	timeoutSeconds := cfg.AiTimeout
 	if timeoutSeconds <= 0 {
@@ -210,6 +221,7 @@ func createChatCompletionWithPolicy(ctx context.Context, request openai.ChatComp
 		cancelAttempt()
 
 		if lastErr == nil {
+			result = "success"
 			utils.LogAIRaw(trace.Kind, "response", trace.RequestID, attempt, buildAIRawResponsePayload(resp), nil)
 			return resp, nil
 		}

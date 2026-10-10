@@ -43,6 +43,8 @@ func (t *FetchTool) Name() string {
 	return "web_fetch"
 }
 
+func (t *FetchTool) Source() string { return "web" }
+
 func (t *FetchTool) Description() string {
 	return "读取指定 URL 的网页正文。适合用户提供链接，或搜索结果需要阅读全文确认时使用。"
 }

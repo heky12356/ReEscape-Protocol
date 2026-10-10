@@ -45,6 +45,8 @@ func (t *SearchTool) Name() string {
 	return "web_search"
 }
 
+func (t *SearchTool) Source() string { return "web" }
+
 func (t *SearchTool) Description() string {
 	return "搜索外部网页信息，适合最新消息、陌生实体、近期事件、法规、价格、公告或需要来源核实时使用。"
 }

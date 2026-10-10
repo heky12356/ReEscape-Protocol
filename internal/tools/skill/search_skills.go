@@ -26,6 +26,8 @@ func (t *SearchSkillsTool) Name() string {
 	return "search_skills"
 }
 
+func (t *SearchSkillsTool) Source() string { return "skill" }
+
 func (t *SearchSkillsTool) Description() string {
 	return "按当前任务搜索可能相关的标准 skill 包，只返回名称、描述和匹配原因。"
 }

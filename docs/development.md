@@ -28,6 +28,8 @@ Linux CI 还会运行 `go test -race ./...`。
 
 事件扩展应使用 `eventlog.NewHookedStore`。blocking Hook 只用于需要在落盘前拒绝事件的策略，必须遵守传入 context 的超时；observe Hook 只用于通知、指标或派生读模型，不能依赖其成功来判断事实事件是否写入。事件关联信息优先使用 `eventlog.Event` 的顶层字段，兼容历史数据时保留旧字段读取路径。
 
+新增耗时或结果观测时使用 `internal/metrics.Registry` 的 counter 和 duration API，标签只使用低基数维度（例如工具名、来源、结果、模型和投递状态），不要将用户输入、请求 ID 或错误全文作为标签。
+
 ## 提交规范
 
 提交信息使用中文 Conventional Commits，例如：

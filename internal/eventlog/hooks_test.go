@@ -66,12 +66,14 @@ func TestHookedStoreBlockingHookTimeout(t *testing.T) {
 func TestHookedStoreObserveHookIsAsyncAndIsolated(t *testing.T) {
 	base, _ := NewFileStore(nil, nil)
 	done := make(chan struct{})
+	errorDone := make(chan struct{})
 	var mu sync.Mutex
 	var hookErrors []error
 	dispatcher := NewDispatcher(HookOptions{Timeout: time.Second, ErrorHandler: func(err error) {
 		mu.Lock()
 		hookErrors = append(hookErrors, err)
 		mu.Unlock()
+		close(errorDone)
 	}})
 	dispatcher.AddObserve(func(ctx context.Context, _ Event) error {
 		select {
@@ -93,6 +95,11 @@ func TestHookedStoreObserveHookIsAsyncAndIsolated(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("observe hook did not run")
+	}
+	select {
+	case <-errorDone:
+	case <-time.After(time.Second):
+		t.Fatal("observe hook error was not reported")
 	}
 	mu.Lock()
 	defer mu.Unlock()

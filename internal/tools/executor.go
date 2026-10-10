@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"project-yume/internal/metrics"
+
 	openai "github.com/sashabaranov/go-openai"
 )
 
@@ -47,14 +49,17 @@ func (e *Executor) Execute(ctx context.Context, turn TurnView, call openai.ToolC
 		result.Error = fmt.Sprintf("unknown tool: %s", name)
 		result.Content = result.Error
 		result.DurationMs = time.Since(startedAt).Milliseconds()
+		recordToolMetrics(name, "unknown", "unknown", time.Since(startedAt))
 		return result
 	}
+	source := toolSource(tool)
 
 	if err := e.policy.Check(tool); err != nil {
 		result.Error = err.Error()
 		result.Content = result.Error
 		result.Denied = true
 		result.DurationMs = time.Since(startedAt).Milliseconds()
+		recordToolMetrics(name, source, "denied", time.Since(startedAt))
 		return result
 	}
 
@@ -66,6 +71,7 @@ func (e *Executor) Execute(ctx context.Context, turn TurnView, call openai.ToolC
 		result.Error = fmt.Sprintf("invalid tool arguments: %s", call.Function.Arguments)
 		result.Content = result.Error
 		result.DurationMs = time.Since(startedAt).Milliseconds()
+		recordToolMetrics(name, source, "invalid_arguments", time.Since(startedAt))
 		return result
 	}
 
@@ -78,11 +84,41 @@ func (e *Executor) Execute(ctx context.Context, turn TurnView, call openai.ToolC
 	if err != nil {
 		result.Error = err.Error()
 		result.Content = err.Error()
+		recordToolMetrics(name, source, "error", time.Since(startedAt))
 		return result
 	}
 
 	result.Content = summarizeToolResult(toolResult)
+	recordToolMetrics(name, source, "success", time.Since(startedAt))
 	return result
+}
+
+type sourceAwareTool interface {
+	Source() string
+}
+
+func toolSource(tool Tool) string {
+	if sourceTool, ok := tool.(sourceAwareTool); ok {
+		if source := strings.TrimSpace(sourceTool.Source()); source != "" {
+			return source
+		}
+	}
+	return "builtin"
+}
+
+func recordToolMetrics(name, source, result string, duration time.Duration) {
+	if strings.TrimSpace(name) == "" {
+		name = "unknown"
+	}
+	if strings.TrimSpace(source) == "" {
+		source = "unknown"
+	}
+	metrics.IncCounter("bot_tool_executions_total", "Tool execution outcomes.", map[string]string{
+		"tool": name, "source": source, "result": result,
+	})
+	metrics.ObserveDuration("bot_tool_duration", "Tool execution duration.", duration, map[string]string{
+		"tool": name, "source": source,
+	})
 }
 
 func (e *Executor) safeExecute(ctx context.Context, turn TurnView, tool Tool, input json.RawMessage) (result ToolResult, err error) {

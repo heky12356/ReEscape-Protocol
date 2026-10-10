@@ -34,6 +34,8 @@ func (t *ReadSkillResourceTool) Name() string {
 	return "read_skill_resource"
 }
 
+func (t *ReadSkillResourceTool) Source() string { return "skill" }
+
 func (t *ReadSkillResourceTool) Description() string {
 	return "读取指定 skill root 内 references、assets 或 scripts 中的文本资源；不会执行脚本。"
 }

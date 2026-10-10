@@ -27,6 +27,8 @@ func (t *ReadSkillTool) Name() string {
 	return "read_skill"
 }
 
+func (t *ReadSkillTool) Source() string { return "skill" }
+
 func (t *ReadSkillTool) Description() string {
 	return "读取指定 skill 的完整 SKILL.md 正文和只读元数据，不读取扩展资源。"
 }

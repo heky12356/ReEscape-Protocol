@@ -132,7 +132,26 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 			trace.Steps = append(trace.Steps, stepTrace)
 			events = append(events, eventFromStepTrace(turn, stepTrace))
 			for _, event := range execution.Result.Events {
-				events = append(events, event.WithCorrelation(correlation))
+				event = event.WithCorrelation(correlation)
+				if event.ToolName == "" {
+					event.ToolName = execution.ToolName
+				}
+				if event.Tool == "" {
+					event.Tool = event.ToolName
+				}
+				if event.ToolCallID == "" {
+					event.ToolCallID = execution.ToolCallID
+				}
+				if event.ToolProvider == "" {
+					event.ToolProvider = execution.ToolProvider
+				}
+				if event.ToolOrigin == "" {
+					event.ToolOrigin = execution.ToolOrigin
+				}
+				if event.ToolVersion == "" {
+					event.ToolVersion = execution.ToolVersion
+				}
+				events = append(events, event)
 			}
 			messages = append(messages, openai.ChatCompletionMessage{
 				Role:       openai.ChatMessageRoleTool,
@@ -385,13 +404,16 @@ func multiContentMatchesTurn(parts []openai.ChatMessagePart, turn *TurnContext) 
 func stepTraceFromExecution(step int, call openai.ToolCall, execution tools.ExecutionResult) StepTrace {
 	traceMode := config.GetConfig().ReactTraceMode
 	item := StepTrace{
-		Index:      step,
-		ToolName:   execution.ToolName,
-		ToolCallID: execution.ToolCallID,
-		Error:      execution.Error,
-		Denied:     execution.Denied,
-		Duration:   time.Duration(execution.DurationMs) * time.Millisecond,
-		FinishedAt: time.Now(),
+		Index:        step,
+		ToolName:     execution.ToolName,
+		ToolProvider: execution.ToolProvider,
+		ToolOrigin:   execution.ToolOrigin,
+		ToolVersion:  execution.ToolVersion,
+		ToolCallID:   execution.ToolCallID,
+		Error:        execution.Error,
+		Denied:       execution.Denied,
+		Duration:     time.Duration(execution.DurationMs) * time.Millisecond,
+		FinishedAt:   time.Now(),
 	}
 	if traceMode == "full" {
 		item.Arguments = call.Function.Arguments
@@ -417,10 +439,13 @@ func truncateTraceText(input string, limit int) string {
 
 func eventFromStepTrace(turn *TurnContext, step StepTrace) eventlog.Event {
 	data := map[string]any{
-		"step":        step.Index,
-		"tool_call":   step.ToolCallID,
-		"duration_ms": step.Duration.Milliseconds(),
-		"denied":      step.Denied,
+		"step":          step.Index,
+		"tool_call":     step.ToolCallID,
+		"tool_provider": step.ToolProvider,
+		"tool_origin":   step.ToolOrigin,
+		"tool_version":  step.ToolVersion,
+		"duration_ms":   step.Duration.Milliseconds(),
+		"denied":        step.Denied,
 	}
 	if step.Error != "" {
 		data["error"] = step.Error
@@ -432,18 +457,23 @@ func eventFromStepTrace(turn *TurnContext, step StepTrace) eventlog.Event {
 		data["observation"] = step.Observation
 	}
 	return eventlog.Event{
-		Type:       "tool_called",
-		SessionID:  turn.SessionID(),
-		UserID:     turn.UserID(),
-		Actor:      turn.Actor(),
-		Tool:       step.ToolName,
-		ToolName:   step.ToolName,
-		ToolCallID: step.ToolCallID,
-		Data:       data,
-		CreatedAt:  step.FinishedAt,
+		Type:         "tool_called",
+		SessionID:    turn.SessionID(),
+		UserID:       turn.UserID(),
+		Actor:        turn.Actor(),
+		Tool:         step.ToolName,
+		ToolName:     step.ToolName,
+		ToolCallID:   step.ToolCallID,
+		ToolProvider: step.ToolProvider,
+		ToolOrigin:   step.ToolOrigin,
+		ToolVersion:  step.ToolVersion,
+		Data:         data,
+		CreatedAt:    step.FinishedAt,
 	}.WithCorrelation(eventlog.Correlation{
 		RequestID: turn.RequestID(), TurnID: turn.TurnID(), SessionID: turn.SessionID(),
 		UserID: turn.UserID(), Actor: turn.Actor(), ToolName: step.ToolName,
-		ToolCallID: step.ToolCallID, Model: config.GetConfig().AiModel,
+		ToolCallID: step.ToolCallID, ToolProvider: step.ToolProvider,
+		ToolOrigin: step.ToolOrigin, ToolVersion: step.ToolVersion,
+		Model: config.GetConfig().AiModel,
 	})
 }

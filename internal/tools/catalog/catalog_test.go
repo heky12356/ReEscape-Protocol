@@ -80,6 +80,41 @@ func TestNewRegistryRegistersReadOnlySkillTools(t *testing.T) {
 	}
 }
 
+func TestNewRegistryAssignsToolProviderMetadata(t *testing.T) {
+	registry := NewRegistry(Options{
+		EnableWebTools: true,
+		SearchClient:   testSearchClient{},
+		FetchClient:    testFetchClient{},
+	})
+
+	cases := []struct {
+		name     string
+		provider string
+		origin   string
+	}{
+		{name: "get_session_state", provider: "core", origin: "go"},
+		{name: "search_skills", provider: "skill", origin: "skill"},
+		{name: "web_search", provider: "web", origin: "external"},
+	}
+	for _, testCase := range cases {
+		metadata, ok := registry.Metadata(testCase.name)
+		if !ok || metadata.Provider != testCase.provider || metadata.Origin != testCase.origin {
+			t.Fatalf("unexpected metadata for %s: %#v, %v", testCase.name, metadata, ok)
+		}
+	}
+
+	definitions := ListDefinitions(Options{
+		EnableWebTools: true,
+		SearchClient:   testSearchClient{},
+		FetchClient:    testFetchClient{},
+	})
+	for _, definition := range definitions {
+		if definition.Name == "web_search" && (definition.Provider != "web" || definition.Origin != "external") {
+			t.Fatalf("web definition is missing source metadata: %#v", definition)
+		}
+	}
+}
+
 func TestNewRegistryRegistersImageSaveToolAsWriteTool(t *testing.T) {
 	registry := NewRegistry()
 	tool, ok := registry.Get("save_image_asset")

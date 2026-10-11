@@ -12,9 +12,14 @@ type ToolResult struct {
 type ExecutionResult struct {
 	ToolCallID string
 	ToolName   string
-	Content    string
-	Result     ToolResult
-	DurationMs int64
-	Error      string
-	Denied     bool
+	// Tool metadata identifies the provider that supplied the tool. These
+	// fields are intentionally separate from the model Provider metadata.
+	ToolProvider string
+	ToolOrigin   string
+	ToolVersion  string
+	Content      string
+	Result       ToolResult
+	DurationMs   int64
+	Error        string
+	Denied       bool
 }

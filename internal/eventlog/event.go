@@ -6,37 +6,43 @@ import "time"
 // intent, and delivery. Empty fields are intentionally omitted from JSON so
 // older event snapshots remain compatible.
 type Correlation struct {
-	RequestID  string
-	TurnID     string
-	IntentID   string
-	DeliveryID string
-	SessionID  string
-	UserID     int64
-	Actor      string
-	ToolName   string
-	ToolCallID string
-	Provider   string
-	Model      string
+	RequestID    string
+	TurnID       string
+	IntentID     string
+	DeliveryID   string
+	SessionID    string
+	UserID       int64
+	Actor        string
+	ToolName     string
+	ToolCallID   string
+	ToolProvider string
+	ToolOrigin   string
+	ToolVersion  string
+	Provider     string
+	Model        string
 }
 
 type Event struct {
-	ID         string         `json:"id"`
-	Type       string         `json:"type"`
-	RequestID  string         `json:"request_id,omitempty"`
-	TurnID     string         `json:"turn_id,omitempty"`
-	IntentID   string         `json:"intent_id,omitempty"`
-	DeliveryID string         `json:"delivery_id,omitempty"`
-	SessionID  string         `json:"session_id,omitempty"`
-	UserID     int64          `json:"user_id,omitempty"`
-	Actor      string         `json:"actor,omitempty"`
-	Tool       string         `json:"tool,omitempty"` // Deprecated: use ToolName.
-	ToolName   string         `json:"tool_name,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-	Provider   string         `json:"provider,omitempty"`
-	Model      string         `json:"model,omitempty"`
-	Message    string         `json:"message,omitempty"`
-	Data       map[string]any `json:"data,omitempty"`
-	CreatedAt  time.Time      `json:"created_at"`
+	ID           string         `json:"id"`
+	Type         string         `json:"type"`
+	RequestID    string         `json:"request_id,omitempty"`
+	TurnID       string         `json:"turn_id,omitempty"`
+	IntentID     string         `json:"intent_id,omitempty"`
+	DeliveryID   string         `json:"delivery_id,omitempty"`
+	SessionID    string         `json:"session_id,omitempty"`
+	UserID       int64          `json:"user_id,omitempty"`
+	Actor        string         `json:"actor,omitempty"`
+	Tool         string         `json:"tool,omitempty"` // Deprecated: use ToolName.
+	ToolName     string         `json:"tool_name,omitempty"`
+	ToolCallID   string         `json:"tool_call_id,omitempty"`
+	ToolProvider string         `json:"tool_provider,omitempty"`
+	ToolOrigin   string         `json:"tool_origin,omitempty"`
+	ToolVersion  string         `json:"tool_version,omitempty"`
+	Provider     string         `json:"provider,omitempty"`
+	Model        string         `json:"model,omitempty"`
+	Message      string         `json:"message,omitempty"`
+	Data         map[string]any `json:"data,omitempty"`
+	CreatedAt    time.Time      `json:"created_at"`
 }
 
 func New(eventType string) Event {
@@ -81,6 +87,15 @@ func (e Event) WithCorrelation(c Correlation) Event {
 	}
 	if e.ToolCallID == "" {
 		e.ToolCallID = c.ToolCallID
+	}
+	if e.ToolProvider == "" {
+		e.ToolProvider = c.ToolProvider
+	}
+	if e.ToolOrigin == "" {
+		e.ToolOrigin = c.ToolOrigin
+	}
+	if e.ToolVersion == "" {
+		e.ToolVersion = c.ToolVersion
 	}
 	if e.Provider == "" {
 		e.Provider = c.Provider

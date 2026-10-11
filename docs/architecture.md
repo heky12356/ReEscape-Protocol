@@ -32,12 +32,14 @@ ReAct Runtime 是消息处理的唯一主链路。关闭 `ENABLE_REACT_AGENT` �
 
 - `request_id`、`turn_id`、`session_id`：请求和会话上下文
 - `intent_id`、`delivery_id`：主动任务和真实投递结果
-- `tool_name`、`tool_call_id`、`provider`、`model`：工具及模型来源
+- `tool_name`、`tool_call_id`、`tool_provider`、`tool_origin`、`tool_version`、`provider`、`model`：工具及模型来源
 
 旧事件中的 `tool` 字段仍可读取，新事件同时写入 `tool_name`。投递关联字段位于事件顶层，`data` 只保留业务细节。
 
 事件存储和扩展通知通过 `HookedStore` 分层：blocking Hook 在事实写入前串行执行，可以返回错误阻止写入；observe Hook 在写入成功后异步执行，超时、错误和 panic 会被隔离，不会改变事实日志。
 
-观测指标通过 Prometheus 文本接口暴露。工具指标包含 `tool`、`source` 和结果标签，并记录调用次数与耗时；AI 指标按请求类型和模型记录成功/失败与耗时；Delivery 指标记录投递状态、主动触达维度和每个消息单元的结果。
+观测指标通过 Prometheus 文本接口暴露。工具指标包含 `tool`、`provider`、`origin` 和结果标签，并记录调用次数与耗时；AI 指标按请求类型和模型记录成功/失败与耗时；Delivery 指标记录投递状态、主动触达维度和每个消息单元的结果。
 
 模型调用经过 `internal/llm` 的 ModelTask、Provider 和 Orchestrator 边界。当前 Agent 使用 `reply` 任务；`memory` 与 `planner` 已预留独立模型配置，分别由 `AI_MEMORY_MODEL` 和 `AI_PLANNER_MODEL` 指定，未配置时回退到 `AI_MODEL`。
+
+Tool Call 与 Tool Result 在发送给模型前、收到模型响应后和执行结果落地前进行关联校验，拒绝孤儿结果、重复或乱序 call ID。模型调用失败会生成脱敏 `FailureSnapshot` 和 `llm_request_failed` 事件；快照只保留结构与摘要哈希，`ReplayRequest` 生成占位请求，不会自动调用 Provider 或触发消息投递。

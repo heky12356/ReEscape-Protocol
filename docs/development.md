@@ -34,6 +34,8 @@ Linux CI 还会运行 `go test -race ./...`。
 
 新增模型用途时先注册 `llm.Task`，通过 Orchestrator 选择模型和 Provider；Agent、工具或业务模块不应直接依赖 `aifunction.Chat`。当前默认任务模型分别由 `AI_REPLY_MODEL`、`AI_MEMORY_MODEL`、`AI_PLANNER_MODEL` 配置，空值回退到 `AI_MODEL`。
 
+新增工具来源时通过 `tools.ToolProvider` 注册，并为工具提供 provider、origin 和 version 元数据。重复工具名必须保留冲突记录，不得覆盖已有工具。Tool Call/Tool Result 事件必须保留 call ID 和工具来源；失败快照使用 `llm.NewFailureSnapshot`，不得把原始消息、工具参数、图片 URL 或密钥写入快照。
+
 ## 提交规范
 
 提交信息使用中文 Conventional Commits，例如：

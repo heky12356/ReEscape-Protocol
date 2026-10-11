@@ -5,6 +5,9 @@ import "time"
 type Trace struct {
 	RequestID string      `json:"request_id"`
 	SessionID string      `json:"session_id"`
+	Task      string      `json:"task,omitempty"`
+	Provider  string      `json:"provider,omitempty"`
+	Model     string      `json:"model,omitempty"`
 	Steps     []StepTrace `json:"steps"`
 }
 

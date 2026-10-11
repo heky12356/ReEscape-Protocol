@@ -32,6 +32,8 @@ Linux CI 还会运行 `go test -race ./...`。
 
 配置重载测试会在临时目录创建最小合法的 AI profile，不依赖本地 `.env`、真实 API key 或被忽略的运行时配置文件。新增配置测试也应显式准备自己的 profile 和环境变量，避免在 CI 中读取开发机状态。
 
+新增模型用途时先注册 `llm.Task`，通过 Orchestrator 选择模型和 Provider；Agent、工具或业务模块不应直接依赖 `aifunction.Chat`。当前默认任务模型分别由 `AI_REPLY_MODEL`、`AI_MEMORY_MODEL`、`AI_PLANNER_MODEL` 配置，空值回退到 `AI_MODEL`。
+
 ## 提交规范
 
 提交信息使用中文 Conventional Commits，例如：

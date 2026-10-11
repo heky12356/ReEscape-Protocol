@@ -31,6 +31,9 @@ type Config struct {
 	UserPrompt                        string
 	CharacterPrompt                   string
 	AiModel                           string
+	AiReplyModel                      string
+	AiMemoryModel                     string
+	AiPlannerModel                    string
 	AiProfile                         string
 	AiConfigFile                      string
 	EnvFile                           string
@@ -225,6 +228,7 @@ func init() {
 	if err := loadActiveAIProfileIntoConfig(); err != nil {
 		utils.Warn("load ai profile config failed, fallback env values: %v", err)
 	}
+	applyTaskModelsFromEnv()
 
 	// 日志配置
 	config.LogLevel = getStringEnv("LOG_LEVEL", "INFO")

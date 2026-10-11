@@ -251,6 +251,12 @@ func loadActiveAIProfileIntoConfig() error {
 	return nil
 }
 
+func applyTaskModelsFromEnv() {
+	config.AiReplyModel = getStringEnv("AI_REPLY_MODEL", config.AiModel)
+	config.AiMemoryModel = getStringEnv("AI_MEMORY_MODEL", config.AiModel)
+	config.AiPlannerModel = getStringEnv("AI_PLANNER_MODEL", config.AiModel)
+}
+
 func normalizeAIProfileSet(set *AIProfileSet) {
 	if set.Profiles == nil {
 		set.Profiles = map[string]AIProfile{}

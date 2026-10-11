@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"project-yume/internal/aifunction"
 	"project-yume/internal/config"
 	"project-yume/internal/eventlog"
+	"project-yume/internal/llm"
 	"project-yume/internal/state"
 	"project-yume/internal/tools"
 	"project-yume/internal/utils"
@@ -17,16 +17,25 @@ import (
 )
 
 type Runtime struct {
-	registry *tools.Registry
-	executor *tools.Executor
-	budget   Budget
+	registry     *tools.Registry
+	executor     *tools.Executor
+	budget       Budget
+	orchestrator *llm.Orchestrator
 }
 
 func NewRuntime(registry *tools.Registry, executor *tools.Executor, budget Budget) *Runtime {
+	return NewRuntimeWithOrchestrator(registry, executor, budget, llm.NewDefaultOrchestrator())
+}
+
+func NewRuntimeWithOrchestrator(registry *tools.Registry, executor *tools.Executor, budget Budget, orchestrator *llm.Orchestrator) *Runtime {
+	if orchestrator == nil {
+		orchestrator = llm.NewDefaultOrchestrator()
+	}
 	return &Runtime{
-		registry: registry,
-		executor: executor,
-		budget:   budget,
+		registry:     registry,
+		executor:     executor,
+		budget:       budget,
+		orchestrator: orchestrator,
 	}
 }
 
@@ -46,11 +55,11 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 	messages := r.buildMessages(turn)
 	toolPolicy := r.toolPolicy()
 	openAITools := tools.ToOpenAIToolsWithPolicy(r.registry, toolPolicy)
-	trace := Trace{RequestID: turn.RequestID(), SessionID: turn.SessionID()}
+	trace := Trace{RequestID: turn.RequestID(), SessionID: turn.SessionID(), Task: llm.TaskReply.String()}
 	cfg := config.GetConfig()
 	correlation := eventlog.Correlation{
 		RequestID: turn.RequestID(), TurnID: turn.TurnID(), SessionID: turn.SessionID(),
-		UserID: turn.UserID(), Actor: turn.Actor(), Model: cfg.AiModel,
+		UserID: turn.UserID(), Actor: turn.Actor(), Model: cfg.AiReplyModel,
 	}
 	events := make([]eventlog.Event, 0)
 	for _, event := range resolveTurnSkills(turn) {
@@ -60,7 +69,7 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 
 	for step := 0; step < budget.MaxSteps; step++ {
 		req := openai.ChatCompletionRequest{
-			Model:             cfg.AiModel,
+			Model:             cfg.AiReplyModel,
 			Messages:          messages,
 			Tools:             openAITools,
 			ToolChoice:        r.toolChoiceForStep(turn, step),
@@ -72,7 +81,16 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 			N:                 1,
 		}
 
-		resp, err := aifunction.Chat(runCtx, req)
+		modelResult, err := r.orchestrator.Complete(runCtx, llm.TaskReply, req)
+		resp := modelResult.Response
+		if modelResult.Provider != "" {
+			trace.Provider = modelResult.Provider
+			correlation.Provider = modelResult.Provider
+		}
+		if modelResult.Model != "" {
+			trace.Model = modelResult.Model
+			correlation.Model = modelResult.Model
+		}
 		if err != nil {
 			return TurnResult{Trace: trace, Events: events, ScheduleManaged: scheduleManaged}, err
 		}

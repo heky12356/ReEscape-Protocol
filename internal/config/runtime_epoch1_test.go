@@ -44,6 +44,28 @@ func TestValidateConfigRejectsInvalidRuntimeLimits(t *testing.T) {
 	}
 }
 
+func TestTaskModelsUseDedicatedOverridesAndMainModelFallback(t *testing.T) {
+	cfg := GetConfig()
+	previousModel := cfg.AiModel
+	previousReply := cfg.AiReplyModel
+	previousMemory := cfg.AiMemoryModel
+	previousPlanner := cfg.AiPlannerModel
+	t.Cleanup(func() {
+		cfg.AiModel = previousModel
+		cfg.AiReplyModel = previousReply
+		cfg.AiMemoryModel = previousMemory
+		cfg.AiPlannerModel = previousPlanner
+	})
+	cfg.AiModel = "main-model"
+	t.Setenv("AI_REPLY_MODEL", "reply-model")
+	t.Setenv("AI_MEMORY_MODEL", "")
+	t.Setenv("AI_PLANNER_MODEL", "planner-model")
+	applyTaskModelsFromEnv()
+	if cfg.AiReplyModel != "reply-model" || cfg.AiMemoryModel != "main-model" || cfg.AiPlannerModel != "planner-model" {
+		t.Fatalf("unexpected task model routing: reply=%q memory=%q planner=%q", cfg.AiReplyModel, cfg.AiMemoryModel, cfg.AiPlannerModel)
+	}
+}
+
 func TestReloadRuntimeConfigCommitsVersionAndScope(t *testing.T) {
 	setupRuntimeReloadTest(t)
 	clearReloadCallbacks()

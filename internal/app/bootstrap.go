@@ -13,6 +13,7 @@ import (
 	"project-yume/internal/domain/affection"
 	"project-yume/internal/eventlog"
 	"project-yume/internal/inbound"
+	"project-yume/internal/llm"
 	"project-yume/internal/memory"
 	"project-yume/internal/model"
 	"project-yume/internal/scheduler"
@@ -167,7 +168,7 @@ func NewAgentRuntime() *agent.Runtime {
 		tools.Policy{AllowWriteTools: cfg.ReactAllowWriteTools},
 		toolTimeout,
 	)
-	return agent.NewRuntime(registry, executor, agent.BudgetFromConfig())
+	return agent.NewRuntimeWithOrchestrator(registry, executor, agent.BudgetFromConfig(), llm.NewDefaultOrchestrator())
 }
 
 func catalogOptions(cfg *config.Config) catalog.Options {

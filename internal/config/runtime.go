@@ -63,6 +63,7 @@ func ReloadRuntimeConfig() (err error) {
 	if err := loadActiveAIProfileIntoConfig(); err != nil {
 		return fmt.Errorf("load ai profile config failed: %w", err)
 	}
+	applyTaskModelsFromEnv()
 
 	config.EnableNaturalScheduler = getBoolEnv("ENABLE_NATURAL_SCHEDULER", config.EnableNaturalScheduler)
 	config.EnableEmotionalMemory = getBoolEnv("ENABLE_EMOTIONAL_MEMORY", config.EnableEmotionalMemory)

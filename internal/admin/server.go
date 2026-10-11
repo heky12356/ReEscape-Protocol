@@ -43,6 +43,9 @@ type configResponse struct {
 	TargetID                          int64                `json:"targetId"`
 	AIBaseURL                         string               `json:"aiBaseUrl"`
 	AIModel                           string               `json:"aiModel"`
+	AIReplyModel                      string               `json:"aiReplyModel"`
+	AIMemoryModel                     string               `json:"aiMemoryModel"`
+	AIPlannerModel                    string               `json:"aiPlannerModel"`
 	AIKeyMasked                       string               `json:"aiKeyMasked"`
 	AIKeySet                          bool                 `json:"aiKeySet"`
 	AIProfile                         string               `json:"aiProfile"`
@@ -917,6 +920,9 @@ func (s *server) buildConfigResponse() (configResponse, error) {
 		TargetID:                          cfg.TargetId,
 		AIBaseURL:                         cfg.AiBaseUrl,
 		AIModel:                           cfg.AiModel,
+		AIReplyModel:                      cfg.AiReplyModel,
+		AIMemoryModel:                     cfg.AiMemoryModel,
+		AIPlannerModel:                    cfg.AiPlannerModel,
 		AIKeyMasked:                       maskSecret(cfg.AiKEY),
 		AIKeySet:                          strings.TrimSpace(cfg.AiKEY) != "",
 		AIProfile:                         cfg.AiProfile,

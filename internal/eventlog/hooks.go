@@ -166,3 +166,25 @@ func (s *HookedStore) Append(ctx context.Context, events ...Event) error {
 	}
 	return nil
 }
+
+func (s *HookedStore) ListAfter(ctx context.Context, cursor int64, limit int) ([]Event, error) {
+	if s == nil || s.Store == nil {
+		return nil, fmt.Errorf("event store is not configured")
+	}
+	store, ok := s.Store.(CursorStore)
+	if !ok {
+		return nil, fmt.Errorf("event store does not support cursor replay")
+	}
+	return store.ListAfter(ctx, cursor, limit)
+}
+
+func (s *HookedStore) LatestCursor(ctx context.Context) (int64, error) {
+	if s == nil || s.Store == nil {
+		return 0, fmt.Errorf("event store is not configured")
+	}
+	store, ok := s.Store.(CursorStore)
+	if !ok {
+		return 0, fmt.Errorf("event store does not support cursor replay")
+	}
+	return store.LatestCursor(ctx)
+}

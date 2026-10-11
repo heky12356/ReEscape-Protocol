@@ -10,6 +10,14 @@ type Store interface {
 	List(ctx context.Context, limit int) ([]Event, error)
 }
 
+// CursorStore supports incremental event replay for consumers that reconnect
+// after receiving an earlier cursor.
+type CursorStore interface {
+	Store
+	ListAfter(ctx context.Context, cursor int64, limit int) ([]Event, error)
+	LatestCursor(ctx context.Context) (int64, error)
+}
+
 var (
 	defaultStoreMu sync.RWMutex
 	defaultStore   Store

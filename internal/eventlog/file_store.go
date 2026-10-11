@@ -18,10 +18,11 @@ const (
 )
 
 type FileStore struct {
-	mu     sync.RWMutex
-	events []Event
-	store  storage.SnapshotStore
-	dirty  storage.DirtyMarker
+	mu         sync.RWMutex
+	events     []Event
+	nextCursor int64
+	store      storage.SnapshotStore
+	dirty      storage.DirtyMarker
 }
 
 type eventStorage struct {
@@ -48,6 +49,13 @@ func NewFileStore(store storage.SnapshotStore, dirty storage.DirtyMarker) (*File
 		return nil, fmt.Errorf("parse event log failed: %w", err)
 	}
 	fs.events = append([]Event(nil), snapshot.Events...)
+	for i := range fs.events {
+		if fs.events[i].Cursor <= fs.nextCursor {
+			fs.nextCursor++
+		} else {
+			fs.nextCursor = fs.events[i].Cursor
+		}
+	}
 	fs.trimLocked()
 	return fs, nil
 }
@@ -68,6 +76,8 @@ func (s *FileStore) Append(ctx context.Context, events ...Event) error {
 	}
 	s.mu.Lock()
 	for _, event := range prepared {
+		s.nextCursor++
+		event.Cursor = s.nextCursor
 		s.events = append(s.events, event)
 	}
 	s.trimLocked()
@@ -120,6 +130,47 @@ func (s *FileStore) List(ctx context.Context, limit int) ([]Event, error) {
 	result := make([]Event, limit)
 	copy(result, s.events[start:])
 	return result, nil
+}
+
+func (s *FileStore) ListAfter(ctx context.Context, cursor int64, limit int) ([]Event, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	if cursor < 0 {
+		cursor = 0
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	start := len(s.events)
+	for i, event := range s.events {
+		if event.Cursor > cursor {
+			start = i
+			break
+		}
+	}
+	if start == len(s.events) {
+		return []Event{}, nil
+	}
+	end := len(s.events)
+	if limit > 0 && start+limit < end {
+		end = start + limit
+	}
+	result := make([]Event, end-start)
+	copy(result, s.events[start:end])
+	return result, nil
+}
+
+func (s *FileStore) LatestCursor(ctx context.Context) (int64, error) {
+	select {
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	default:
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.nextCursor, nil
 }
 
 func (s *FileStore) Flush() error {

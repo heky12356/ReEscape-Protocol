@@ -23,6 +23,7 @@ type Correlation struct {
 }
 
 type Event struct {
+	Cursor       int64          `json:"cursor,omitempty"`
 	ID           string         `json:"id"`
 	Type         string         `json:"type"`
 	RequestID    string         `json:"request_id,omitempty"`

@@ -666,13 +666,35 @@ func (s *server) handleEvents(c *gin.Context) {
 			limit = parsed
 		}
 	}
+	var after int64
+	hasAfter := false
+	if raw := strings.TrimSpace(c.Query("after")); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "after must be a non-negative event cursor"})
+			return
+		}
+		after = parsed
+		hasAfter = true
+	}
 
 	store := eventlog.Default()
 	if store == nil {
 		c.JSON(http.StatusOK, eventLogResponse{})
 		return
 	}
-	events, err := store.List(c.Request.Context(), limit)
+	var events []eventlog.Event
+	var err error
+	if hasAfter {
+		cursorStore, ok := store.(eventlog.CursorStore)
+		if !ok {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "event cursor replay is unavailable"})
+			return
+		}
+		events, err = cursorStore.ListAfter(c.Request.Context(), after, limit)
+	} else {
+		events, err = store.List(c.Request.Context(), limit)
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -108,10 +108,17 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 		return nil, fmt.Errorf("configure affection persistence: %w", err)
 	}
 
-	eventStore, err := eventlog.NewFileStore(snapshotStore, components.FlushWorker)
-	if err != nil {
-		_ = persistence.Close()
-		return nil, fmt.Errorf("configure event log persistence: %w", err)
+	var eventStore eventlog.Store
+	if persistence.Status().Backend == storage.BackendSQLite {
+		eventStore = eventlog.NewSQLiteEventStore(persistence.Database())
+	} else {
+		fileEventStore, err := eventlog.NewFileStore(snapshotStore, components.FlushWorker)
+		if err != nil {
+			_ = persistence.Close()
+			return nil, fmt.Errorf("configure event log persistence: %w", err)
+		}
+		eventStore = fileEventStore
+		components.FlushWorker.Register(eventlog.FlushTaskName, fileEventStore.Flush)
 	}
 	components.EventHooks = eventlog.NewDispatcher(eventlog.HookOptions{})
 	components.EventStore = eventlog.NewHookedStore(eventStore, components.EventHooks)
@@ -122,7 +129,6 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 	components.FlushWorker.Register(memory.FactFlushTaskName, memory.GetFactManager().Flush)
 	components.FlushWorker.Register(state.FlushTaskName, state.GetManager().Flush)
 	components.FlushWorker.Register(affection.FlushTaskName, affection.GetManager().Flush)
-	components.FlushWorker.Register(eventlog.FlushTaskName, eventStore.Flush)
 	go components.FlushWorker.Run(ctx)
 
 	go admin.Start(ctx, func() error {

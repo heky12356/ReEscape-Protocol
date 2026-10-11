@@ -256,6 +256,76 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
+.sidebar-logout {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--bg);
+}
+
+.auth-panel {
+  width: min(100%, 420px);
+  padding: 30px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: 0 12px 34px rgba(23, 35, 38, 0.08);
+}
+
+.auth-brand {
+  margin-bottom: 42px;
+}
+
+.auth-heading h1 {
+  margin: 8px 0 0;
+  font-size: 1.7rem;
+  line-height: 1.25;
+}
+
+.auth-heading p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+
+.auth-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 26px;
+}
+
+.auth-error {
+  padding: 10px 12px;
+  border: 1px solid rgba(198, 91, 66, 0.28);
+  border-radius: var(--radius-md);
+  color: #8f3d2c;
+  background: rgba(250, 224, 214, 0.8);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.auth-submit {
+  width: 100%;
+  min-height: 42px;
+  margin-top: 4px;
+}
+
+.auth-loading {
+  color: var(--muted);
+  text-align: center;
+}
+
+.auth-loading p {
+  margin: 12px 0 0;
+}
+
 .console-shell {
   min-width: 0;
   padding: 24px 28px 32px;

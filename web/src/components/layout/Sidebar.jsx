@@ -1,4 +1,4 @@
-export function Sidebar({ items, active, onChange, panel }) {
+export function Sidebar({ items, active, onChange, panel, onLogout, loggingOut }) {
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -45,6 +45,14 @@ export function Sidebar({ items, active, onChange, panel }) {
           <strong>{panel.ready.status || "unknown"}</strong>
         </div>
         <div className="sidebar-hint mono">{panel.config.environmentConfig || ".env"}</div>
+        <button
+          type="button"
+          className="btn-ghost sidebar-logout"
+          onClick={onLogout}
+          disabled={loggingOut}
+        >
+          {loggingOut ? "退出中..." : "退出登录"}
+        </button>
       </div>
     </aside>
   );

@@ -1,37 +1,53 @@
-async function fetchJSON(url, options) {
-  const request = options ? { ...options, headers: { ...(options.headers || {}) } } : { headers: {} };
-  const apiKey = getAdminAPIKey();
-  if (apiKey) {
-    request.headers.Authorization = `Bearer ${apiKey}`;
+class AdminApiError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.name = "AdminApiError";
+    this.status = status;
   }
+}
+
+async function fetchJSON(url, options = {}) {
+  const { notifyUnauthorized = true, ...fetchOptions } = options;
+  const request = {
+    ...fetchOptions,
+    credentials: "include",
+    headers: { ...(fetchOptions.headers || {}) }
+  };
   const resp = await fetch(url, request);
   const contentType = resp.headers.get("content-type") || "";
   const isJSON = contentType.includes("application/json");
   const data = isJSON ? await resp.json() : await resp.text();
 
   if (!resp.ok) {
-    if (isJSON && data?.error) {
-      throw new Error(data.error);
+    if (resp.status === 401 && notifyUnauthorized) {
+      window.dispatchEvent(new Event("admin:unauthorized"));
     }
-    throw new Error(typeof data === "string" ? data : "request failed");
+    if (isJSON && data?.error) {
+      throw new AdminApiError(data.error, resp.status);
+    }
+    throw new AdminApiError(typeof data === "string" ? data : "request failed", resp.status);
   }
   return data;
 }
 
-function getAdminAPIKey() {
-  const buildKey = typeof import.meta !== "undefined" ? import.meta.env?.VITE_ADMIN_API_KEY : "";
-  if (buildKey) {
-    return buildKey;
-  }
-  try {
-    return window.localStorage.getItem("adminApiKey") || "";
-  } catch {
-    return "";
-  }
+export function getAdminSession() {
+  return fetchJSON("/api/auth/session", { cache: "no-store", notifyUnauthorized: false });
 }
 
-export function getAdminAPIKeyForStream() {
-  return getAdminAPIKey();
+export function loginAdmin(key) {
+  return fetchJSON("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key }),
+    notifyUnauthorized: false
+  });
+}
+
+export function logoutAdmin() {
+  return fetchJSON("/api/auth/logout", {
+    method: "POST",
+    notifyUnauthorized: false
+  });
 }
 
 export const adminApi = {

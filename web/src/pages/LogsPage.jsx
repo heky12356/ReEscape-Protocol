@@ -5,7 +5,6 @@ import {
   useMemo,
   useState
 } from "react";
-import { getAdminAPIKeyForStream } from "../api/adminApi";
 import { Panel } from "../components/common/Panel";
 import { InputField, SelectField } from "../components/common/FormField";
 import { LiveTerminal } from "../components/logs/LiveTerminal";
@@ -77,13 +76,14 @@ export function LogsPage({ panel }) {
     async function consumeStream() {
       while (!controller.signal.aborted) {
         try {
-        const headers = {};
-        const apiKey = getAdminAPIKeyForStream();
-        if (apiKey) {
-          headers.Authorization = `Bearer ${apiKey}`;
-        }
-        const response = await fetch(streamUrl, { headers, signal: controller.signal });
+        const response = await fetch(streamUrl, {
+          credentials: "include",
+          signal: controller.signal
+        });
         if (!response.ok || !response.body) {
+          if (response.status === 401) {
+            window.dispatchEvent(new Event("admin:unauthorized"));
+          }
           throw new Error(`stream request failed (${response.status})`);
         }
         setConnected(true);

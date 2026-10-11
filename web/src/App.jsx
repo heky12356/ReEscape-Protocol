@@ -1,9 +1,11 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Sidebar } from "./components/layout/Sidebar";
 import { OverviewPage } from "./pages/OverviewPage";
 import { AIConfigPage } from "./pages/AIConfigPage";
 import { PromptPage } from "./pages/PromptPage";
 import { LogsPage } from "./pages/LogsPage";
+import { AuthLoadingPage, LoginPage } from "./pages/LoginPage";
+import { getAdminSession, logoutAdmin } from "./api/adminApi";
 import { useAdminPanel } from "./hooks/useAdminPanel";
 
 const MENU_ITEMS = [
@@ -38,8 +40,57 @@ const MENU_ITEMS = [
 ];
 
 export default function App() {
+  const [authState, setAuthState] = useState("checking");
+
+  useEffect(() => {
+    let active = true;
+    getAdminSession()
+      .then((data) => {
+        if (active) {
+          setAuthState(data.authenticated ? "authenticated" : "unauthenticated");
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setAuthState("unauthenticated");
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleUnauthorized = () => setAuthState("unauthenticated");
+    window.addEventListener("admin:unauthorized", handleUnauthorized);
+    return () => window.removeEventListener("admin:unauthorized", handleUnauthorized);
+  }, []);
+
+  if (authState === "checking") {
+    return <AuthLoadingPage />;
+  }
+  if (authState !== "authenticated") {
+    return <LoginPage onAuthenticated={() => setAuthState("authenticated")} />;
+  }
+
+  return <AdminConsole onLogout={() => setAuthState("unauthenticated")} />;
+}
+
+function AdminConsole({ onLogout }) {
   const [active, setActive] = useState("overview");
+  const [loggingOut, setLoggingOut] = useState(false);
   const panel = useAdminPanel();
+
+  const handleLogout = useCallback(async () => {
+    setLoggingOut(true);
+    try {
+      await logoutAdmin();
+    } finally {
+      setLoggingOut(false);
+      onLogout();
+    }
+  }, [onLogout]);
 
   const currentSection = useMemo(
     () => MENU_ITEMS.find((item) => item.key === active) || MENU_ITEMS[0],
@@ -48,7 +99,14 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar items={MENU_ITEMS} active={active} onChange={setActive} panel={panel} />
+      <Sidebar
+        items={MENU_ITEMS}
+        active={active}
+        onChange={setActive}
+        panel={panel}
+        onLogout={handleLogout}
+        loggingOut={loggingOut}
+      />
 
       <main className="console-shell">
         <header className="page-header">

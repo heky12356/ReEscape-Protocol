@@ -1,15 +1,19 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"project-yume/internal/config"
+	"project-yume/internal/eventlog"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 )
 
 func TestMaskSecret(t *testing.T) {
@@ -368,3 +372,72 @@ func TestConfigResponseDoesNotExposeWebSearchAPIKey(t *testing.T) {
 		t.Fatalf("config response contains a raw webSearchApiKey field: %s", body)
 	}
 }
+
+func TestEventStreamReplaysEventsAfterCursor(t *testing.T) {
+	cfg := config.GetConfig()
+	previousKey := cfg.AdminAPIKey
+	previousOrigins := cfg.AdminCORSOrigins
+	cfg.AdminAPIKey = "stream-key"
+	cfg.AdminCORSOrigins = nil
+	t.Cleanup(func() {
+		cfg.AdminAPIKey = previousKey
+		cfg.AdminCORSOrigins = previousOrigins
+		eventlog.SetDefault(nil)
+	})
+
+	store, err := eventlog.NewFileStore(nil, nil)
+	if err != nil {
+		t.Fatalf("create event store: %v", err)
+	}
+	if err := store.Append(context.Background(), eventlog.Event{Type: "stream_probe"}); err != nil {
+		t.Fatalf("append event: %v", err)
+	}
+	eventlog.SetDefault(eventlog.NewHookedStore(store, nil))
+
+	server := httptest.NewServer((&server{sessions: newSessionStore(), loginLimiter: newLoginLimiter()}).routes())
+	t.Cleanup(server.Close)
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/admin/events/stream?after=0&limit=10"
+	connection, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"X-API-Key": []string{"stream-key"}})
+	if err != nil {
+		t.Fatalf("dial event stream: %v", err)
+	}
+	defer connection.Close()
+	_ = connection.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var message struct {
+		Type  string         `json:"type"`
+		Event eventlog.Event `json:"event"`
+	}
+	if err := connection.ReadJSON(&message); err != nil {
+		t.Fatalf("read event stream message: %v", err)
+	}
+	if message.Type != "event" || message.Event.Cursor != 1 || message.Event.Type != "stream_probe" {
+		t.Fatalf("unexpected event stream message: %+v", message)
+	}
+}
+
+func TestEventStreamRejectsInvalidCursor(t *testing.T) {
+	cfg := config.GetConfig()
+	previousKey := cfg.AdminAPIKey
+	cfg.AdminAPIKey = "stream-key"
+	t.Cleanup(func() { cfg.AdminAPIKey = previousKey })
+	eventlog.SetDefault(eventlog.NewHookedStore(&stubEventStore{}, nil))
+	t.Cleanup(func() { eventlog.SetDefault(nil) })
+
+	engine := (&server{sessions: newSessionStore(), loginLimiter: newLoginLimiter()}).routes()
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/events/stream?after=-1", nil)
+	request.Header.Set("X-API-Key", "stream-key")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+}
+
+type stubEventStore struct{}
+
+func (s *stubEventStore) Append(context.Context, ...eventlog.Event) error     { return nil }
+func (s *stubEventStore) List(context.Context, int) ([]eventlog.Event, error) { return nil, nil }
+func (s *stubEventStore) ListAfter(context.Context, int64, int) ([]eventlog.Event, error) {
+	return nil, nil
+}
+func (s *stubEventStore) LatestCursor(context.Context) (int64, error) { return 0, nil }

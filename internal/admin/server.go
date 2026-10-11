@@ -28,6 +28,7 @@ import (
 	"project-yume/internal/webaccess"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 )
 
 const (
@@ -304,6 +305,7 @@ func (s *server) routes() *gin.Engine {
 		adminGroup.GET("/image-assets", s.handleImageAssets)
 		adminGroup.GET("/tools", s.handleTools)
 		adminGroup.GET("/events", s.handleEvents)
+		adminGroup.GET("/events/stream", s.handleEventStream)
 		adminGroup.GET("/affection/:userID", s.handleAffection)
 		adminGroup.GET("/logs/files", s.handleLogFiles)
 		adminGroup.GET("/logs/content", s.handleLogContent)
@@ -700,6 +702,110 @@ func (s *server) handleEvents(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, eventLogResponse{Events: events})
+}
+
+func (s *server) handleEventStream(c *gin.Context) {
+	store, ok := eventlog.Default().(eventlog.CursorStore)
+	if !ok {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "event cursor replay is unavailable"})
+		return
+	}
+
+	limit := 200
+	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "limit must be a positive integer"})
+			return
+		}
+		if parsed < limit {
+			limit = parsed
+		}
+	}
+	after := int64(0)
+	if raw := strings.TrimSpace(c.Query("after")); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "after must be a non-negative event cursor"})
+			return
+		}
+		after = parsed
+	} else {
+		latest, err := store.LatestCursor(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		after = latest
+	}
+
+	upgrader := websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 4096,
+		CheckOrigin: func(request *http.Request) bool {
+			origin := strings.TrimSpace(request.Header.Get("Origin"))
+			if origin == "" || allowedOrigin(origin, config.GetConfig().AdminCORSOrigins) {
+				return true
+			}
+			return origin == "http://"+request.Host || origin == "https://"+request.Host
+		},
+	}
+	connection, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		return
+	}
+	defer connection.Close()
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		for {
+			if _, _, err := connection.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	lastCursor := after
+	ticker := time.NewTicker(500 * time.Millisecond)
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	defer heartbeat.Stop()
+
+	writeEvents := func() error {
+		events, err := store.ListAfter(c.Request.Context(), lastCursor, limit)
+		if err != nil {
+			return err
+		}
+		for _, event := range events {
+			if event.Cursor <= lastCursor {
+				continue
+			}
+			if err := connection.WriteJSON(map[string]any{"type": "event", "event": event}); err != nil {
+				return err
+			}
+			lastCursor = event.Cursor
+		}
+		return nil
+	}
+	if err := writeEvents(); err != nil {
+		return
+	}
+	for {
+		select {
+		case <-closed:
+			return
+		case <-c.Request.Context().Done():
+			return
+		case <-ticker.C:
+			if err := writeEvents(); err != nil {
+				return
+			}
+		case <-heartbeat.C:
+			if err := connection.WriteJSON(map[string]any{"type": "ping", "cursor": lastCursor}); err != nil {
+				return
+			}
+		}
+	}
 }
 
 func (s *server) handleAffection(c *gin.Context) {

@@ -52,6 +52,7 @@ func NewFileStore(store storage.SnapshotStore, dirty storage.DirtyMarker) (*File
 	for i := range fs.events {
 		if fs.events[i].Cursor <= fs.nextCursor {
 			fs.nextCursor++
+			fs.events[i].Cursor = fs.nextCursor
 		} else {
 			fs.nextCursor = fs.events[i].Cursor
 		}

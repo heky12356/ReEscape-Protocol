@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -85,6 +86,10 @@ func ReloadRuntimeConfig() (err error) {
 	config.MetricsPath = getStringEnv("METRICS_PATH", config.MetricsPath)
 	config.DataDir = getStringEnv("DATA_DIR", config.DataDir)
 	config.LogDir = getStringEnv("LOG_DIR", config.LogDir)
+	config.PersistenceBackend = getStringEnv("PERSISTENCE_BACKEND", config.PersistenceBackend)
+	config.SQLitePath = getStringEnv("SQLITE_PATH", filepath.Join(config.DataDir, "runtime.sqlite"))
+	config.SQLiteBusyTimeoutMs = getIntEnv("SQLITE_BUSY_TIMEOUT_MS", config.SQLiteBusyTimeoutMs)
+	config.SQLiteBackupDir = getStringEnv("SQLITE_BACKUP_DIR", filepath.Join(config.DataDir, "backups"))
 	config.MessageAggregateIdleWindowMs = getIntEnv("MESSAGE_AGGREGATE_IDLE_WINDOW_MS", config.MessageAggregateIdleWindowMs)
 	config.MessageAggregateMaxWindowMs = getIntEnv("MESSAGE_AGGREGATE_MAX_WINDOW_MS", config.MessageAggregateMaxWindowMs)
 	config.MessageAggregateMaxMessages = getIntEnv("MESSAGE_AGGREGATE_MAX_MESSAGES", config.MessageAggregateMaxMessages)

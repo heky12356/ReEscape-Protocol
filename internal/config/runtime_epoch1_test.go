@@ -44,6 +44,37 @@ func TestValidateConfigRejectsInvalidRuntimeLimits(t *testing.T) {
 	}
 }
 
+func TestValidateConfigPersistenceSettings(t *testing.T) {
+	cfg := cloneConfig(GetConfig())
+	cfg.PersistenceBackend = "file"
+	cfg.SQLitePath = filepath.Join(t.TempDir(), "runtime.sqlite")
+	cfg.SQLiteBackupDir = t.TempDir()
+	cfg.SQLiteBusyTimeoutMs = 5000
+	if err := validateConfig(cfg); err != nil {
+		t.Fatalf("valid persistence settings rejected: %v", err)
+	}
+
+	cfg.PersistenceBackend = "unknown"
+	if err := validateConfig(cfg); err == nil {
+		t.Fatal("unsupported persistence backend was accepted")
+	}
+
+	cfg.PersistenceBackend = "file"
+	cfg.SQLiteBusyTimeoutMs = 0
+	if err := validateConfig(cfg); err == nil {
+		t.Fatal("invalid SQLite busy timeout was accepted")
+	}
+}
+
+func TestChangedScopesDetectsStorageSettings(t *testing.T) {
+	before := cloneConfig(GetConfig())
+	after := cloneConfig(before)
+	after.PersistenceBackend = "sqlite"
+	if scopes := changedScopes(before, after); !containsScope(scopes, ScopeStorage) {
+		t.Fatalf("storage change did not produce storage scope: %v", scopes)
+	}
+}
+
 func TestTaskModelsUseDedicatedOverridesAndMainModelFallback(t *testing.T) {
 	cfg := GetConfig()
 	previousModel := cfg.AiModel

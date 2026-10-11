@@ -35,6 +35,7 @@ type Components struct {
 	EventStore       eventlog.Store
 	EventHooks       *eventlog.Dispatcher
 	FlushWorker      *storage.FlushWorker
+	Persistence      *storage.Persistence
 }
 
 func Bootstrap(ctx context.Context) (*Components, error) {
@@ -74,25 +75,42 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 		cfg.MessageAggregateMaxMessages,
 	)
 
-	snapshotStore := storage.NewFileSnapshotStore(cfg.DataDir)
+	persistence, err := storage.OpenPersistence(storage.PersistenceOptions{
+		Backend:         cfg.PersistenceBackend,
+		DataDir:         cfg.DataDir,
+		SQLitePath:      cfg.SQLitePath,
+		SQLiteBackupDir: cfg.SQLiteBackupDir,
+		BusyTimeout:     time.Duration(cfg.SQLiteBusyTimeoutMs) * time.Millisecond,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("open persistence backend: %w", err)
+	}
+	components.Persistence = persistence
+	snapshotStore := persistence.Snapshots
 	if err := memory.GetManager().ConfigurePersistence(snapshotStore, components.FlushWorker); err != nil {
+		_ = persistence.Close()
 		return nil, fmt.Errorf("configure emotional memory persistence: %w", err)
 	}
 	if err := memory.GetProfileManager().ConfigurePersistence(snapshotStore, components.FlushWorker); err != nil {
+		_ = persistence.Close()
 		return nil, fmt.Errorf("configure user profile persistence: %w", err)
 	}
 	if err := memory.GetFactManager().ConfigurePersistence(snapshotStore, components.FlushWorker); err != nil {
+		_ = persistence.Close()
 		return nil, fmt.Errorf("configure fact memory persistence: %w", err)
 	}
 	if err := state.GetManager().ConfigurePersistence(snapshotStore, components.FlushWorker); err != nil {
+		_ = persistence.Close()
 		return nil, fmt.Errorf("configure session persistence: %w", err)
 	}
 	if err := affection.GetManager().ConfigurePersistence(snapshotStore, components.FlushWorker); err != nil {
+		_ = persistence.Close()
 		return nil, fmt.Errorf("configure affection persistence: %w", err)
 	}
 
 	eventStore, err := eventlog.NewFileStore(snapshotStore, components.FlushWorker)
 	if err != nil {
+		_ = persistence.Close()
 		return nil, fmt.Errorf("configure event log persistence: %w", err)
 	}
 	components.EventHooks = eventlog.NewDispatcher(eventlog.HookOptions{})
@@ -121,10 +139,22 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 }
 
 func (c *Components) Stop() error {
-	if c == nil || c.FlushWorker == nil {
+	if c == nil {
 		return nil
 	}
-	return c.FlushWorker.Stop()
+	var stopErr error
+	if c.FlushWorker != nil {
+		stopErr = c.FlushWorker.Stop()
+	}
+	if c.Persistence != nil {
+		if err := c.Persistence.Close(); err != nil {
+			if stopErr != nil {
+				return fmt.Errorf("stop flush worker: %v; close persistence: %w", stopErr, err)
+			}
+			return err
+		}
+	}
+	return stopErr
 }
 
 func StartWorkers(ctx context.Context, conn *websocket.Conn, components *Components) <-chan error {

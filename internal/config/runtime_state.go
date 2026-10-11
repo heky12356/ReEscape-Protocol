@@ -25,6 +25,19 @@ func validateConfig(cfg *Config) error {
 	if cfg == nil {
 		return fmt.Errorf("config is nil")
 	}
+	switch strings.ToLower(strings.TrimSpace(cfg.PersistenceBackend)) {
+	case "", "file":
+	case "sqlite":
+		return fmt.Errorf("sqlite persistence backend is not enabled yet; use PERSISTENCE_BACKEND=file")
+	default:
+		return fmt.Errorf("unsupported persistence backend %q", cfg.PersistenceBackend)
+	}
+	if strings.TrimSpace(cfg.SQLitePath) == "" || strings.TrimSpace(cfg.SQLiteBackupDir) == "" {
+		return fmt.Errorf("sqlite path and backup directory must not be empty")
+	}
+	if cfg.SQLiteBusyTimeoutMs <= 0 {
+		return fmt.Errorf("sqlite busy timeout must be > 0")
+	}
 	for _, origin := range cfg.AdminCORSOrigins {
 		if strings.TrimSpace(origin) == "*" {
 			return fmt.Errorf("admin CORS origins must be explicit; wildcard is not allowed")
@@ -74,9 +87,9 @@ func validateConfig(cfg *Config) error {
 
 func changedScopes(before, after *Config) []ConfigScope {
 	if before == nil || after == nil {
-		return []ConfigScope{ScopeBot, ScopeModel, ScopeSkill, ScopeLogging, ScopeRuntime}
+		return []ConfigScope{ScopeBot, ScopeModel, ScopeSkill, ScopeLogging, ScopeRuntime, ScopeStorage}
 	}
-	result := make([]ConfigScope, 0, 5)
+	result := make([]ConfigScope, 0, 6)
 	if !reflect.DeepEqual([]any{before.Hostadd, before.WsPort, before.HttpPort, before.TargetId, before.Token, before.AdminListenHost, before.AdminAPIKey, before.AdminCookieSecure, before.AdminCORSOrigins, before.OneBotDialTimeoutMs, before.OneBotReconnectInitialMs, before.OneBotReconnectMaxMs, before.OneBotHeartbeatIntervalMs, before.OneBotReadTimeoutMs, before.ShutdownTimeoutMs}, []any{after.Hostadd, after.WsPort, after.HttpPort, after.TargetId, after.Token, after.AdminListenHost, after.AdminAPIKey, after.AdminCookieSecure, after.AdminCORSOrigins, after.OneBotDialTimeoutMs, after.OneBotReconnectInitialMs, after.OneBotReconnectMaxMs, after.OneBotHeartbeatIntervalMs, after.OneBotReadTimeoutMs, after.ShutdownTimeoutMs}) {
 		result = append(result, ScopeBot)
 	}
@@ -89,7 +102,10 @@ func changedScopes(before, after *Config) []ConfigScope {
 	if !reflect.DeepEqual([]any{before.LogLevel, before.LogToFile, before.LogFormat, before.LogEnableColor, before.EnableAIRawLog, before.LogDir}, []any{after.LogLevel, after.LogToFile, after.LogFormat, after.LogEnableColor, after.EnableAIRawLog, after.LogDir}) {
 		result = append(result, ScopeLogging)
 	}
-	if !reflect.DeepEqual([]any{before.EnableNaturalScheduler, before.EnableEmotionalMemory, before.ActiveHours, before.SleepHours, before.BaseInterval, before.RandomFactor, before.ProactiveClaimLeaseMs, before.ProactiveSkipOnPendingUser, before.ProactiveUserMessageGraceMs, before.RequestIDHeader, before.EnableHealthEndpoint, before.EnableMetrics, before.MetricsPath, before.DataDir, before.MessageAggregateIdleWindowMs, before.MessageAggregateMaxWindowMs, before.MessageAggregateMaxMessages, before.EnableTimeContext, before.TimeContextTimezone, before.TimeContextFormat, before.EnableVisionInput, before.VisionImageDetail, before.EnableImageOCRFallback, before.EnableImageAssetReply, before.ImageAssetDir, before.ImageAssetIndexFile, before.EnableSpaceSegmentDelimiter, before.ContextRecentTurns, before.ContextSummaryMaxTurns, before.ContextOpenLoopLimit, before.EnableReactAgent, before.ReactMaxSteps, before.ReactToolTimeoutMs, before.ReactAllowWriteTools, before.ReactTraceMode, before.ReactTotalTimeoutMs, before.WebSearchMaxResults, before.WebToolTimeoutMs, before.WebFetchMaxBytes, before.WebFetchMaxChars, before.WebFetchUserAgent, before.TavilySearchDepth, before.TavilyTopic, before.TavilyIncludeAnswer, before.TavilyIncludeRawContent, before.TavilySafeSearch, before.Character, before.AllowCharacterIdentityExplanation, before.AiPrompt, before.BasePrompt, before.UserPrompt, before.CharacterPrompt}, []any{after.EnableNaturalScheduler, after.EnableEmotionalMemory, after.ActiveHours, after.SleepHours, after.BaseInterval, after.RandomFactor, after.ProactiveClaimLeaseMs, after.ProactiveSkipOnPendingUser, after.ProactiveUserMessageGraceMs, after.RequestIDHeader, after.EnableHealthEndpoint, after.EnableMetrics, after.MetricsPath, after.DataDir, after.MessageAggregateIdleWindowMs, after.MessageAggregateMaxWindowMs, after.MessageAggregateMaxMessages, after.EnableTimeContext, after.TimeContextTimezone, after.TimeContextFormat, after.EnableVisionInput, after.VisionImageDetail, after.EnableImageOCRFallback, after.EnableImageAssetReply, after.ImageAssetDir, after.ImageAssetIndexFile, after.EnableSpaceSegmentDelimiter, after.ContextRecentTurns, after.ContextSummaryMaxTurns, after.ContextOpenLoopLimit, after.EnableReactAgent, after.ReactMaxSteps, after.ReactToolTimeoutMs, after.ReactAllowWriteTools, after.ReactTraceMode, after.ReactTotalTimeoutMs, after.WebSearchMaxResults, after.WebToolTimeoutMs, after.WebFetchMaxBytes, after.WebFetchMaxChars, after.WebFetchUserAgent, after.TavilySearchDepth, after.TavilyTopic, after.TavilyIncludeAnswer, after.TavilyIncludeRawContent, after.TavilySafeSearch, after.Character, after.AllowCharacterIdentityExplanation, after.AiPrompt, after.BasePrompt, after.UserPrompt, after.CharacterPrompt}) {
+	if !reflect.DeepEqual([]any{before.DataDir, before.PersistenceBackend, before.SQLitePath, before.SQLiteBusyTimeoutMs, before.SQLiteBackupDir}, []any{after.DataDir, after.PersistenceBackend, after.SQLitePath, after.SQLiteBusyTimeoutMs, after.SQLiteBackupDir}) {
+		result = append(result, ScopeStorage)
+	}
+	if !reflect.DeepEqual([]any{before.EnableNaturalScheduler, before.EnableEmotionalMemory, before.ActiveHours, before.SleepHours, before.BaseInterval, before.RandomFactor, before.ProactiveClaimLeaseMs, before.ProactiveSkipOnPendingUser, before.ProactiveUserMessageGraceMs, before.RequestIDHeader, before.EnableHealthEndpoint, before.EnableMetrics, before.MetricsPath, before.MessageAggregateIdleWindowMs, before.MessageAggregateMaxWindowMs, before.MessageAggregateMaxMessages, before.EnableTimeContext, before.TimeContextTimezone, before.TimeContextFormat, before.EnableVisionInput, before.VisionImageDetail, before.EnableImageOCRFallback, before.EnableImageAssetReply, before.ImageAssetDir, before.ImageAssetIndexFile, before.EnableSpaceSegmentDelimiter, before.ContextRecentTurns, before.ContextSummaryMaxTurns, before.ContextOpenLoopLimit, before.EnableReactAgent, before.ReactMaxSteps, before.ReactToolTimeoutMs, before.ReactAllowWriteTools, before.ReactTraceMode, before.ReactTotalTimeoutMs, before.WebSearchMaxResults, before.WebToolTimeoutMs, before.WebFetchMaxBytes, before.WebFetchMaxChars, before.WebFetchUserAgent, before.TavilySearchDepth, before.TavilyTopic, before.TavilyIncludeAnswer, before.TavilyIncludeRawContent, before.TavilySafeSearch, before.Character, before.AllowCharacterIdentityExplanation, before.AiPrompt, before.BasePrompt, before.UserPrompt, before.CharacterPrompt}, []any{after.EnableNaturalScheduler, after.EnableEmotionalMemory, after.ActiveHours, after.SleepHours, after.BaseInterval, after.RandomFactor, after.ProactiveClaimLeaseMs, after.ProactiveSkipOnPendingUser, after.ProactiveUserMessageGraceMs, after.RequestIDHeader, after.EnableHealthEndpoint, after.EnableMetrics, after.MetricsPath, after.MessageAggregateIdleWindowMs, after.MessageAggregateMaxWindowMs, after.MessageAggregateMaxMessages, after.EnableTimeContext, after.TimeContextTimezone, after.TimeContextFormat, after.EnableVisionInput, after.VisionImageDetail, after.EnableImageOCRFallback, after.EnableImageAssetReply, after.ImageAssetDir, after.ImageAssetIndexFile, after.EnableSpaceSegmentDelimiter, after.ContextRecentTurns, after.ContextSummaryMaxTurns, after.ContextOpenLoopLimit, after.EnableReactAgent, after.ReactMaxSteps, after.ReactToolTimeoutMs, after.ReactAllowWriteTools, after.ReactTraceMode, after.ReactTotalTimeoutMs, after.WebSearchMaxResults, after.WebToolTimeoutMs, after.WebFetchMaxBytes, after.WebFetchMaxChars, after.WebFetchUserAgent, after.TavilySearchDepth, after.TavilyTopic, after.TavilyIncludeAnswer, after.TavilyIncludeRawContent, after.TavilySafeSearch, after.Character, after.AllowCharacterIdentityExplanation, after.AiPrompt, after.BasePrompt, after.UserPrompt, after.CharacterPrompt}) {
 		result = append(result, ScopeRuntime)
 	}
 	sort.Slice(result, func(i, j int) bool { return strings.Compare(string(result[i]), string(result[j])) < 0 })

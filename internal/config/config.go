@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -84,8 +85,12 @@ type Config struct {
 	MetricsPath          string // 指标接口路径
 
 	// 存储配置
-	DataDir string // 数据目录
-	LogDir  string // 日志目录
+	DataDir             string // 数据目录
+	LogDir              string // 日志目录
+	PersistenceBackend  string // 持久化后端：file 或 sqlite
+	SQLitePath          string // SQLite 数据库文件路径
+	SQLiteBusyTimeoutMs int    // SQLite busy_timeout（毫秒）
+	SQLiteBackupDir     string // SQLite 备份目录
 
 	// 功能开关
 	MessageAggregateIdleWindowMs int  // 消息聚合空闲窗口(毫秒)
@@ -149,6 +154,7 @@ const (
 	ScopeSkill   ConfigScope = "skill"
 	ScopeLogging ConfigScope = "logging"
 	ScopeRuntime ConfigScope = "runtime"
+	ScopeStorage ConfigScope = "storage"
 )
 
 type ReloadChange struct {
@@ -245,6 +251,10 @@ func init() {
 	// 存储配置
 	config.DataDir = getStringEnv("DATA_DIR", "./data")
 	config.LogDir = getStringEnv("LOG_DIR", "./logs")
+	config.PersistenceBackend = getStringEnv("PERSISTENCE_BACKEND", "file")
+	config.SQLitePath = getStringEnv("SQLITE_PATH", filepath.Join(config.DataDir, "runtime.sqlite"))
+	config.SQLiteBusyTimeoutMs = getIntEnv("SQLITE_BUSY_TIMEOUT_MS", 5000)
+	config.SQLiteBackupDir = getStringEnv("SQLITE_BACKUP_DIR", filepath.Join(config.DataDir, "backups"))
 
 	// 功能开关
 	config.MessageAggregateIdleWindowMs = getIntEnv("MESSAGE_AGGREGATE_IDLE_WINDOW_MS", 2000)

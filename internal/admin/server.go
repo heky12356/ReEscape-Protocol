@@ -22,6 +22,7 @@ import (
 	"project-yume/internal/domain/affection"
 	"project-yume/internal/eventlog"
 	"project-yume/internal/metrics"
+	"project-yume/internal/storage"
 	"project-yume/internal/tools"
 	"project-yume/internal/tools/catalog"
 	"project-yume/internal/utils"
@@ -216,6 +217,7 @@ type server struct {
 	reloadRuntimeConfig func() error
 	sessions            *sessionStore
 	loginLimiter        *loginLimiter
+	transfers           *storage.TransferManager
 }
 
 func Start(ctx context.Context, reloadRuntimeConfig func() error) {
@@ -224,6 +226,11 @@ func Start(ctx context.Context, reloadRuntimeConfig func() error) {
 		reloadRuntimeConfig: reloadRuntimeConfig,
 		sessions:            newSessionStore(),
 		loginLimiter:        newLoginLimiter(),
+	}
+	if transferManager, err := storage.NewTransferManager(config.GetConfig().DataDir); err != nil {
+		utils.Error("initialize transfer manager failed: %v", err)
+	} else {
+		s.transfers = transferManager
 	}
 
 	httpPort := config.GetConfig().HttpPort
@@ -306,6 +313,10 @@ func (s *server) routes() *gin.Engine {
 		adminGroup.GET("/tools", s.handleTools)
 		adminGroup.GET("/events", s.handleEvents)
 		adminGroup.GET("/events/stream", s.handleEventStream)
+		adminGroup.POST("/transfers/export", s.handleStartExport)
+		adminGroup.POST("/transfers/import", s.handleStartImport)
+		adminGroup.GET("/transfers/:id/download", s.handleDownloadTransfer)
+		adminGroup.GET("/transfers/:id", s.handleGetTransfer)
 		adminGroup.GET("/affection/:userID", s.handleAffection)
 		adminGroup.GET("/logs/files", s.handleLogFiles)
 		adminGroup.GET("/logs/content", s.handleLogContent)
@@ -321,6 +332,90 @@ func (s *server) routes() *gin.Engine {
 	})
 
 	return engine
+}
+
+func (s *server) transferManager() (*storage.TransferManager, error) {
+	if s == nil {
+		return nil, errors.New("transfer manager is not configured")
+	}
+	if s.transfers != nil {
+		return s.transfers, nil
+	}
+	manager, err := storage.NewTransferManager(config.GetConfig().DataDir)
+	if err != nil {
+		return nil, err
+	}
+	s.transfers = manager
+	return manager, nil
+}
+
+func (s *server) handleStartExport(c *gin.Context) {
+	manager, err := s.transferManager()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	job, err := manager.StartExport()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusAccepted, job)
+}
+
+func (s *server) handleStartImport(c *gin.Context) {
+	manager, err := s.transferManager()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	header, err := c.FormFile("archive")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "multipart field archive is required"})
+		return
+	}
+	file, err := header.Open()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "could not open import archive"})
+		return
+	}
+	defer file.Close()
+	job, err := manager.StartImport(file)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusAccepted, job)
+}
+
+func (s *server) handleGetTransfer(c *gin.Context) {
+	manager, err := s.transferManager()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	job, ok := manager.Get(c.Param("id"))
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "transfer job not found"})
+		return
+	}
+	c.JSON(http.StatusOK, job)
+}
+
+func (s *server) handleDownloadTransfer(c *gin.Context) {
+	manager, err := s.transferManager()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	archivePath, ok := manager.DownloadPath(c.Param("id"))
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "completed export not found"})
+		return
+	}
+	c.Header("Content-Type", "application/zip")
+	c.Header("Content-Disposition", `attachment; filename="`+filepath.Base(archivePath)+`"`)
+	c.File(archivePath)
 }
 
 func (s *server) handleAdminLogin(c *gin.Context) {

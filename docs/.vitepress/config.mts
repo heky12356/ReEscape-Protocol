@@ -19,6 +19,7 @@ export default defineConfig({
           items: [
             { text: '快速开始', link: '/quickstart' },
             { text: '配置参考', link: '/configuration' },
+            { text: '运维数据传输', link: '/operations' },
             { text: '架构概览', link: '/architecture' }
           ]
         },

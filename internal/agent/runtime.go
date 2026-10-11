@@ -68,6 +68,9 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 	scheduleManaged := false
 
 	for step := 0; step < budget.MaxSteps; step++ {
+		if err := llm.ValidateToolCallHistory(messages); err != nil {
+			return TurnResult{Trace: trace, Events: events, ScheduleManaged: scheduleManaged}, fmt.Errorf("invalid tool call history: %w", err)
+		}
 		req := openai.ChatCompletionRequest{
 			Model:             cfg.AiReplyModel,
 			Messages:          messages,
@@ -99,6 +102,9 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 		}
 
 		message := resp.Choices[0].Message
+		if err := llm.ValidateToolCallResponse(messages, message); err != nil {
+			return TurnResult{Trace: trace, Events: events, ScheduleManaged: scheduleManaged}, fmt.Errorf("invalid tool call response: %w", err)
+		}
 		if len(message.ToolCalls) == 0 {
 			reply := strings.TrimSpace(utils.CleanThinkTag(message.Content))
 			if reply == "" {
@@ -125,6 +131,9 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 		messages = append(messages, message)
 		for _, call := range message.ToolCalls {
 			execution := r.executor.Execute(runCtx, turn, call)
+			if strings.TrimSpace(execution.ToolCallID) != strings.TrimSpace(call.ID) {
+				return TurnResult{Trace: trace, Events: events, ScheduleManaged: scheduleManaged}, fmt.Errorf("tool result call_id mismatch: expected %s, got %s", call.ID, execution.ToolCallID)
+			}
 			if isScheduleManagingTool(execution) {
 				scheduleManaged = true
 			}

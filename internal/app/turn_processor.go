@@ -279,6 +279,11 @@ func processMessageTurn(ctx context.Context, c *websocket.Conn, messageCtx handl
 	agentResult, err := runtime.RunTurn(ctx, turn)
 	if err != nil {
 		if eventStore != nil {
+			if len(agentResult.Events) > 0 {
+				if appendErr := eventStore.Append(ctx, agentResult.Events...); appendErr != nil {
+					utils.Warn("append agent failure details failed: %v", appendErr)
+				}
+			}
 			appendErr := eventStore.Append(ctx, eventlog.Event{
 				Type: "agent_turn_failed", RequestID: messageCtx.RequestID, TurnID: messageCtx.RequestID,
 				SessionID: messageCtx.SessionID, UserID: messageCtx.UserID,

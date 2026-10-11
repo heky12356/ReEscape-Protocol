@@ -62,8 +62,11 @@ func TestOrchestratorPreservesProviderError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = orchestrator.Complete(context.Background(), TaskPlanner, openai.ChatCompletionRequest{Model: "planner-model"})
+	result, err := orchestrator.Complete(context.Background(), TaskPlanner, openai.ChatCompletionRequest{Model: "planner-model"})
 	if !errors.Is(err, want) {
 		t.Fatalf("error = %v, want %v", err, want)
+	}
+	if result.Failure == nil || result.Failure.Provider != "fake" || result.Failure.Error == "" {
+		t.Fatalf("expected sanitized failure snapshot, got %#v", result.Failure)
 	}
 }

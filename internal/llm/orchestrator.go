@@ -17,6 +17,7 @@ type Result struct {
 	Provider  string
 	Model     string
 	RequestID string
+	Failure   *FailureSnapshot
 }
 
 type Orchestrator struct {
@@ -79,7 +80,8 @@ func (o *Orchestrator) Complete(ctx context.Context, task Task, request openai.C
 	for _, provider := range o.providers {
 		response, err := provider.Complete(ctx, request)
 		if err != nil {
-			return Result{Task: task, Provider: provider.Name(), Model: request.Model, RequestID: requestID}, err
+			snapshot := NewFailureSnapshot(task, provider.Name(), request.Model, requestID, request, err)
+			return Result{Task: task, Provider: provider.Name(), Model: request.Model, RequestID: requestID, Failure: &snapshot}, err
 		}
 		model := strings.TrimSpace(response.Model)
 		if model == "" {
@@ -87,5 +89,7 @@ func (o *Orchestrator) Complete(ctx context.Context, task Task, request openai.C
 		}
 		return Result{Response: response, Task: task, Provider: provider.Name(), Model: model, RequestID: requestID}, nil
 	}
-	return Result{}, fmt.Errorf("no LLM provider available for task %s", task)
+	err := fmt.Errorf("no LLM provider available for task %s", task)
+	snapshot := NewFailureSnapshot(task, "", request.Model, requestID, request, err)
+	return Result{Task: task, Model: request.Model, RequestID: requestID, Failure: &snapshot}, err
 }

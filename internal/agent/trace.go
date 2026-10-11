@@ -1,14 +1,19 @@
 package agent
 
-import "time"
+import (
+	"time"
+
+	"project-yume/internal/llm"
+)
 
 type Trace struct {
-	RequestID string      `json:"request_id"`
-	SessionID string      `json:"session_id"`
-	Task      string      `json:"task,omitempty"`
-	Provider  string      `json:"provider,omitempty"`
-	Model     string      `json:"model,omitempty"`
-	Steps     []StepTrace `json:"steps"`
+	RequestID string               `json:"request_id"`
+	SessionID string               `json:"session_id"`
+	Task      string               `json:"task,omitempty"`
+	Provider  string               `json:"provider,omitempty"`
+	Model     string               `json:"model,omitempty"`
+	Failure   *llm.FailureSnapshot `json:"failure,omitempty"`
+	Steps     []StepTrace          `json:"steps"`
 }
 
 type StepTrace struct {

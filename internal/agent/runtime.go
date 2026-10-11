@@ -95,20 +95,27 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 			correlation.Model = modelResult.Model
 		}
 		if err != nil {
+			events = appendLLMFailureEvent(&trace, events, turn, correlation, req, modelResult, err)
 			return TurnResult{Trace: trace, Events: events, ScheduleManaged: scheduleManaged}, err
 		}
 		if len(resp.Choices) == 0 {
-			return TurnResult{Trace: trace, Events: events, ScheduleManaged: scheduleManaged}, ErrEmptyModelResponse
+			err := ErrEmptyModelResponse
+			events = appendLLMFailureEvent(&trace, events, turn, correlation, req, modelResult, err)
+			return TurnResult{Trace: trace, Events: events, ScheduleManaged: scheduleManaged}, err
 		}
 
 		message := resp.Choices[0].Message
 		if err := llm.ValidateToolCallResponse(messages, message); err != nil {
-			return TurnResult{Trace: trace, Events: events, ScheduleManaged: scheduleManaged}, fmt.Errorf("invalid tool call response: %w", err)
+			err = fmt.Errorf("invalid tool call response: %w", err)
+			events = appendLLMFailureEvent(&trace, events, turn, correlation, req, modelResult, err)
+			return TurnResult{Trace: trace, Events: events, ScheduleManaged: scheduleManaged}, err
 		}
 		if len(message.ToolCalls) == 0 {
 			reply := strings.TrimSpace(utils.CleanThinkTag(message.Content))
 			if reply == "" {
-				return TurnResult{Trace: trace, Events: events, ScheduleManaged: scheduleManaged}, ErrEmptyModelResponse
+				err := ErrEmptyModelResponse
+				events = appendLLMFailureEvent(&trace, events, turn, correlation, req, modelResult, err)
+				return TurnResult{Trace: trace, Events: events, ScheduleManaged: scheduleManaged}, err
 			}
 			events = append(events, eventlog.Event{
 				Type:      "agent_final_reply",
@@ -172,6 +179,30 @@ func (r *Runtime) RunTurn(ctx context.Context, turn *TurnContext) (TurnResult, e
 	}
 
 	return TurnResult{Trace: trace, Events: events, ScheduleManaged: scheduleManaged}, ErrMaxStepsExceeded
+}
+
+func appendLLMFailureEvent(trace *Trace, events []eventlog.Event, turn *TurnContext, correlation eventlog.Correlation, request openai.ChatCompletionRequest, result llm.Result, err error) []eventlog.Event {
+	if trace == nil || turn == nil {
+		return events
+	}
+	snapshot := result.Failure
+	if snapshot == nil {
+		built := llm.NewFailureSnapshot(result.Task, result.Provider, result.Model, result.RequestID, request, err)
+		snapshot = &built
+	}
+	trace.Failure = snapshot
+	return append(events, eventlog.Event{
+		Type:      "llm_request_failed",
+		RequestID: turn.RequestID(),
+		TurnID:    turn.TurnID(),
+		SessionID: turn.SessionID(),
+		UserID:    turn.UserID(),
+		Actor:     turn.Actor(),
+		Provider:  result.Provider,
+		Model:     result.Model,
+		Data:      map[string]any{"snapshot": snapshot},
+		CreatedAt: time.Now(),
+	}.WithCorrelation(correlation))
 }
 
 func (r *Runtime) toolChoiceForStep(turn *TurnContext, step int) any {

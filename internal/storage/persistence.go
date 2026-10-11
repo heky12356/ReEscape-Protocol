@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -40,6 +41,7 @@ type PersistenceStatus struct {
 type Persistence struct {
 	Snapshots SnapshotStore
 	status    PersistenceStatus
+	database  *sql.DB
 
 	closeOnce sync.Once
 	closeErr  error
@@ -68,7 +70,29 @@ func OpenPersistence(options PersistenceOptions) (*Persistence, error) {
 	}
 
 	if backend == BackendSQLite {
-		return nil, fmt.Errorf("sqlite persistence backend is not enabled yet; use PERSISTENCE_BACKEND=file")
+		database, err := openSQLiteDatabase(sqlitePath, options.BusyTimeout)
+		if err != nil {
+			return nil, err
+		}
+		if err := migrateSQLite(database); err != nil {
+			_ = database.Close()
+			return nil, fmt.Errorf("migrate SQLite database: %w", err)
+		}
+		if err := os.MkdirAll(backupDir, 0o755); err != nil {
+			_ = database.Close()
+			return nil, fmt.Errorf("create SQLite backup directory: %w", err)
+		}
+		return &Persistence{
+			Snapshots: NewSQLiteSnapshotStore(database),
+			status: PersistenceStatus{
+				Backend:         BackendSQLite,
+				DataDir:         dataDir,
+				DatabasePath:    sqlitePath,
+				BackupDirectory: backupDir,
+				Ready:           true,
+			},
+			database: database,
+		}, nil
 	}
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create persistence data directory: %w", err)
@@ -97,6 +121,17 @@ func (p *Persistence) Close() error {
 	if p == nil {
 		return nil
 	}
-	p.closeOnce.Do(func() {})
+	p.closeOnce.Do(func() {
+		if p.database != nil {
+			p.closeErr = p.database.Close()
+		}
+	})
 	return p.closeErr
+}
+
+func (p *Persistence) Database() *sql.DB {
+	if p == nil {
+		return nil
+	}
+	return p.database
 }

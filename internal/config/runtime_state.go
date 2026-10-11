@@ -28,7 +28,6 @@ func validateConfig(cfg *Config) error {
 	switch strings.ToLower(strings.TrimSpace(cfg.PersistenceBackend)) {
 	case "", "file":
 	case "sqlite":
-		return fmt.Errorf("sqlite persistence backend is not enabled yet; use PERSISTENCE_BACKEND=file")
 	default:
 		return fmt.Errorf("unsupported persistence backend %q", cfg.PersistenceBackend)
 	}

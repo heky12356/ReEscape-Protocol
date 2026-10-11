@@ -31,7 +31,19 @@ Copy-Item .env.example .env
 ADMIN_LISTEN_HOST=127.0.0.1
 ADMIN_API_KEY=请替换为随机长密钥
 ADMIN_CORS_ORIGINS=http://127.0.0.1:8088,http://localhost:5173
+ADMIN_COOKIE_SECURE=false
 ```
+
+浏览器打开管理后台后会进入登录页。输入 `ADMIN_API_KEY` 后，后端签发有效期为 8 小时的 HttpOnly 会话 Cookie；密钥不会写入浏览器存储、前端构建变量、配置响应或日志。服务重启后内存会话失效，需要重新登录。生产 HTTPS 部署时将 `ADMIN_CORS_ORIGINS` 改为实际管理域名，并设置 `ADMIN_COOKIE_SECURE=true`：
+
+```env
+ADMIN_LISTEN_HOST=127.0.0.1
+ADMIN_API_KEY=请替换为随机长密钥
+ADMIN_CORS_ORIGINS=https://admin.example.com
+ADMIN_COOKIE_SECURE=true
+```
+
+不要把 `ADMIN_API_KEY` 配置到 `VITE_*` 变量、前端静态文件或公开仓库。CORS 来源必须逐项列出，不能使用 `*`。
 
 OneBot 连接断开后会自动退避重连，可通过 `ONEBOT_RECONNECT_INITIAL_MS`、`ONEBOT_RECONNECT_MAX_MS`、`ONEBOT_HEARTBEAT_INTERVAL_MS` 和 `ONEBOT_READ_TIMEOUT_MS` 调整。
 
@@ -137,7 +149,40 @@ go run ./cmd/bot
 
 如果修改了 `HttpPort`，这里也会跟着变化。
 
-## 7. 开启 ReAct 工具模式
+## 7. 生产反向代理
+
+生产环境建议让 Go 服务继续监听本机地址，由 Nginx、Caddy 或云负载均衡器负责 HTTPS 和可信域名。下面是 Nginx 的最小示例，证书路径和域名请替换为实际值：
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name admin.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/admin.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/admin.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8088;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}
+```
+
+对应的 `.env` 至少应包含：
+
+```env
+ADMIN_LISTEN_HOST=127.0.0.1
+ADMIN_CORS_ORIGINS=https://admin.example.com
+ADMIN_COOKIE_SECURE=true
+```
+
+确认防火墙只公开代理端口，不要把后端 `8088` 直接暴露到公网。
+
+## 8. 开启 ReAct 工具模式
 
 当前可以通过 `.env` 控制是否启用 ReAct Agent：
 
@@ -168,7 +213,7 @@ REACT_ALLOW_WRITE_TOOLS=true
 
 如需允许 agent 根据用户约定设置下一次主动触达，例如“晚上九点再来找我”“半小时后提醒我一下”或“今天先别主动找我了”，请开启 `REACT_ALLOW_WRITE_TOOLS=true`。查询当前计划的 `get_proactive_schedule` 是只读工具，不需要开启写工具。
 
-## 8. 可选：配置 ReAct Skills
+## 9. 可选：配置 ReAct Skills
 
 Skills 是 ReAct 的只读策略层，用来给特定场景提供回复流程，例如安慰、冲突修复、主动触达约定或技术解释。默认已启用，并从项目内置目录加载：
 
@@ -206,7 +251,7 @@ description: Use when the user expresses sadness, stress, fatigue, disappointmen
 
 `SKILL_DIRS` 支持逗号分隔多个目录。新增或删除 skill 后，建议重启机器人；通过管理后台保存运行时配置时也会触发 skill 重新加载。
 
-## 9. 可选：开启 Web Tools
+## 10. 可选：开启 Web Tools
 
 `web_search` 和 `web_fetch` 是 ReAct 只读工具，默认关闭。需要稳定 agent 搜索时推荐 Tavily：
 
@@ -231,7 +276,7 @@ WEB_SEARCH_ENDPOINT=http://127.0.0.1:8888/search
 
 SearXNG 需要启用 JSON search API，并把 endpoint 配到 `/search`。公开 SearXNG 实例可能返回 HTML bot challenge，不建议依赖。工具注册类配置修改后建议重启机器人。
 
-## 10. 开发模式启动前端
+## 11. 开发模式启动前端
 
 如果需要单独调试前端：
 
@@ -246,7 +291,7 @@ npm run dev
 
 前端会把 `/api` 代理到后端管理服务。
 
-## 11. 生产构建前端
+## 12. 生产构建前端
 
 ```powershell
 Set-Location web
@@ -260,7 +305,7 @@ Set-Location ..
 
 Go 管理后台会直接托管这批静态文件。
 
-## 12. 核验启动是否正常
+## 13. 核验启动是否正常
 
 浏览器或命令行检查：
 
@@ -276,7 +321,7 @@ Invoke-WebRequest http://127.0.0.1:8088/readyz
 Invoke-WebRequest http://127.0.0.1:8088/metrics
 ```
 
-## 13. 建议先关注的配置项
+## 14. 建议先关注的配置项
 
 ### 连接和身份
 
@@ -329,7 +374,7 @@ Invoke-WebRequest http://127.0.0.1:8088/metrics
 - `MESSAGE_AGGREGATE_MAX_WINDOW_MS`
 - `MESSAGE_AGGREGATE_MAX_MESSAGES`
 
-## 14. 常见第一次启动问题
+## 15. 常见第一次启动问题
 
 - 后端能启动但不回复：先确认 `TARGETID` 是否正确，并检查消息来源是否符合当前过滤规则。
 - 启动时报 character config not found：确认 `CHARACTER` 对应的 `config/character/<name>.json` 存在。

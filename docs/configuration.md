@@ -37,7 +37,20 @@ Skills 默认从 `./config/skills` 加载，可通过 `ENABLE_SKILLS`、`SKILL_D
 
 ## 安全边界
 
-管理 API 默认要求 `ADMIN_API_KEY`，管理服务默认监听 `127.0.0.1`。生产部署应设置 `ADMIN_CORS_ORIGINS` 白名单，并确保 `DATA_DIR`、`LOG_DIR` 具备最小写权限。
+管理服务默认监听 `127.0.0.1`。浏览器管理后台通过后端配置的单个 `ADMIN_API_KEY` 登录，不使用用户名体系或密码哈希。这个密钥按当前设计保留为后端明文配置，只能放在服务器 `.env`、进程环境或部署平台的私有 Secret 中，不得放进 `VITE_*` 变量、前端静态文件、配置响应和日志。
+
+```env
+ADMIN_LISTEN_HOST=127.0.0.1
+ADMIN_API_KEY=请替换为随机长密钥
+ADMIN_CORS_ORIGINS=https://admin.example.com
+ADMIN_COOKIE_SECURE=true
+```
+
+登录成功后后端签发 `admin_session` HttpOnly、SameSite=Lax Cookie，会话默认有效期 8 小时并保存在进程内存中。服务重启或 `ADMIN_API_KEY` 轮换后，已有会话失效。CLI 等兼容客户端仍可使用 `Authorization: Bearer <ADMIN_API_KEY>`，浏览器主流程不再保存 Bearer 密钥。
+
+登录失败按客户端 IP 限流；短时间连续失败会暂时返回 `429`。管理写请求会校验 `Origin`，CORS 只允许显式配置的来源，不能配置 `*`。生产环境应通过 HTTPS 反向代理暴露管理后台，并确保 `DATA_DIR`、`LOG_DIR` 具备最小写权限。
+
+开发环境使用 HTTP 时可设置 `ADMIN_COOKIE_SECURE=false`；浏览器通过 HTTPS 访问时（包括 TLS 在反向代理终止）必须设置 `ADMIN_COOKIE_SECURE=true`。
 
 ## 运行时重载
 

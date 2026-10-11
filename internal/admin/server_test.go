@@ -144,7 +144,7 @@ func TestAdminLoginRejectsWrongKey(t *testing.T) {
 	cfg.AdminAPIKey = "correct-key"
 	defer func() { cfg.AdminAPIKey = previous }()
 
-	s := &server{sessions: newSessionStore()}
+	s := &server{sessions: newSessionStore(), loginLimiter: newLoginLimiter()}
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	engine.POST("/login", s.handleAdminLogin)
@@ -158,6 +158,67 @@ func TestAdminLoginRejectsWrongKey(t *testing.T) {
 	}
 	if resp.Header().Get("Set-Cookie") != "" {
 		t.Fatalf("wrong key unexpectedly set a cookie: %q", resp.Header().Get("Set-Cookie"))
+	}
+	if strings.Contains(resp.Body.String(), "correct-key") {
+		t.Fatalf("wrong key response exposed configured key: %s", resp.Body.String())
+	}
+}
+
+func TestAdminLoginUsesSameErrorForEmptyAndWrongKeys(t *testing.T) {
+	cfg := config.GetConfig()
+	previous := cfg.AdminAPIKey
+	cfg.AdminAPIKey = "correct-key"
+	defer func() { cfg.AdminAPIKey = previous }()
+
+	s := &server{sessions: newSessionStore(), loginLimiter: newLoginLimiter()}
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.POST("/login", s.handleAdminLogin)
+
+	requests := []string{`{"key":"wrong-key"}`, `{"key":""}`, `{`}
+	for index, body := range requests {
+		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp := httptest.NewRecorder()
+		engine.ServeHTTP(resp, req)
+		if resp.Code != http.StatusUnauthorized {
+			t.Fatalf("request %d status = %d, want %d", index, resp.Code, http.StatusUnauthorized)
+		}
+		if resp.Body.String() != `{"error":"invalid admin key"}` {
+			t.Fatalf("request %d body = %q, want generic invalid-key response", index, resp.Body.String())
+		}
+	}
+}
+
+func TestAdminLoginRateLimitsFailuresByClientIP(t *testing.T) {
+	cfg := config.GetConfig()
+	previous := cfg.AdminAPIKey
+	cfg.AdminAPIKey = "correct-key"
+	defer func() { cfg.AdminAPIKey = previous }()
+
+	s := &server{sessions: newSessionStore(), loginLimiter: newLoginLimiter()}
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.POST("/login", s.handleAdminLogin)
+	for attempt := 0; attempt < loginFailureLimit; attempt++ {
+		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"key":"wrong-key"}`))
+		req.Header.Set("Content-Type", "application/json")
+		resp := httptest.NewRecorder()
+		engine.ServeHTTP(resp, req)
+		if resp.Code != http.StatusUnauthorized && resp.Code != http.StatusTooManyRequests {
+			t.Fatalf("attempt %d status = %d, want unauthorized or rate limited", attempt+1, resp.Code)
+		}
+	}
+
+	blocked := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"key":"correct-key"}`))
+	blocked.Header.Set("Content-Type", "application/json")
+	blockedResp := httptest.NewRecorder()
+	engine.ServeHTTP(blockedResp, blocked)
+	if blockedResp.Code != http.StatusTooManyRequests {
+		t.Fatalf("blocked login status = %d, want %d", blockedResp.Code, http.StatusTooManyRequests)
+	}
+	if blockedResp.Header().Get("Retry-After") == "" {
+		t.Fatal("blocked login did not include Retry-After")
 	}
 }
 
@@ -185,6 +246,101 @@ func TestCORSMiddlewareUsesConfiguredAllowlist(t *testing.T) {
 	engine.ServeHTTP(deniedResp, denied)
 	if deniedResp.Code != http.StatusForbidden {
 		t.Fatalf("denied preflight status = %d, want %d", deniedResp.Code, http.StatusForbidden)
+	}
+}
+
+func TestCORSMiddlewareRejectsWildcardWithCredentials(t *testing.T) {
+	previous := config.GetConfig().AdminCORSOrigins
+	config.GetConfig().AdminCORSOrigins = []string{"*"}
+	defer func() { config.GetConfig().AdminCORSOrigins = previous }()
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(corsMiddleware())
+	engine.GET("/resource", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+	request := httptest.NewRequest(http.MethodGet, "/resource", nil)
+	request.Header.Set("Origin", "https://attacker.example")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if got := response.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("wildcard CORS unexpectedly allowed origin %q", got)
+	}
+
+	preflight := httptest.NewRequest(http.MethodOptions, "/resource", nil)
+	preflight.Header.Set("Origin", "https://attacker.example")
+	preflightResponse := httptest.NewRecorder()
+	engine.ServeHTTP(preflightResponse, preflight)
+	if preflightResponse.Code != http.StatusForbidden {
+		t.Fatalf("wildcard preflight status = %d, want %d", preflightResponse.Code, http.StatusForbidden)
+	}
+}
+
+func TestSessionWritesRequireAllowedOriginButBearerWritesRemainCompatible(t *testing.T) {
+	cfg := config.GetConfig()
+	previousKey := cfg.AdminAPIKey
+	previousOrigins := cfg.AdminCORSOrigins
+	previousSecure := cfg.AdminCookieSecure
+	cfg.AdminAPIKey = "test-origin-key"
+	cfg.AdminCORSOrigins = []string{"https://console.example"}
+	cfg.AdminCookieSecure = false
+	t.Cleanup(func() {
+		cfg.AdminAPIKey = previousKey
+		cfg.AdminCORSOrigins = previousOrigins
+		cfg.AdminCookieSecure = previousSecure
+	})
+
+	s := &server{sessions: newSessionStore(), loginLimiter: newLoginLimiter()}
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	auth := engine.Group("/api/auth")
+	auth.POST("/login", s.handleAdminLogin)
+	admin := engine.Group("/api/admin")
+	admin.Use(adminAuthMiddleware(s.sessions), adminWriteOriginMiddleware())
+	admin.PUT("/write", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+	loginBody, _ := json.Marshal(adminLoginRequest{Key: "test-origin-key"})
+	login := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(string(loginBody)))
+	login.Header.Set("Content-Type", "application/json")
+	loginResp := httptest.NewRecorder()
+	engine.ServeHTTP(loginResp, login)
+	if loginResp.Code != http.StatusOK {
+		t.Fatalf("login status = %d, want %d", loginResp.Code, http.StatusOK)
+	}
+	cookies := loginResp.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("expected one session cookie, got %d", len(cookies))
+	}
+
+	for _, test := range []struct {
+		name   string
+		origin string
+		status int
+	}{
+		{name: "allowed session origin", origin: "https://console.example", status: http.StatusNoContent},
+		{name: "denied session origin", origin: "https://attacker.example", status: http.StatusForbidden},
+		{name: "missing session origin", status: http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPut, "/api/admin/write", nil)
+			req.AddCookie(cookies[0])
+			if test.origin != "" {
+				req.Header.Set("Origin", test.origin)
+			}
+			resp := httptest.NewRecorder()
+			engine.ServeHTTP(resp, req)
+			if resp.Code != test.status {
+				t.Fatalf("status = %d, want %d", resp.Code, test.status)
+			}
+		})
+	}
+
+	bearer := httptest.NewRequest(http.MethodPut, "/api/admin/write", nil)
+	bearer.Header.Set("Authorization", "Bearer test-origin-key")
+	bearerResp := httptest.NewRecorder()
+	engine.ServeHTTP(bearerResp, bearer)
+	if bearerResp.Code != http.StatusNoContent {
+		t.Fatalf("Bearer write status = %d, want %d", bearerResp.Code, http.StatusNoContent)
 	}
 }
 

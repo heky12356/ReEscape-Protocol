@@ -164,12 +164,36 @@ func corsMiddleware() gin.HandlerFunc {
 }
 
 func allowedOrigin(origin string, configured []string) bool {
+	origin = strings.TrimSpace(origin)
+	if origin == "" || origin == "null" {
+		return false
+	}
 	for _, candidate := range configured {
-		if strings.TrimSpace(candidate) == origin {
+		candidate = strings.TrimSpace(candidate)
+		if candidate != "" && candidate != "*" && candidate == origin {
 			return true
 		}
 	}
 	return false
+}
+
+func adminWriteOriginMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead || c.Request.Method == http.MethodOptions {
+			c.Next()
+			return
+		}
+		if authMethod, _ := c.Get("admin_auth_method"); authMethod != "session" {
+			c.Next()
+			return
+		}
+		origin := strings.TrimSpace(c.GetHeader("Origin"))
+		if !allowedOrigin(origin, config.GetConfig().AdminCORSOrigins) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "request origin is not allowed"})
+			return
+		}
+		c.Next()
+	}
 }
 
 func adminAuthMiddleware(stores ...*sessionStore) gin.HandlerFunc {
@@ -188,6 +212,7 @@ func adminAuthMiddleware(stores ...*sessionStore) gin.HandlerFunc {
 		}
 
 		if cookie, err := c.Request.Cookie(adminSessionCookie); err == nil && sessions.valid(cookie.Value, time.Now(), cfg.AdminAPIKey) {
+			c.Set("admin_auth_method", "session")
 			c.Next()
 			return
 		}
@@ -207,6 +232,7 @@ func adminAuthMiddleware(stores ...*sessionStore) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid admin API key"})
 			return
 		}
+		c.Set("admin_auth_method", "legacy")
 		c.Next()
 	}
 }

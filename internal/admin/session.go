@@ -15,6 +15,9 @@ import (
 const (
 	adminSessionCookie = "admin_session"
 	adminSessionTTL    = 8 * time.Hour
+	loginFailureLimit  = 5
+	loginFailureWindow = time.Minute
+	loginBlockDuration = time.Minute
 )
 
 type adminSession struct {
@@ -27,6 +30,88 @@ type adminSession struct {
 type sessionStore struct {
 	mu       sync.Mutex
 	sessions map[string]adminSession
+}
+
+type loginAttempt struct {
+	WindowStartedAt time.Time
+	Failures        int
+	BlockedUntil    time.Time
+}
+
+type loginLimiter struct {
+	mu       sync.Mutex
+	attempts map[string]loginAttempt
+}
+
+func newLoginLimiter() *loginLimiter {
+	return &loginLimiter{attempts: make(map[string]loginAttempt)}
+}
+
+func (l *loginLimiter) allow(ip string, now time.Time) (bool, time.Duration) {
+	if l == nil {
+		return true, 0
+	}
+	ip = normalizeClientIP(ip)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.pruneLocked(now)
+	attempt, ok := l.attempts[ip]
+	if !ok || !now.Before(attempt.WindowStartedAt.Add(loginFailureWindow)) {
+		return true, 0
+	}
+	if now.Before(attempt.BlockedUntil) {
+		return false, attempt.BlockedUntil.Sub(now)
+	}
+	return true, 0
+}
+
+func (l *loginLimiter) failure(ip string, now time.Time) (blocked bool, retryAfter time.Duration) {
+	if l == nil {
+		return false, 0
+	}
+	ip = normalizeClientIP(ip)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.pruneLocked(now)
+	attempt := l.attempts[ip]
+	if attempt.WindowStartedAt.IsZero() || !now.Before(attempt.WindowStartedAt.Add(loginFailureWindow)) {
+		attempt = loginAttempt{WindowStartedAt: now}
+	}
+	attempt.Failures++
+	if attempt.Failures >= loginFailureLimit {
+		attempt.BlockedUntil = now.Add(loginBlockDuration)
+	}
+	l.attempts[ip] = attempt
+	if now.Before(attempt.BlockedUntil) {
+		return true, attempt.BlockedUntil.Sub(now)
+	}
+	return false, 0
+}
+
+func (l *loginLimiter) success(ip string) {
+	if l == nil {
+		return
+	}
+	ip = normalizeClientIP(ip)
+	l.mu.Lock()
+	delete(l.attempts, ip)
+	l.mu.Unlock()
+}
+
+func (l *loginLimiter) pruneLocked(now time.Time) {
+	for ip, attempt := range l.attempts {
+		if !now.Before(attempt.WindowStartedAt.Add(loginFailureWindow)) && !now.Before(attempt.BlockedUntil) {
+			delete(l.attempts, ip)
+		}
+	}
+}
+
+func normalizeClientIP(ip string) string {
+	trimmed := strings.TrimSpace(ip)
+	if trimmed == "" {
+		return "unknown"
+	}
+	return trimmed
 }
 
 func newSessionStore() *sessionStore {

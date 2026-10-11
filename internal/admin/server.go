@@ -214,6 +214,7 @@ type server struct {
 	webDistDir          string
 	reloadRuntimeConfig func() error
 	sessions            *sessionStore
+	loginLimiter        *loginLimiter
 }
 
 func Start(ctx context.Context, reloadRuntimeConfig func() error) {
@@ -221,6 +222,7 @@ func Start(ctx context.Context, reloadRuntimeConfig func() error) {
 		webDistDir:          filepath.Clean("./web/dist"),
 		reloadRuntimeConfig: reloadRuntimeConfig,
 		sessions:            newSessionStore(),
+		loginLimiter:        newLoginLimiter(),
 	}
 
 	httpPort := config.GetConfig().HttpPort
@@ -275,6 +277,9 @@ func (s *server) routes() *gin.Engine {
 	if s.sessions == nil {
 		s.sessions = newSessionStore()
 	}
+	if s.loginLimiter == nil {
+		s.loginLimiter = newLoginLimiter()
+	}
 	if cfg.EnableHealthEndpoint {
 		engine.GET("/healthz", s.handleHealth)
 		engine.GET("/readyz", s.handleReady)
@@ -291,7 +296,7 @@ func (s *server) routes() *gin.Engine {
 	}
 
 	adminGroup := engine.Group("/api/admin")
-	adminGroup.Use(adminAuthMiddleware(s.sessions))
+	adminGroup.Use(adminAuthMiddleware(s.sessions), adminWriteOriginMiddleware())
 	{
 		adminGroup.GET("/config", s.handleGetConfig)
 		adminGroup.PUT("/config", s.handlePutConfig)
@@ -323,22 +328,50 @@ func (s *server) handleAdminLogin(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "admin API key is not configured"})
 		return
 	}
+	if s.loginLimiter == nil {
+		s.loginLimiter = newLoginLimiter()
+	}
+	now := time.Now()
+	clientIP := c.ClientIP()
+	if allowed, retryAfter := s.loginLimiter.allow(clientIP, now); !allowed {
+		writeLoginRateLimit(c, retryAfter)
+		return
+	}
 	var req adminLoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid login request"})
+		s.writeLoginFailure(c, clientIP, now)
 		return
 	}
 	if !constantTimeSecretEqual(req.Key, cfg.AdminAPIKey) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid admin key"})
+		s.writeLoginFailure(c, clientIP, now)
 		return
 	}
-	token, expiresAt, err := s.sessions.create(time.Now(), cfg.AdminAPIKey)
+	s.loginLimiter.success(clientIP)
+	token, expiresAt, err := s.sessions.create(now, cfg.AdminAPIKey)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not create admin session"})
 		return
 	}
 	setAdminSessionCookie(c, token, expiresAt, cfg.AdminCookieSecure)
 	c.JSON(http.StatusOK, adminSessionResponse{Authenticated: true})
+}
+
+func (s *server) writeLoginFailure(c *gin.Context, clientIP string, now time.Time) {
+	blocked, retryAfter := s.loginLimiter.failure(clientIP, now)
+	if blocked {
+		writeLoginRateLimit(c, retryAfter)
+		return
+	}
+	c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid admin key"})
+}
+
+func writeLoginRateLimit(c *gin.Context, retryAfter time.Duration) {
+	seconds := int(retryAfter.Seconds())
+	if seconds < 1 {
+		seconds = 1
+	}
+	c.Header("Retry-After", strconv.Itoa(seconds))
+	c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many login attempts"})
 }
 
 func (s *server) handleAdminSession(c *gin.Context) {

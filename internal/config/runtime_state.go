@@ -25,6 +25,11 @@ func validateConfig(cfg *Config) error {
 	if cfg == nil {
 		return fmt.Errorf("config is nil")
 	}
+	for _, origin := range cfg.AdminCORSOrigins {
+		if strings.TrimSpace(origin) == "*" {
+			return fmt.Errorf("admin CORS origins must be explicit; wildcard is not allowed")
+		}
+	}
 	if cfg.BaseInterval <= 0 {
 		return fmt.Errorf("base interval must be > 0")
 	}

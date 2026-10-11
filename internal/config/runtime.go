@@ -139,6 +139,7 @@ func ReloadRuntimeConfig() (err error) {
 	config.Token = os.Getenv("Token")
 	config.AdminListenHost = getStringEnv("ADMIN_LISTEN_HOST", config.AdminListenHost)
 	config.AdminAPIKey = os.Getenv("ADMIN_API_KEY")
+	config.AdminCookieSecure = getBoolEnv("ADMIN_COOKIE_SECURE", config.AdminCookieSecure)
 	config.AdminCORSOrigins = getStringArrayEnv("ADMIN_CORS_ORIGINS", config.AdminCORSOrigins)
 	config.OneBotDialTimeoutMs = getIntEnv("ONEBOT_DIAL_TIMEOUT_MS", config.OneBotDialTimeoutMs)
 	config.OneBotReconnectInitialMs = getIntEnv("ONEBOT_RECONNECT_INITIAL_MS", config.OneBotReconnectInitialMs)

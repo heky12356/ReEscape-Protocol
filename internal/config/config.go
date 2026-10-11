@@ -42,6 +42,7 @@ type Config struct {
 	Token                             string
 	AdminListenHost                   string
 	AdminAPIKey                       string
+	AdminCookieSecure                 bool
 	AdminCORSOrigins                  []string
 	OneBotDialTimeoutMs               int
 	OneBotReconnectInitialMs          int

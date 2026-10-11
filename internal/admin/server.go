@@ -202,15 +202,25 @@ type createCharacterRequest struct {
 	Config character.CharacterConfig `json:"config"`
 }
 
+type adminLoginRequest struct {
+	Key string `json:"key"`
+}
+
+type adminSessionResponse struct {
+	Authenticated bool `json:"authenticated"`
+}
+
 type server struct {
 	webDistDir          string
 	reloadRuntimeConfig func() error
+	sessions            *sessionStore
 }
 
 func Start(ctx context.Context, reloadRuntimeConfig func() error) {
 	s := &server{
 		webDistDir:          filepath.Clean("./web/dist"),
 		reloadRuntimeConfig: reloadRuntimeConfig,
+		sessions:            newSessionStore(),
 	}
 
 	httpPort := config.GetConfig().HttpPort
@@ -262,6 +272,9 @@ func (s *server) routes() *gin.Engine {
 	engine.Use(accessLogMiddleware())
 
 	cfg := config.GetConfig()
+	if s.sessions == nil {
+		s.sessions = newSessionStore()
+	}
 	if cfg.EnableHealthEndpoint {
 		engine.GET("/healthz", s.handleHealth)
 		engine.GET("/readyz", s.handleReady)
@@ -270,8 +283,15 @@ func (s *server) routes() *gin.Engine {
 		engine.GET(resolveMetricsPath(cfg.MetricsPath), s.handleMetrics)
 	}
 
+	authGroup := engine.Group("/api/auth")
+	{
+		authGroup.POST("/login", s.handleAdminLogin)
+		authGroup.GET("/session", s.handleAdminSession)
+		authGroup.POST("/logout", s.handleAdminLogout)
+	}
+
 	adminGroup := engine.Group("/api/admin")
-	adminGroup.Use(adminAuthMiddleware())
+	adminGroup.Use(adminAuthMiddleware(s.sessions))
 	{
 		adminGroup.GET("/config", s.handleGetConfig)
 		adminGroup.PUT("/config", s.handlePutConfig)
@@ -294,6 +314,65 @@ func (s *server) routes() *gin.Engine {
 	})
 
 	return engine
+}
+
+func (s *server) handleAdminLogin(c *gin.Context) {
+	setNoCacheHeaders(c)
+	cfg := config.GetConfig()
+	if cfg == nil || strings.TrimSpace(cfg.AdminAPIKey) == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "admin API key is not configured"})
+		return
+	}
+	var req adminLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid login request"})
+		return
+	}
+	if !constantTimeSecretEqual(req.Key, cfg.AdminAPIKey) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid admin key"})
+		return
+	}
+	token, expiresAt, err := s.sessions.create(time.Now(), cfg.AdminAPIKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not create admin session"})
+		return
+	}
+	setAdminSessionCookie(c, token, expiresAt, cfg.AdminCookieSecure)
+	c.JSON(http.StatusOK, adminSessionResponse{Authenticated: true})
+}
+
+func (s *server) handleAdminSession(c *gin.Context) {
+	setNoCacheHeaders(c)
+	cookie, err := c.Request.Cookie(adminSessionCookie)
+	cfg := config.GetConfig()
+	if err != nil || cfg == nil || !s.sessions.valid(cookie.Value, time.Now(), cfg.AdminAPIKey) {
+		c.JSON(http.StatusUnauthorized, adminSessionResponse{Authenticated: false})
+		return
+	}
+	c.JSON(http.StatusOK, adminSessionResponse{Authenticated: true})
+}
+
+func (s *server) handleAdminLogout(c *gin.Context) {
+	setNoCacheHeaders(c)
+	if cookie, err := c.Request.Cookie(adminSessionCookie); err == nil {
+		s.sessions.revoke(cookie.Value)
+	}
+	clearAdminSessionCookie(c, config.GetConfig().AdminCookieSecure)
+	c.Status(http.StatusNoContent)
+}
+
+func setAdminSessionCookie(c *gin.Context, token string, expiresAt time.Time, secure bool) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	maxAge := int(time.Until(expiresAt).Seconds())
+	if maxAge <= 0 {
+		maxAge = int(adminSessionTTL.Seconds())
+	}
+	c.SetCookie(adminSessionCookie, token, maxAge, "/", "", secure, true)
+}
+
+func clearAdminSessionCookie(c *gin.Context, secure bool) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(adminSessionCookie, "", -1, "/", "", secure, true)
 }
 
 func (s *server) handleGetConfig(c *gin.Context) {

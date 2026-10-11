@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"os"
@@ -147,6 +146,7 @@ func corsMiddleware() gin.HandlerFunc {
 		}
 		if origin != "" && allowedOrigin(origin, config.GetConfig().AdminCORSOrigins) {
 			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+			c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 			c.Writer.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-API-Key, X-Request-ID")
 			c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
 		}
@@ -172,11 +172,23 @@ func allowedOrigin(origin string, configured []string) bool {
 	return false
 }
 
-func adminAuthMiddleware() gin.HandlerFunc {
+func adminAuthMiddleware(stores ...*sessionStore) gin.HandlerFunc {
+	var sessions *sessionStore
+	if len(stores) > 0 {
+		sessions = stores[0]
+	}
+	if sessions == nil {
+		sessions = newSessionStore()
+	}
 	return func(c *gin.Context) {
 		cfg := config.GetConfig()
 		if cfg == nil || strings.TrimSpace(cfg.AdminAPIKey) == "" {
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "admin API key is not configured"})
+			return
+		}
+
+		if cookie, err := c.Request.Cookie(adminSessionCookie); err == nil && sessions.valid(cookie.Value, time.Now(), cfg.AdminAPIKey) {
+			c.Next()
 			return
 		}
 
@@ -191,7 +203,7 @@ func adminAuthMiddleware() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "admin API key is required"})
 			return
 		}
-		if len(provided) != len(cfg.AdminAPIKey) || subtle.ConstantTimeCompare([]byte(provided), []byte(cfg.AdminAPIKey)) != 1 {
+		if !constantTimeSecretEqual(provided, cfg.AdminAPIKey) {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid admin API key"})
 			return
 		}

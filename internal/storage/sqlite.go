@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path"
@@ -155,7 +156,12 @@ func (s *SQLiteSnapshotStore) Save(name string, data []byte) error {
 	if name == "" {
 		return fmt.Errorf("snapshot name is empty")
 	}
-	_, err := s.database.Exec(`INSERT INTO snapshots(name, data, backup, updated_at)
+	tx, err := s.database.Begin()
+	if err != nil {
+		return fmt.Errorf("begin SQLite snapshot save %s: %w", name, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.Exec(`INSERT INTO snapshots(name, data, backup, updated_at)
         VALUES (?, ?, NULL, ?)
         ON CONFLICT(name) DO UPDATE SET
             backup = snapshots.data,
@@ -163,6 +169,73 @@ func (s *SQLiteSnapshotStore) Save(name string, data []byte) error {
             updated_at = excluded.updated_at`, name, data, time.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return fmt.Errorf("save SQLite snapshot %s: %w", name, err)
+	}
+	if err := syncSQLiteReadModels(tx, name, data); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit SQLite snapshot %s: %w", name, err)
+	}
+	return nil
+}
+
+func syncSQLiteReadModels(tx *sql.Tx, name string, data []byte) error {
+	if name != "memory/conversation_history.json" {
+		return nil
+	}
+	var snapshot struct {
+		Sessions  map[string]json.RawMessage `json:"sessions"`
+		Intents   map[string]json.RawMessage `json:"intents"`
+		OpenLoops map[string]json.RawMessage `json:"open_loops"`
+	}
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		return fmt.Errorf("parse state snapshot for SQLite read models: %w", err)
+	}
+	for _, table := range []string{"sessions", "intents", "open_loops"} {
+		if _, err := tx.Exec("DELETE FROM " + table); err != nil {
+			return fmt.Errorf("reset SQLite %s read model: %w", table, err)
+		}
+	}
+	for id, payload := range snapshot.Sessions {
+		var metadata struct {
+			UserID    int64     `json:"user_id"`
+			UpdatedAt time.Time `json:"last_updated"`
+		}
+		if err := json.Unmarshal(payload, &metadata); err != nil {
+			return fmt.Errorf("parse session %s for SQLite read model: %w", id, err)
+		}
+		updatedAt := metadata.UpdatedAt.UTC().Format(time.RFC3339Nano)
+		if metadata.UpdatedAt.IsZero() {
+			updatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		}
+		if _, err := tx.Exec("INSERT INTO sessions(id, user_id, updated_at, payload_json) VALUES (?, ?, ?, ?)", id, metadata.UserID, updatedAt, string(payload)); err != nil {
+			return fmt.Errorf("write SQLite session %s: %w", id, err)
+		}
+	}
+	if err := syncSQLiteStateRows(tx, "intents", snapshot.Intents); err != nil {
+		return err
+	}
+	return syncSQLiteStateRows(tx, "open_loops", snapshot.OpenLoops)
+}
+
+func syncSQLiteStateRows(tx *sql.Tx, table string, records map[string]json.RawMessage) error {
+	for id, payload := range records {
+		var metadata struct {
+			UserID    int64     `json:"user_id"`
+			SessionID string    `json:"session_id"`
+			Status    string    `json:"status"`
+			UpdatedAt time.Time `json:"updated_at"`
+		}
+		if err := json.Unmarshal(payload, &metadata); err != nil {
+			return fmt.Errorf("parse %s %s for SQLite read model: %w", table, id, err)
+		}
+		updatedAt := metadata.UpdatedAt.UTC().Format(time.RFC3339Nano)
+		if metadata.UpdatedAt.IsZero() {
+			updatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		}
+		if _, err := tx.Exec("INSERT INTO "+table+"(id, user_id, session_id, status, updated_at, payload_json) VALUES (?, ?, ?, ?, ?, ?)", id, metadata.UserID, metadata.SessionID, metadata.Status, updatedAt, string(payload)); err != nil {
+			return fmt.Errorf("write SQLite %s %s: %w", table, id, err)
+		}
 	}
 	return nil
 }
@@ -185,10 +258,31 @@ func (s *SQLiteSnapshotStore) Load(name string) ([]byte, error) {
 		return nil, fmt.Errorf("load SQLite snapshot %s: %w", name, err)
 	}
 	if snapshotDataValid(name, data) {
+		if err := syncSQLiteReadModelsNow(s.database, name, data); err != nil {
+			return nil, err
+		}
 		return data, nil
 	}
 	if len(backup) > 0 && snapshotDataValid(name, backup) {
+		if err := syncSQLiteReadModelsNow(s.database, name, backup); err != nil {
+			return nil, err
+		}
 		return backup, nil
 	}
 	return nil, fmt.Errorf("SQLite snapshot %s and its backup contain invalid JSON", name)
+}
+
+func syncSQLiteReadModelsNow(database *sql.DB, name string, data []byte) error {
+	tx, err := database.Begin()
+	if err != nil {
+		return fmt.Errorf("begin SQLite read model sync: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := syncSQLiteReadModels(tx, name, data); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit SQLite read model sync: %w", err)
+	}
+	return nil
 }

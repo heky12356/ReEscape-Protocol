@@ -54,3 +54,19 @@ func TestFileStoreAssignsCursorsAndReplays(t *testing.T) {
 		t.Fatalf("unexpected file replay result: %+v, %v", events, err)
 	}
 }
+
+func TestSQLiteStoreProjectsDeliveryRows(t *testing.T) {
+	persistence, err := storage.OpenPersistence(storage.PersistenceOptions{Backend: string(storage.BackendSQLite), DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("open persistence: %v", err)
+	}
+	defer persistence.Close()
+	store := NewSQLiteEventStore(persistence.Database())
+	if err := store.Append(context.Background(), Event{Type: "delivery_sent", DeliveryID: "delivery-1", IntentID: "intent-1", UserID: 42}); err != nil {
+		t.Fatalf("append delivery event: %v", err)
+	}
+	records, err := storage.NewSQLiteQueryStore(persistence.Database()).List(context.Background(), "deliveries", 42, "", "", 10)
+	if err != nil || len(records) != 1 || records[0].ID != "delivery-1" || records[0].Status != "delivery_sent" {
+		t.Fatalf("delivery query = %+v, %v", records, err)
+	}
+}

@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -118,5 +119,24 @@ func TestSQLiteMigrationIsIdempotent(t *testing.T) {
 	}
 	if err := persistence.Close(); err != nil {
 		t.Fatalf("second close returned unexpected error: %v", err)
+	}
+}
+
+func TestSQLiteSnapshotSaveProjectsQueryableState(t *testing.T) {
+	persistence, err := OpenPersistence(PersistenceOptions{Backend: string(BackendSQLite), DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("open SQLite persistence: %v", err)
+	}
+	defer persistence.Close()
+	data := []byte(`{"sessions":{"private:42":{"id":"private:42","user_id":42,"last_updated":"2026-01-01T00:00:00Z"}},"intents":{"intent-1":{"id":"intent-1","user_id":42,"session_id":"private:42","status":"pending","updated_at":"2026-01-01T00:00:00Z"}},"open_loops":{"loop-1":{"id":"loop-1","user_id":42,"session_id":"private:42","status":"open","updated_at":"2026-01-01T00:00:00Z"}}}`)
+	if err := persistence.Snapshots.Save("memory/conversation_history.json", data); err != nil {
+		t.Fatalf("save state snapshot: %v", err)
+	}
+	queryStore := NewSQLiteQueryStore(persistence.Database())
+	for _, kind := range []string{"sessions", "intents", "open_loops"} {
+		records, err := queryStore.List(context.Background(), kind, 42, "private:42", "", 10)
+		if err != nil || len(records) != 1 || records[0].UserID != 42 {
+			t.Fatalf("query %s = %+v, %v", kind, records, err)
+		}
 	}
 }

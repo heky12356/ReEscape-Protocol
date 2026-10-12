@@ -329,6 +329,7 @@ func (m *TransferManager) importArchive(archivePath string) error {
 	if len(entries) != len(manifest.Files) {
 		return errors.New("import manifest file list does not match archive")
 	}
+	manifestPaths := make(map[string]struct{}, len(manifest.Files))
 	for _, expected := range manifest.Files {
 		rel, err := validateTransferPath(expected.Path)
 		if err != nil {
@@ -337,6 +338,10 @@ func (m *TransferManager) importArchive(archivePath string) error {
 		if expected.Size < 0 || expected.Path != rel {
 			return fmt.Errorf("import manifest path is not canonical: %s", expected.Path)
 		}
+		if _, exists := manifestPaths[rel]; exists {
+			return fmt.Errorf("duplicate import manifest path: %s", rel)
+		}
+		manifestPaths[rel] = struct{}{}
 		if isProtectedTransferPath(rel) {
 			return fmt.Errorf("import path is protected: %s", rel)
 		}
@@ -356,6 +361,9 @@ func (m *TransferManager) importArchive(archivePath string) error {
 		if size != expected.Size || !strings.EqualFold(digest, expected.SHA256) {
 			return fmt.Errorf("import manifest checksum mismatch: %s", rel)
 		}
+	}
+	if len(manifestPaths) != len(entries) {
+		return errors.New("import archive contains files missing from manifest")
 	}
 	for _, expected := range manifest.Files {
 		if err := ensureNoSymlinkPath(m.root, expected.Path); err != nil {

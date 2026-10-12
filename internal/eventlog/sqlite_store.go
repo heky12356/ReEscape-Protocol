@@ -47,6 +47,22 @@ func (s *SQLiteStore) Append(ctx context.Context, events ...Event) error {
 		if err != nil {
 			return fmt.Errorf("append SQLite event %s: %w", event.ID, err)
 		}
+		if event.DeliveryID != "" {
+			_, err = tx.ExecContext(ctx, `INSERT INTO deliveries(
+                id, intent_id, user_id, status, updated_at, payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                intent_id = excluded.intent_id,
+                user_id = excluded.user_id,
+                status = excluded.status,
+                updated_at = excluded.updated_at,
+                payload_json = excluded.payload_json`,
+				event.DeliveryID, event.IntentID, event.UserID, event.Type,
+				event.CreatedAt.UTC().Format(time.RFC3339Nano), string(payload))
+			if err != nil {
+				return fmt.Errorf("project SQLite delivery %s: %w", event.DeliveryID, err)
+			}
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit SQLite events: %w", err)

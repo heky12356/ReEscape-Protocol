@@ -36,3 +36,13 @@ Content-Type: multipart/form-data
 导入同样返回异步 Job。服务端会限制压缩包和解压后的总大小，并校验 manifest 版本、规范相对路径、重复文件、大小、SHA-256 和符号链接。所有文件通过暂存文件原子替换，路径穿越或受保护路径会使 Job 失败。
 
 导入不会覆盖 `.env`、`exports`、`imports`、管理会话和 SQLite 运行文件。生产环境应在导入前保留独立数据库备份，并在低流量窗口执行。
+
+## SQLite 读模型查询
+
+启用 `PERSISTENCE_BACKEND=sqlite` 后，管理后台可以查询快照同步得到的 session、Intent、OpenLoop，以及由事件投影得到的 Delivery：
+
+```http
+GET /api/admin/state/{kind}?user_id=42&session_id=private:42&status=pending&limit=100
+```
+
+`kind` 支持 `sessions`、`intents`、`open_loops` 和 `deliveries`。查询只读取 SQLite 索引和 payload，不重新加载完整 JSON 快照。文件后端不会伪造 SQLite 读模型，会返回不可用状态。

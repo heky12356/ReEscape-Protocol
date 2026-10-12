@@ -47,6 +47,11 @@ type Persistence struct {
 	closeErr  error
 }
 
+var (
+	defaultDatabaseMu sync.RWMutex
+	defaultDatabase   *sql.DB
+)
+
 func OpenPersistence(options PersistenceOptions) (*Persistence, error) {
 	backend := BackendKind(strings.ToLower(strings.TrimSpace(options.Backend)))
 	if backend == "" {
@@ -82,6 +87,7 @@ func OpenPersistence(options PersistenceOptions) (*Persistence, error) {
 			_ = database.Close()
 			return nil, fmt.Errorf("create SQLite backup directory: %w", err)
 		}
+		setDefaultDatabase(database)
 		return &Persistence{
 			Snapshots: NewSQLiteSnapshotStore(database),
 			status: PersistenceStatus{
@@ -97,6 +103,7 @@ func OpenPersistence(options PersistenceOptions) (*Persistence, error) {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create persistence data directory: %w", err)
 	}
+	setDefaultDatabase(nil)
 
 	return &Persistence{
 		Snapshots: NewFileSnapshotStore(dataDir),
@@ -108,6 +115,18 @@ func OpenPersistence(options PersistenceOptions) (*Persistence, error) {
 			Ready:           true,
 		},
 	}, nil
+}
+
+func DefaultDatabase() *sql.DB {
+	defaultDatabaseMu.RLock()
+	defer defaultDatabaseMu.RUnlock()
+	return defaultDatabase
+}
+
+func setDefaultDatabase(database *sql.DB) {
+	defaultDatabaseMu.Lock()
+	defaultDatabase = database
+	defaultDatabaseMu.Unlock()
 }
 
 func (p *Persistence) Status() PersistenceStatus {
@@ -124,6 +143,11 @@ func (p *Persistence) Close() error {
 	p.closeOnce.Do(func() {
 		if p.database != nil {
 			p.closeErr = p.database.Close()
+			defaultDatabaseMu.Lock()
+			if defaultDatabase == p.database {
+				defaultDatabase = nil
+			}
+			defaultDatabaseMu.Unlock()
 		}
 	})
 	return p.closeErr

@@ -46,6 +46,17 @@ func TestValidateConfigRejectsInvalidRuntimeLimits(t *testing.T) {
 
 func TestValidateConfigPersistenceSettings(t *testing.T) {
 	cfg := cloneConfig(GetConfig())
+	// Keep this validation test independent of developer-local .env files and
+	// ignored AI profile overrides that are unavailable in CI.
+	cfg.AiProfile = "default"
+	cfg.AiBaseUrl = "https://example.test/v1"
+	cfg.AiModel = "test-model"
+	cfg.AiTemperature = 1
+	cfg.AiMaxTokens = 2000
+	cfg.AiTimeout = 30
+	cfg.AiRetryCount = 0
+	cfg.AiRateLimit = 20
+	cfg.AiTopP = 0.9
 	cfg.PersistenceBackend = "file"
 	cfg.SQLitePath = filepath.Join(t.TempDir(), "runtime.sqlite")
 	cfg.SQLiteBackupDir = t.TempDir()

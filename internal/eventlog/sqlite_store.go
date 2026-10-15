@@ -1,11 +1,14 @@
 package eventlog
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"project-yume/internal/storage"
 )
 
 // SQLiteStore persists events as queryable rows while retaining the complete
@@ -35,33 +38,49 @@ func (s *SQLiteStore) Append(ctx context.Context, events ...Event) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 	for _, event := range prepared {
+		event.Cursor = 0
+		event.CreatedAt = event.CreatedAt.UTC()
 		payload, err := json.Marshal(event)
 		if err != nil {
 			return fmt.Errorf("marshal event %s: %w", event.ID, err)
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO events(
+		result, err := tx.ExecContext(ctx, `INSERT INTO events(
             id, type, created_at, user_id, session_id, turn_id, intent_id, delivery_id, payload_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
 			event.ID, event.Type, event.CreatedAt.UTC().Format(time.RFC3339Nano), event.UserID,
 			event.SessionID, event.TurnID, event.IntentID, event.DeliveryID, string(payload))
 		if err != nil {
 			return fmt.Errorf("append SQLite event %s: %w", event.ID, err)
 		}
-		if event.DeliveryID != "" {
-			_, err = tx.ExecContext(ctx, `INSERT INTO deliveries(
-                id, intent_id, user_id, status, updated_at, payload_json
-            ) VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                intent_id = excluded.intent_id,
-                user_id = excluded.user_id,
-                status = excluded.status,
-                updated_at = excluded.updated_at,
-                payload_json = excluded.payload_json`,
-				event.DeliveryID, event.IntentID, event.UserID, event.Type,
-				event.CreatedAt.UTC().Format(time.RFC3339Nano), string(payload))
-			if err != nil {
-				return fmt.Errorf("project SQLite delivery %s: %w", event.DeliveryID, err)
+		inserted, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if inserted == 0 {
+			var stored []byte
+			if err := tx.QueryRowContext(ctx, "SELECT payload_json FROM events WHERE id = ?", event.ID).Scan(&stored); err != nil {
+				return err
 			}
+			existing, err := decodeSQLiteEvent(stored)
+			if err != nil {
+				return err
+			}
+			existing.Cursor, existing.CreatedAt = 0, existing.CreatedAt.UTC()
+			canonical, err := json.Marshal(existing)
+			if err != nil {
+				return err
+			}
+			if !bytes.Equal(canonical, payload) {
+				return fmt.Errorf("conflicting event id %s", event.ID)
+			}
+			continue
+		}
+		cursor, err := result.LastInsertId()
+		if err != nil {
+			return err
+		}
+		if err := storage.ProjectDeliveryEvent(ctx, tx, cursor, payload); err != nil {
+			return err
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -131,8 +150,8 @@ func scanSQLiteEvents(rows *sql.Rows) ([]Event, error) {
 		if err := rows.Scan(&cursor, &payload); err != nil {
 			return nil, fmt.Errorf("scan SQLite event: %w", err)
 		}
-		var event Event
-		if err := json.Unmarshal([]byte(payload), &event); err != nil {
+		event, err := decodeSQLiteEvent([]byte(payload))
+		if err != nil {
 			return nil, fmt.Errorf("decode SQLite event at cursor %d: %w", cursor, err)
 		}
 		event.Cursor = cursor
@@ -142,4 +161,17 @@ func scanSQLiteEvents(rows *sql.Rows) ([]Event, error) {
 		return nil, fmt.Errorf("iterate SQLite events: %w", err)
 	}
 	return events, nil
+}
+
+func decodeSQLiteEvent(payload []byte) (Event, error) {
+	var event Event
+	if !json.Valid(payload) {
+		return event, fmt.Errorf("invalid event JSON")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	// Data includes OneBot message IDs which may exceed float64's exact range.
+	// Preserve numbers so read/retry cannot change event content or identity.
+	decoder.UseNumber()
+	err := decoder.Decode(&event)
+	return event, err
 }

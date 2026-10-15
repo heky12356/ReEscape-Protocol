@@ -139,7 +139,7 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 		aifunction.ResetRateLimiter()
 		runtimeHandle.Replace(NewAgentRuntime())
 		return nil
-	})
+	}, persistence)
 
 	return components, nil
 }

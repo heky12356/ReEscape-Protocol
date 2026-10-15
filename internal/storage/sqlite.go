@@ -113,6 +113,12 @@ func migrateSQLite(database *sql.DB) error {
 			_ = transaction.Rollback()
 			return fmt.Errorf("apply SQLite migration %d: %w", version, err)
 		}
+		if version == 3 {
+			if err := upgradeReadModelContract(transaction); err != nil {
+				_ = transaction.Rollback()
+				return fmt.Errorf("upgrade SQLite read models: %w", err)
+			}
+		}
 		if _, err := transaction.Exec("INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)", version, name, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 			_ = transaction.Rollback()
 			return fmt.Errorf("record SQLite migration %d: %w", version, err)
@@ -204,18 +210,27 @@ func syncSQLiteReadModels(tx *sql.Tx, name string, data []byte) error {
 		if err := json.Unmarshal(payload, &metadata); err != nil {
 			return fmt.Errorf("parse session %s for SQLite read model: %w", id, err)
 		}
-		updatedAt := metadata.UpdatedAt.UTC().Format(time.RFC3339Nano)
-		if metadata.UpdatedAt.IsZero() {
-			updatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		updatedAt := readModelTime(metadata.UpdatedAt)
+		summary, err := sessionSummary(payload)
+		if err != nil {
+			return fmt.Errorf("summarize session %s: %w", id, err)
 		}
-		if _, err := tx.Exec("INSERT INTO sessions(id, user_id, updated_at, payload_json) VALUES (?, ?, ?, ?)", id, metadata.UserID, updatedAt, string(payload)); err != nil {
+		if _, err := tx.Exec("INSERT INTO sessions(id, user_id, updated_at, payload_json, summary_json) VALUES (?, ?, ?, ?, ?)", id, metadata.UserID, updatedAt, string(payload), string(summary)); err != nil {
 			return fmt.Errorf("write SQLite session %s: %w", id, err)
 		}
 	}
 	if err := syncSQLiteStateRows(tx, "intents", snapshot.Intents); err != nil {
 		return err
 	}
-	return syncSQLiteStateRows(tx, "open_loops", snapshot.OpenLoops)
+	if err := syncSQLiteStateRows(tx, "open_loops", snapshot.OpenLoops); err != nil {
+		return err
+	}
+	for _, kind := range []string{"sessions", "intents", "open_loops"} {
+		if err := touchReadModel(context.Background(), tx, kind); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func syncSQLiteStateRows(tx *sql.Tx, table string, records map[string]json.RawMessage) error {
@@ -229,10 +244,7 @@ func syncSQLiteStateRows(tx *sql.Tx, table string, records map[string]json.RawMe
 		if err := json.Unmarshal(payload, &metadata); err != nil {
 			return fmt.Errorf("parse %s %s for SQLite read model: %w", table, id, err)
 		}
-		updatedAt := metadata.UpdatedAt.UTC().Format(time.RFC3339Nano)
-		if metadata.UpdatedAt.IsZero() {
-			updatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		}
+		updatedAt := readModelTime(metadata.UpdatedAt)
 		if _, err := tx.Exec("INSERT INTO "+table+"(id, user_id, session_id, status, updated_at, payload_json) VALUES (?, ?, ?, ?, ?, ?)", id, metadata.UserID, metadata.SessionID, metadata.Status, updatedAt, string(payload)); err != nil {
 			return fmt.Errorf("write SQLite %s %s: %w", table, id, err)
 		}

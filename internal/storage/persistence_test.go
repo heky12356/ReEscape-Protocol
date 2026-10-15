@@ -111,8 +111,8 @@ func TestSQLiteMigrationIsIdempotent(t *testing.T) {
 	if err := database.QueryRow("SELECT count(*) FROM schema_migrations").Scan(&count); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if count != 2 {
-		t.Fatalf("migration count = %d, want 2", count)
+	if count != 3 {
+		t.Fatalf("migration count = %d, want 3", count)
 	}
 	if err := persistence.Close(); err != nil {
 		t.Fatalf("close SQLite persistence: %v", err)

@@ -218,14 +218,16 @@ type server struct {
 	sessions            *sessionStore
 	loginLimiter        *loginLimiter
 	transfers           *storage.TransferManager
+	persistence         *storage.Persistence
 }
 
-func Start(ctx context.Context, reloadRuntimeConfig func() error) {
+func Start(ctx context.Context, reloadRuntimeConfig func() error, persistence *storage.Persistence) {
 	s := &server{
 		webDistDir:          filepath.Clean("./web/dist"),
 		reloadRuntimeConfig: reloadRuntimeConfig,
 		sessions:            newSessionStore(),
 		loginLimiter:        newLoginLimiter(),
+		persistence:         persistence,
 	}
 	if transferManager, err := storage.NewTransferManager(config.GetConfig().DataDir); err != nil {
 		utils.Error("initialize transfer manager failed: %v", err)
@@ -314,6 +316,9 @@ func (s *server) routes() *gin.Engine {
 		adminGroup.GET("/events", s.handleEvents)
 		adminGroup.GET("/events/stream", s.handleEventStream)
 		adminGroup.GET("/state/:kind", s.handleQueryState)
+		adminGroup.GET("/state/:kind/:id", s.handleStateDetail)
+		adminGroup.POST("/state/deliveries/rebuild", s.handleRebuildDeliveries)
+		adminGroup.GET("/persistence", s.handlePersistence)
 		adminGroup.POST("/transfers/export", s.handleStartExport)
 		adminGroup.POST("/transfers/import", s.handleStartImport)
 		adminGroup.GET("/transfers/:id/download", s.handleDownloadTransfer)
@@ -348,45 +353,6 @@ func (s *server) transferManager() (*storage.TransferManager, error) {
 	}
 	s.transfers = manager
 	return manager, nil
-}
-
-func (s *server) handleQueryState(c *gin.Context) {
-	database := storage.DefaultDatabase()
-	if database == nil {
-		c.JSON(http.StatusNotImplemented, gin.H{"error": "SQLite read models are unavailable"})
-		return
-	}
-	userID := int64(0)
-	if raw := strings.TrimSpace(c.Query("user_id")); raw != "" {
-		parsed, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || parsed < 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "user_id must be a non-negative integer"})
-			return
-		}
-		userID = parsed
-	}
-	limit := 100
-	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed <= 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "limit must be a positive integer"})
-			return
-		}
-		if parsed < limit {
-			limit = parsed
-		}
-	}
-	queryStore := storage.NewSQLiteQueryStore(database)
-	records, err := queryStore.List(c.Request.Context(), c.Param("kind"), userID, strings.TrimSpace(c.Query("session_id")), strings.TrimSpace(c.Query("status")), limit)
-	if err != nil {
-		if strings.HasPrefix(err.Error(), "unsupported read model") {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"kind": c.Param("kind"), "records": records})
 }
 
 func (s *server) handleStartExport(c *gin.Context) {

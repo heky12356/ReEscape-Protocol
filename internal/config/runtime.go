@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 
@@ -48,6 +47,17 @@ func ReloadRuntimeConfig() (err error) {
 		}
 	}()
 
+	// Active stores and flush workers are installed at Bootstrap. Reject changes
+	// before loading profiles or committing callbacks rather than reporting a
+	// storage configuration that the running process cannot apply.
+	config.DataDir = getStringEnv("DATA_DIR", config.DataDir)
+	config.PersistenceBackend = getStringEnv("PERSISTENCE_BACKEND", config.PersistenceBackend)
+	config.SQLitePath = getStringEnv("SQLITE_PATH", config.SQLitePath)
+	config.SQLiteBusyTimeoutMs = getIntEnv("SQLITE_BUSY_TIMEOUT_MS", config.SQLiteBusyTimeoutMs)
+	config.SQLiteBackupDir = getStringEnv("SQLITE_BACKUP_DIR", config.SQLiteBackupDir)
+	if containsScope(changedScopes(previousConfig, config), ScopeStorage) {
+		return fmt.Errorf("storage settings require a process restart; runtime configuration was not changed")
+	}
 	config.EnvFile = GetEnvFilePath()
 	config.Hostadd = getStringEnv("HOSTADD", config.Hostadd)
 	config.WsPort = getStringEnv("WsPort", config.WsPort)
@@ -84,12 +94,7 @@ func ReloadRuntimeConfig() (err error) {
 	config.EnableHealthEndpoint = getBoolEnv("ENABLE_HEALTH_ENDPOINT", config.EnableHealthEndpoint)
 	config.EnableMetrics = getBoolEnv("ENABLE_METRICS", config.EnableMetrics)
 	config.MetricsPath = getStringEnv("METRICS_PATH", config.MetricsPath)
-	config.DataDir = getStringEnv("DATA_DIR", config.DataDir)
 	config.LogDir = getStringEnv("LOG_DIR", config.LogDir)
-	config.PersistenceBackend = getStringEnv("PERSISTENCE_BACKEND", config.PersistenceBackend)
-	config.SQLitePath = getStringEnv("SQLITE_PATH", filepath.Join(config.DataDir, "runtime.sqlite"))
-	config.SQLiteBusyTimeoutMs = getIntEnv("SQLITE_BUSY_TIMEOUT_MS", config.SQLiteBusyTimeoutMs)
-	config.SQLiteBackupDir = getStringEnv("SQLITE_BACKUP_DIR", filepath.Join(config.DataDir, "backups"))
 	config.MessageAggregateIdleWindowMs = getIntEnv("MESSAGE_AGGREGATE_IDLE_WINDOW_MS", config.MessageAggregateIdleWindowMs)
 	config.MessageAggregateMaxWindowMs = getIntEnv("MESSAGE_AGGREGATE_MAX_WINDOW_MS", config.MessageAggregateMaxWindowMs)
 	config.MessageAggregateMaxMessages = getIntEnv("MESSAGE_AGGREGATE_MAX_MESSAGES", config.MessageAggregateMaxMessages)

@@ -66,7 +66,7 @@ func TestSQLiteStoreProjectsDeliveryRows(t *testing.T) {
 		t.Fatalf("append delivery event: %v", err)
 	}
 	records, err := storage.NewSQLiteQueryStore(persistence.Database()).List(context.Background(), "deliveries", 42, "", "", 10)
-	if err != nil || len(records) != 1 || records[0].ID != "delivery-1" || records[0].Status != "delivery_sent" {
+	if err != nil || len(records) != 1 || records[0].ID != "delivery-1" || records[0].Status != "delivered" || records[0].EventType != "delivery_sent" {
 		t.Fatalf("delivery query = %+v, %v", records, err)
 	}
 }

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -83,6 +85,67 @@ func TestChangedScopesDetectsStorageSettings(t *testing.T) {
 	after.PersistenceBackend = "sqlite"
 	if scopes := changedScopes(before, after); !containsScope(scopes, ScopeStorage) {
 		t.Fatalf("storage change did not produce storage scope: %v", scopes)
+	}
+}
+
+func TestRuntimeReloadRejectsStorageChangesBeforeCallbacks(t *testing.T) {
+	for _, key := range []string{"PERSISTENCE_BACKEND", "DATA_DIR", "SQLITE_PATH", "SQLITE_BACKUP_DIR", "SQLITE_BUSY_TIMEOUT_MS"} {
+		t.Run(key, func(t *testing.T) {
+			setupRuntimeReloadTest(t)
+			before := GetConfig()
+			baseline := map[string]string{
+				"PERSISTENCE_BACKEND":    before.PersistenceBackend,
+				"DATA_DIR":               before.DataDir,
+				"SQLITE_PATH":            before.SQLitePath,
+				"SQLITE_BACKUP_DIR":      before.SQLiteBackupDir,
+				"SQLITE_BUSY_TIMEOUT_MS": strconv.Itoa(before.SQLiteBusyTimeoutMs),
+			}
+			for name, value := range baseline {
+				t.Setenv(name, value)
+			}
+			changed := baseline[key] + "-changed"
+			if key == "PERSISTENCE_BACKEND" {
+				changed = "sqlite"
+				if before.PersistenceBackend == "sqlite" {
+					changed = "file"
+				}
+			}
+			if key == "SQLITE_BUSY_TIMEOUT_MS" {
+				changed = strconv.Itoa(before.SQLiteBusyTimeoutMs + 1)
+			}
+			t.Setenv(key, changed)
+			clearReloadCallbacks()
+			t.Cleanup(clearReloadCallbacks)
+			called := false
+			RegisterReloadCallback(ScopeStorage, func(ReloadChange) error { called = true; return nil })
+			err := ReloadRuntimeConfig()
+			if err == nil || !strings.Contains(err.Error(), "require a process restart") {
+				t.Fatalf("storage change accepted: %v", err)
+			}
+			if GetConfig() != before || GetConfig().Version != before.Version || called {
+				t.Fatal("failed storage reload changed live configuration or ran callbacks")
+			}
+		})
+	}
+}
+
+func TestRuntimeReloadPreservesConfiguredSQLitePathsWithoutOverrides(t *testing.T) {
+	setupRuntimeReloadTest(t)
+	previous := GetConfig()
+	configMu.Lock()
+	config = cloneConfig(previous)
+	config.SQLitePath = filepath.Join(t.TempDir(), "custom.sqlite")
+	config.SQLiteBackupDir = t.TempDir()
+	expectedPath, expectedBackup := config.SQLitePath, config.SQLiteBackupDir
+	configMu.Unlock()
+	t.Cleanup(func() { configMu.Lock(); config = previous; configMu.Unlock() })
+	t.Setenv("SQLITE_PATH", "")
+	t.Setenv("SQLITE_BACKUP_DIR", "")
+	if err := ReloadRuntimeConfig(); err != nil {
+		t.Fatalf("unrelated reload: %v", err)
+	}
+	if GetConfig().SQLitePath != expectedPath || GetConfig().SQLiteBackupDir != expectedBackup {
+		t.Fatal("reload reset explicitly configured storage paths")
 	}
 }
 

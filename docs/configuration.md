@@ -56,6 +56,22 @@ ADMIN_COOKIE_SECURE=true
 
 管理后台更新配置后会执行一次事务式重载：系统先读取环境变量、AI profile、角色和 Skill 配置，构造候选配置并完成范围校验；全部通过后才替换运行中的配置。解析失败、校验失败、角色或 Skill 加载失败时，旧配置和旧 Skill 索引保持不变。
 
-每次成功重载都会递增配置版本，并记录更新时间和变更作用域。作用域包括 `bot`、`model`、`skill`、`logging` 和 `runtime`，可在管理后台配置响应的 `configVersion`、`configUpdatedAt` 和 `configReloadScopes` 字段中查看。
+每次成功重载都会递增配置版本，并记录更新时间和变更作用域。作用域包括 `bot`、`model`、`skill`、`logging`、`runtime` 和 `storage`，可在管理后台配置响应的 `configVersion`、`configUpdatedAt` 和 `configReloadScopes` 字段中查看。
 
 配置 callback 在候选配置完成校验后执行，并带有本次版本和变更作用域；callback 失败会使本次重载回滚。callback 不应执行长时间阻塞操作，也不应把密钥写入日志。
+
+## 持久化配置与重启
+
+```env
+PERSISTENCE_BACKEND=file
+DATA_DIR=./data
+SQLITE_PATH=./data/runtime.sqlite
+SQLITE_BACKUP_DIR=./data/backups
+SQLITE_BUSY_TIMEOUT_MS=5000
+```
+
+`file` 为默认后端；显式选择 `sqlite` 后使用 SQLite 快照、事件和可查询读模型。这些存储配置在启动时建立活动 Store。运行时尝试修改上述任一设置会拒绝本次重载，并提示需要进程重启；旧配置、配置版本、活动 Store 和重载 callback 保持不变。原有自定义 SQLite 路径不会被无关重载重置。
+
+修改部署配置后，应先确认数据迁移与备份方案，再重启进程；切换后端不会自动迁移原有 JSON。`SQLITE_BACKUP_DIR` 当前只是目录配置，不代表已有完整数据库备份/恢复工具。
+
+认证的 `/api/admin/persistence` 返回实际运行后端、schema 与查询能力，前端应据此判断可用功能；完整契约见[运维与数据查询](./operations.md)。

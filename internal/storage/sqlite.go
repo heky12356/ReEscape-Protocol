@@ -126,6 +126,12 @@ func migrateSQLite(database *sql.DB) error {
 				return fmt.Errorf("upgrade SQLite read models: %w", err)
 			}
 		}
+		if version == 4 {
+			if err := backfillConversations(transaction); err != nil {
+				_ = transaction.Rollback()
+				return fmt.Errorf("upgrade SQLite conversations: %w", err)
+			}
+		}
 		if _, err := transaction.Exec("INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)", version, name, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 			_ = transaction.Rollback()
 			return fmt.Errorf("record SQLite migration %d: %w", version, err)
@@ -224,6 +230,14 @@ func syncSQLiteReadModels(tx *sql.Tx, name string, data []byte) error {
 		}
 		if _, err := tx.Exec("INSERT INTO sessions(id, user_id, updated_at, payload_json, summary_json) VALUES (?, ?, ?, ?, ?)", id, metadata.UserID, updatedAt, string(payload), string(summary)); err != nil {
 			return fmt.Errorf("write SQLite session %s: %w", id, err)
+		}
+		if err := syncConversation(tx, id, payload); err != nil {
+			return fmt.Errorf("sync conversation %s: %w", id, err)
+		}
+	}
+	for _, table := range []string{"conversation_messages", "conversation_revisions"} {
+		if _, err := tx.Exec("DELETE FROM " + table + " WHERE session_id NOT IN (SELECT id FROM sessions)"); err != nil {
+			return err
 		}
 	}
 	if err := syncSQLiteStateRows(tx, "intents", snapshot.Intents); err != nil {

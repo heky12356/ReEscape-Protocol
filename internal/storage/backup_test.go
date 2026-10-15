@@ -44,7 +44,7 @@ func TestSQLiteBackupIncludesWALAndRestoresOffline(t *testing.T) {
 	}
 	backup := filepath.Join(t.TempDir(), "copy with # spaces.sqlite")
 	report, err := p.BackupSQLite(ctx, backup)
-	if err != nil || report.SchemaVersion != 3 || report.Events != 1 || report.Snapshots != 1 || report.SHA256 == "" {
+	if err != nil || report.SchemaVersion != 4 || report.Events != 1 || report.Snapshots != 1 || report.SHA256 == "" {
 		t.Fatalf("backup: %+v %v", report, err)
 	}
 	if _, err := p.BackupSQLite(ctx, backup); err == nil {
@@ -78,6 +78,12 @@ func TestSQLiteBackupIncludesWALAndRestoresOffline(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer recovered.Close()
+	// Query before loading the snapshot: restore must preserve the standalone
+	// derived message tables, not rely on Load silently repairing them.
+	messages, err := NewSQLiteQueryStore(recovered.Database()).Messages(ctx, "private:42", 50, "")
+	if err != nil || len(messages.Messages) != 1 || messages.Messages[0].Role != "user" {
+		t.Fatalf("restored messages: %+v %v", messages, err)
+	}
 	loaded, err := recovered.Snapshots.Load("memory/conversation_history.json")
 	if err != nil || string(loaded) != string(data) {
 		t.Fatalf("restored snapshot mismatch: %s %v", loaded, err)
@@ -189,7 +195,7 @@ func TestRestoreUpgradesPrivateLegacyCandidateOnly(t *testing.T) {
 	}
 	options := PersistenceOptions{DataDir: t.TempDir()}
 	report, err := RestoreSQLiteOffline(ctx, options, source)
-	if err != nil || report.SchemaVersion != 3 {
+	if err != nil || report.SchemaVersion != 4 {
 		t.Fatalf("upgraded restore: %+v %v", report, err)
 	}
 	after, err := os.ReadFile(source)

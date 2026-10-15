@@ -139,7 +139,43 @@ Session 列表的 `payload` 是预先保存的概要，不含 `conversation`。�
 GET /api/admin/state/sessions/private%3A42
 ```
 
-详情接口适用于四类模型，不接受查询筛选参数；不存在的记录返回 `404`。Session 详情仍包含完整 conversation，逐条聊天分页和 WebUI 查询页尚未接入。
+详情接口适用于四类模型，不接受查询筛选参数；不存在的记录返回 `404`。这个兼容 Session 详情仍包含完整 conversation。WebUI 使用下面的元信息和消息接口，避免加载完整会话正文。
+
+### WebUI 状态与聊天
+
+登录后打开“会话与状态”，在会话、意图、待办、投递之间切换。可按用户 ID、会话 ID、状态（会话除外）筛选，并选择每页 25/50/100/200 条。点击记录 ID 查看详情，点击关联 ID 或“本会话的…”跳转查询相关状态。
+
+会话详情会独立加载元信息和聊天页，每页 50 条消息，按保存顺序从早到晚浏览。用户消息与已写入 conversation 的已投递助手消息才进入聊天读模型；失败/取消后的未投递片段、Intent 草稿和 InterruptedReply 不用于补写正文。部分投递只展示已提交到会话事实的部分。
+
+旧消息没有逐条时间戳时显示“时间未知”，不会拿会话更新时间冒充消息时间。图片和其他结构化附件只显示占位说明，原始 URL 不自动请求；消息按纯文本展示，不执行 HTML。原始元信息和消息 payload 默认折叠，展开可能看到敏感正文、URL 等内容。聊天范围是快照当前仍保留的 conversation，不是额外永久归档。
+
+页面先读取活动后端能力。file 后端显示迁移和重启提示，不发送 SQLite 查询，也不会自动切换后端。切换筛选、会话、页面或退出登录时取消旧请求并忽略迟到响应；登录失效返回登录页。分页期间数据变化时清空旧结果并提示从第一页重新查询。
+
+### 会话元信息与消息分页 API
+
+```http
+GET /api/admin/sessions/private%3A42
+GET /api/admin/sessions/private%3A42/messages?limit=50
+```
+
+元信息接口返回与 Session 列表相同的概要 DTO，不接受查询参数。消息接口只接受 `limit`（默认 100，1–200）和 `cursor`，不存在的会话返回 `404`，空会话返回空数组：
+
+```json
+{
+  "sessionId": "private:42",
+  "messages": [
+    {"sequence": 0, "role": "user", "recordedAt": null, "payload": {"role": "user", "content": "你好"}}
+  ],
+  "limit": 50,
+  "refreshedAt": "2026-10-15T00:00:00.000000000Z"
+}
+```
+
+消息 `sequence` 是 conversation 中从 0 开始的位置，允许因非聊天角色被排除而不连续；不能当作跨快照永久消息 ID 或业务 turn ID。`recordedAt` 只采用消息自带且有效的 `created_at`，标准历史消息通常为 `null`。`refreshedAt` 是该会话聊天投影最后变更时间，不是聊天发生时间。
+
+有下一页时携带 `nextCursor`。游标绑定会话、limit、内容版本和摘要；相同内容重复 Load/Save、其他会话更新不使其失效。当前会话内容变化时返回 `409/read_model_changed`，应放弃旧页并重新查询。参数错误返回 `400`；文件后端和未就绪实例分别返回 `501`、`503`，全部接口仍要求管理认证。
+
+schema 4 新增 `conversation_messages` 与 `conversation_revisions`，升级时从已有 Session 在事务内回填。随后随快照 Load/Save 同步；重复同步不重复消息，会话删除后清理派生记录。消息页按 `(session_id, sequence)` 索引和 `limit+1` 读取，不读取或反序列化 Session 完整 payload。运行时 Manager 加载/刷盘仍会处理完整快照，当前没有承诺全量聊天写入已改为增量数据库操作。
 
 ## 实际持久化状态
 
@@ -147,7 +183,7 @@ GET /api/admin/state/sessions/private%3A42
 GET /api/admin/persistence
 ```
 
-接口通过应用当前持有的 Persistence 实例报告 `backend`、`ready`、`schemaVersion`、分页上限、`capabilities`，以及各模型支持的 `filters` 和 `refreshedAt`。不返回数据库绝对路径，不通过环境配置推断已运行的后端。文件后端 `readModels` 为空，SQLite 当前 schema 为 3。
+接口通过应用当前持有的 Persistence 实例报告 `backend`、`ready`、`schemaVersion`、分页上限、`capabilities`，以及各模型支持的 `filters` 和 `refreshedAt`。不返回数据库绝对路径，不通过环境配置推断已运行的后端。文件后端 `readModels` 为空，SQLite 当前 schema 为 4，并包含 `conversation_query` 能力。
 
 `refreshedAt` 表示查询投影的最近同步时间，并非最近聊天时间。Session/Intent/OpenLoop 查询反映已保存或已加载的状态快照，可能落后于尚未 flush 的内存状态。缺失旧记录的更新时间保留为零时间，不在启动时伪造业务更新时间。
 

@@ -23,7 +23,7 @@ export function Sidebar({ items, active, onChange, panel, onLogout, loggingOut }
               title={item.note}
               aria-current={selected ? "page" : undefined}
             >
-              <span className="menu-icon">{item.icon}</span>
+              <span className="menu-icon" aria-hidden="true">{item.icon}</span>
               <span className="menu-copy">
                 <span className="menu-label">{item.label}</span>
               </span>

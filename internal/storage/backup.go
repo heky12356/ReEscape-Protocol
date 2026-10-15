@@ -109,6 +109,9 @@ func ValidateSQLiteBackup(ctx context.Context, name string) (BackupReport, error
 	if versions >= 3 {
 		queries = append(queries, "SELECT summary_json FROM sessions LIMIT 0", "SELECT session_id,turn_id,event_type,event_cursor,terminal FROM deliveries LIMIT 0", "SELECT kind,refreshed_at,revision FROM read_model_refreshes LIMIT 0")
 	}
+	if versions >= 4 {
+		queries = append(queries, "SELECT session_id,sequence,role,recorded_at,payload_json FROM conversation_messages LIMIT 0", "SELECT session_id,content_hash,revision,refreshed_at FROM conversation_revisions LIMIT 0")
+	}
 	for _, query := range queries {
 		rows, err := db.QueryContext(ctx, query)
 		if err != nil {

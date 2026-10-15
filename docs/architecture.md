@@ -24,6 +24,10 @@ OneBot event
 - `internal/admin`：配置、日志、健康检查和指标接口
 - `web`：管理后台前端
 
+SQLite 的 `snapshots` 保留 Manager 的完整状态快照；Session/Intent/OpenLoop 与聊天消息是派生读模型，Delivery 来源于事实事件。schema 4 的 `conversation_messages` 按会话与序号索引，消息分页独立于完整 Session payload；`conversation_revisions` 记录单个会话聊天内容版本。重复保存不重复消息，删除会话会清理派生聊天。
+
+WebUI 的“会话与状态”先读取活动 Persistence 能力，再查询分类列表、概要、详情和消息页；请求切换与卸载会取消旧查询，401 接入现有登录失效流程。聊天只展示已保存的 user/assistant 事实，默认不加载远端附件或展开原始 payload。file 后端提供明确的能力提示，继续使用原持久化方式。
+
 ReAct Runtime 是消息处理的唯一主链路。关闭 `ENABLE_REACT_AGENT` 时，系统会明确报告运行时不可用，不会静默回退到旧 handler 路径。
 
 ## 事件与扩展 Hook

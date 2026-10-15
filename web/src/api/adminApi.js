@@ -1,8 +1,9 @@
 class AdminApiError extends Error {
-  constructor(message, status) {
+  constructor(message, status, code) {
     super(message);
     this.name = "AdminApiError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -23,7 +24,7 @@ async function fetchJSON(url, options = {}) {
       window.dispatchEvent(new Event("admin:unauthorized"));
     }
     if (isJSON && data?.error) {
-      throw new AdminApiError(data.error, resp.status);
+      throw new AdminApiError(data.error, resp.status, data.code);
     }
     throw new AdminApiError(typeof data === "string" ? data : "request failed", resp.status);
   }
@@ -51,6 +52,21 @@ export function logoutAdmin() {
 }
 
 export const adminApi = {
+  getPersistence(options = {}) {
+    return fetchJSON("/api/admin/persistence", { cache: "no-store", ...options });
+  },
+  getState(kind, filters = {}, options = {}) {
+    return fetchJSON(`/api/admin/state/${encodeURIComponent(kind)}${queryString(filters)}`, { cache: "no-store", ...options });
+  },
+  getStateDetail(kind, id, options = {}) {
+    return fetchJSON(`/api/admin/state/${encodeURIComponent(kind)}/${encodeURIComponent(id)}`, { cache: "no-store", ...options });
+  },
+  getSessionSummary(id, options = {}) {
+    return fetchJSON(`/api/admin/sessions/${encodeURIComponent(id)}`, { cache: "no-store", ...options });
+  },
+  getConversationMessages(id, filters = {}, options = {}) {
+    return fetchJSON(`/api/admin/sessions/${encodeURIComponent(id)}/messages${queryString(filters)}`, { cache: "no-store", ...options });
+  },
   getHealth() {
     return fetchJSON("/healthz", { cache: "no-store" });
   },
@@ -119,3 +135,12 @@ export const adminApi = {
     );
   }
 };
+
+function queryString(filters) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== "" && value !== undefined && value !== null) params.set(key, String(value));
+  }
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}

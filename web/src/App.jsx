@@ -4,6 +4,7 @@ import { OverviewPage } from "./pages/OverviewPage";
 import { AIConfigPage } from "./pages/AIConfigPage";
 import { PromptPage } from "./pages/PromptPage";
 import { LogsPage } from "./pages/LogsPage";
+import { StatePage } from "./pages/StatePage";
 import { AuthLoadingPage, LoginPage } from "./pages/LoginPage";
 import { getAdminSession, logoutAdmin } from "./api/adminApi";
 import { useAdminPanel } from "./hooks/useAdminPanel";
@@ -15,6 +16,10 @@ const MENU_ITEMS = [
     icon: "◌",
     note: "系统姿态",
     description: "在一张观测台上看清模型路由、人格源文件、日志脉搏和当前运行姿态。"
+  },
+  {
+    key: "state", label: "会话与状态", icon: "▤", note: "持久化查询",
+    description: "浏览会话、意图、待办与投递状态，按会话查看已经保存的聊天历史。"
   },
   {
     key: "ai",
@@ -153,6 +158,7 @@ function AdminConsole({ onLogout }) {
           {active === "ai" ? <AIConfigPage panel={panel} /> : null}
           {active === "prompt" ? <PromptPage panel={panel} /> : null}
           {active === "logs" ? <LogsPage panel={panel} /> : null}
+          {active === "state" ? <StatePage /> : null}
         </section>
       </main>
     </div>

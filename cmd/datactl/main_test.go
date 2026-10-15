@@ -33,7 +33,7 @@ func TestDatactlMigrationBackupRestore(t *testing.T) {
 			t.Fatalf("%s: %v", args[0], err)
 		}
 		var report storage.BackupReport
-		if err := json.Unmarshal(output.Bytes(), &report); err != nil || report.SchemaVersion != 3 {
+		if err := json.Unmarshal(output.Bytes(), &report); err != nil || report.SchemaVersion != 4 {
 			t.Fatalf("output: %s %v", output.String(), err)
 		}
 	}

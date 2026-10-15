@@ -318,6 +318,8 @@ func (s *server) routes() *gin.Engine {
 		adminGroup.GET("/events/stream", s.handleEventStream)
 		adminGroup.GET("/state/:kind", s.handleQueryState)
 		adminGroup.GET("/state/:kind/:id", s.handleStateDetail)
+		adminGroup.GET("/sessions/:id", s.handleSessionSummary)
+		adminGroup.GET("/sessions/:id/messages", s.handleConversationMessages)
 		adminGroup.POST("/state/deliveries/rebuild", s.handleRebuildDeliveries)
 		adminGroup.GET("/persistence", s.handlePersistence)
 		adminGroup.POST("/persistence/backup", s.handleSQLiteBackup)

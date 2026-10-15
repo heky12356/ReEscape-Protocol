@@ -222,7 +222,7 @@ func (p *Persistence) Info(ctx context.Context) (PersistenceInfo, error) {
 		}
 		info.ReadModels = append(info.ReadModels, ReadModelCapability{Kind: kind, Filters: filters, RefreshedAt: refreshed[kind]})
 	}
-	info.Capabilities = append(info.Capabilities, "state_query", "state_detail", "delivery_projection_rebuild", "sqlite_backup", "offline_sqlite_restore")
+	info.Capabilities = append(info.Capabilities, "state_query", "state_detail", "conversation_query", "delivery_projection_rebuild", "sqlite_backup", "offline_sqlite_restore")
 	return info, tx.Commit()
 }
 

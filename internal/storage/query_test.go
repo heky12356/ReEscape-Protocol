@@ -183,7 +183,7 @@ func TestPersistenceInfoReflectsLiveInstance(t *testing.T) {
 	ctx := context.Background()
 	p := queryTestPersistence(t)
 	info, err := p.Info(ctx)
-	if err != nil || info.Backend != BackendSQLite || info.SchemaVersion != 3 || len(info.ReadModels) != 4 || !info.Ready {
+	if err != nil || info.Backend != BackendSQLite || info.SchemaVersion != 4 || len(info.ReadModels) != 4 || !info.Ready {
 		t.Fatalf("info: %+v %v", info, err)
 	}
 	file, err := OpenPersistence(PersistenceOptions{DataDir: t.TempDir()})

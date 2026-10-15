@@ -156,7 +156,7 @@ func TestStateRebuildRequiresAuthenticationAndCookieOrigin(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &info); err != nil {
 		t.Fatal(err)
 	}
-	if response.Code != 200 || info.SchemaVersion != 3 || len(info.ReadModels) != 4 {
+	if response.Code != 200 || info.SchemaVersion != 4 || len(info.ReadModels) != 4 {
 		t.Fatalf("schema info: %s", response.Body)
 	}
 }

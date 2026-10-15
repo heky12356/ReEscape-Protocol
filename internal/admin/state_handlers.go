@@ -132,3 +132,48 @@ func stateQueryError(c *gin.Context, err error) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "state query failed"})
 	}
 }
+
+func (s *server) handleSessionSummary(c *gin.Context) {
+	query := s.stateQueryStore(c)
+	if query == nil {
+		return
+	}
+	if len(c.Request.URL.Query()) != 0 {
+		c.JSON(400, gin.H{"error": "summary does not accept query filters"})
+		return
+	}
+	record, err := query.SessionSummary(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		stateQueryError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, record)
+}
+
+func (s *server) handleConversationMessages(c *gin.Context) {
+	query := s.stateQueryStore(c)
+	if query == nil {
+		return
+	}
+	for key, values := range c.Request.URL.Query() {
+		if (key != "limit" && key != "cursor") || len(values) != 1 || strings.TrimSpace(values[0]) == "" {
+			c.JSON(400, gin.H{"error": "unknown, repeated or empty query parameter: " + key})
+			return
+		}
+	}
+	limit := storage.DefaultQueryLimit
+	if raw := c.Query("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > storage.MaxQueryLimit {
+			c.JSON(400, gin.H{"error": "limit must be between 1 and 200"})
+			return
+		}
+		limit = parsed
+	}
+	page, err := query.Messages(c.Request.Context(), c.Param("id"), limit, c.Query("cursor"))
+	if err != nil {
+		stateQueryError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, page)
+}

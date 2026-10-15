@@ -46,6 +46,7 @@ func restoreFilesOffline(ctx context.Context, options PersistenceOptions, archiv
 	if err != nil {
 		return FileRestoreReport{}, err
 	}
+	defer manager.Close()
 	directory := filepath.Join(manager.root, ".maintenance", newTransferID("restore"))
 	if err := rejectSymlinks(directory); err != nil {
 		return FileRestoreReport{}, err

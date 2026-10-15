@@ -28,6 +28,8 @@ SQLite 的 `snapshots` 保留 Manager 的完整状态快照；Session/Intent/Ope
 
 WebUI 的“会话与状态”先读取活动 Persistence 能力，再查询分类列表、概要、详情和消息页；请求切换与卸载会取消旧查询，401 接入现有登录失效流程。聊天只展示已保存的 user/assistant 事实，默认不加载远端附件或展开原始 payload。file 后端提供明确的能力提示，继续使用原持久化方式。
 
+“数据运维”连接同一活动实例的 TransferManager，统一列出导出、上传预检查和 SQLite 备份任务。Manager 串行保留一个工作槽，后台任务有阶段、结果报告、取消与临时文件清理；列表最多保留 100 个内存记录，成功产物按部署策略保留。浏览器只保存已知 Job ID，轮询不会重复创建任务，大文件交由浏览器下载。在线恢复入口明确拒绝覆盖，实际恢复仍由独立 datactl 在停机后持锁执行。
+
 ReAct Runtime 是消息处理的唯一主链路。关闭 `ENABLE_REACT_AGENT` 时，系统会明确报告运行时不可用，不会静默回退到旧 handler 路径。
 
 ## 事件与扩展 Hook

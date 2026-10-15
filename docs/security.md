@@ -38,6 +38,7 @@ map $http_upgrade $connection_upgrade {
 server {
     listen 443 ssl http2;
     server_name admin.example.com;
+    client_max_body_size 129m;
 
     ssl_certificate     /etc/letsencrypt/live/admin.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/admin.example.com/privkey.pem;
@@ -59,11 +60,15 @@ server {
 
 `ADMIN_CORS_ORIGINS` 必须列出实际管理域名，禁止使用 `*`。防火墙只公开代理端口，不要直接公开后端 `8088`。
 
+`client_max_body_size 129m` 为 128 MiB ZIP 与 multipart 元数据预留空间；后端仍单独限制 ZIP/解压内容为 128 MiB。代理限制更小时，大包会在到达管理 API 前被拒绝。
+
 事件诊断 WebSocket 复用 HttpOnly Cookie 与 Origin 校验；浏览器不通过 URL 或 localStorage 传密钥。已建立的事件连接会持续检查会话有效性，过期/撤销后关闭并返回登录。原始事件可能含正文、参数或 URL，默认折叠不等于脱敏，展开内容和截图仍只供管理员使用。
 
 ## 生产验收
 
-迁移、备份和恢复工具的说明见[运维与数据查询](./operations.md)。SQLite 备份和已验证 ZIP 可能包含完整聊天与记忆，产物只供已认证管理员下载，文件使用私有权限；不要放入公开静态目录或提交 Git。备份、上传包和恢复旧文件目前不会自动清理，应按部署方的保留策略处理。
+迁移、备份和恢复工具的说明见[运维与数据查询](./operations.md)。SQLite 备份和已验证 ZIP 可能包含完整聊天与记忆，产物只供已认证管理员下载，文件使用私有权限；不要放入公开静态目录或提交 Git。成功备份、通过验证的上传包和恢复旧文件不自动清理，应按部署方的保留策略处理；正常失败/取消清理未完成传输文件，崩溃残留需停机核对。
+
+数据运维页只在浏览器保存最近 50 个任务 ID，不保存密钥或数据内容。任务列表最多保留 100 条内存记录，服务重启后旧 Job 失效；产物仍可能在服务器，不能据此认为数据已经删除。在线恢复请求始终被拒绝，实际覆盖操作必须通过持有进程锁的停机 CLI。
 
 在线上传只验证和暂存，不直接执行数据恢复。离线命令使用与机器人相同的进程锁，拒绝运行中替换；路径保护同时覆盖自定义 SQLite 主文件、sidecar、锁、备份和恢复记录。不要通过删除锁文件或 journal 绕过检查。
 

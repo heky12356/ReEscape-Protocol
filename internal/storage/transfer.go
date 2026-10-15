@@ -20,8 +20,11 @@ import (
 )
 
 const (
-	TransferManifestVersion = 1
-	MaxTransferArchiveBytes = 128 << 20
+	TransferManifestVersion  = 1
+	MaxTransferArchiveBytes  = 128 << 20
+	MaxTransferFiles         = 4096
+	MaxTransferManifestBytes = 1 << 20
+	MaxTransferJobs          = 100
 )
 
 type TransferJobStatus string
@@ -31,20 +34,34 @@ const (
 	TransferRunning   TransferJobStatus = "running"
 	TransferCompleted TransferJobStatus = "completed"
 	TransferFailed    TransferJobStatus = "failed"
+	TransferCancelled TransferJobStatus = "cancelled"
 )
 
 type TransferJob struct {
-	Applied     bool              `json:"applied"`
-	NextAction  string            `json:"nextAction,omitempty"`
-	ID          string            `json:"id"`
-	Kind        string            `json:"kind"`
-	Status      TransferJobStatus `json:"status"`
-	Artifact    string            `json:"-"`
-	Error       string            `json:"error,omitempty"`
-	CreatedAt   time.Time         `json:"createdAt"`
-	UpdatedAt   time.Time         `json:"updatedAt"`
-	CompletedAt *time.Time        `json:"completedAt,omitempty"`
+	Stage             string            `json:"stage"`
+	Report            *TransferReport   `json:"report,omitempty"`
+	DownloadAvailable bool              `json:"downloadAvailable"`
+	Applied           bool              `json:"applied"`
+	NextAction        string            `json:"nextAction,omitempty"`
+	ID                string            `json:"id"`
+	Kind              string            `json:"kind"`
+	Status            TransferJobStatus `json:"status"`
+	Artifact          string            `json:"-"`
+	Error             string            `json:"error,omitempty"`
+	CreatedAt         time.Time         `json:"createdAt"`
+	UpdatedAt         time.Time         `json:"updatedAt"`
+	CompletedAt       *time.Time        `json:"completedAt,omitempty"`
 }
+
+type TransferReport struct {
+	FileCount  int            `json:"fileCount"`
+	TotalBytes int64          `json:"totalBytes"`
+	Files      []transferFile `json:"files,omitempty"`
+	Backup     *BackupReport  `json:"backup,omitempty"`
+}
+
+var ErrTransferBusy = errors.New("another transfer job is active")
+var ErrTransferClosed = errors.New("transfer manager is closed")
 
 type transferManifest struct {
 	Version   int            `json:"version"`
@@ -66,6 +83,12 @@ type TransferManager struct {
 	mu             sync.RWMutex
 	jobs           map[string]*TransferJob
 	protectedPaths []string
+	activeID       string
+	instanceID     string
+	ctx            context.Context
+	cancel         context.CancelFunc
+	workers        sync.WaitGroup
+	closed         bool
 }
 
 func NewTransferManager(dataDir string, protectedPaths ...string) (*TransferManager, error) {
@@ -88,6 +111,8 @@ func NewTransferManager(dataDir string, protectedPaths ...string) (*TransferMana
 		jobs:           make(map[string]*TransferJob),
 		protectedPaths: append([]string(nil), protectedPaths...),
 	}
+	manager.ctx, manager.cancel = context.WithCancel(context.Background())
+	manager.instanceID = newTransferID("transfers")
 	if err := os.MkdirAll(manager.exportDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create transfer export directory: %w", err)
 	}
@@ -101,8 +126,11 @@ func (m *TransferManager) StartExport() (TransferJob, error) {
 	if m == nil {
 		return TransferJob{}, errors.New("transfer manager is not configured")
 	}
-	job := m.newJob("export")
-	go m.runExport(job.ID)
+	job, err := m.newJob("export")
+	if err != nil {
+		return TransferJob{}, err
+	}
+	go func() { defer m.releaseJob(job.ID); m.runExport(job.ID) }()
 	return job, nil
 }
 
@@ -113,7 +141,17 @@ func (m *TransferManager) StartImport(source io.Reader) (TransferJob, error) {
 	if source == nil {
 		return TransferJob{}, errors.New("import archive is empty")
 	}
-	job := m.newJob("import_validation")
+	job, err := m.newJob("import_validation")
+	if err != nil {
+		return TransferJob{}, err
+	}
+	started := false
+	defer func() {
+		if !started {
+			m.releaseJob(job.ID)
+		}
+	}()
+	m.updateJob(job.ID, func(job *TransferJob) { job.Status = TransferRunning; job.Stage = "staging" })
 	archivePath := filepath.Join(m.importDir, ".upload-"+job.ID+".zip")
 	file, err := os.OpenFile(archivePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
@@ -121,7 +159,7 @@ func (m *TransferManager) StartImport(source io.Reader) (TransferJob, error) {
 		return TransferJob{}, fmt.Errorf("create import staging file: %w", err)
 	}
 	limited := io.LimitReader(source, MaxTransferArchiveBytes+1)
-	_, copyErr := io.Copy(file, limited)
+	_, copyErr := io.Copy(file, &contextReader{ctx: m.ctx, reader: limited})
 	closeErr := file.Close()
 	if copyErr != nil {
 		_ = os.Remove(archivePath)
@@ -142,7 +180,8 @@ func (m *TransferManager) StartImport(source io.Reader) (TransferJob, error) {
 		m.failJob(job.ID, errors.New("import archive exceeds size limit"))
 		return TransferJob{}, errors.New("import archive exceeds size limit")
 	}
-	go m.runImport(job.ID, archivePath)
+	started = true
+	go func() { defer m.releaseJob(job.ID); m.runImport(job.ID, archivePath) }()
 	return job, nil
 }
 
@@ -159,24 +198,112 @@ func (m *TransferManager) Get(id string) (TransferJob, bool) {
 	if !ok {
 		return TransferJob{}, false
 	}
+	job.DownloadAvailable = m.downloadable(job)
 	return *job, true
 }
 
 func (m *TransferManager) DownloadPath(id string) (string, bool) {
 	job, ok := m.Get(id)
-	if !ok || (job.Kind != "export" && job.Kind != "sqlite_backup") || job.Status != TransferCompleted || job.Artifact == "" {
+	if !ok || !job.DownloadAvailable {
 		return "", false
 	}
 	return job.Artifact, true
 }
 
-func (m *TransferManager) newJob(kind string) TransferJob {
+func (m *TransferManager) newJob(kind string) (TransferJob, error) {
 	now := time.Now().UTC()
-	job := &TransferJob{ID: newTransferID(kind), Kind: kind, Status: TransferPending, CreatedAt: now, UpdatedAt: now}
+	job := &TransferJob{ID: newTransferID(kind), Kind: kind, Status: TransferPending, Stage: "queued", CreatedAt: now, UpdatedAt: now}
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return TransferJob{}, ErrTransferClosed
+	}
+	if m.activeID != "" {
+		return TransferJob{}, ErrTransferBusy
+	}
+	for len(m.jobs) >= MaxTransferJobs {
+		var oldest *TransferJob
+		for _, candidate := range m.jobs {
+			if oldest == nil || candidate.CreatedAt.Before(oldest.CreatedAt) {
+				oldest = candidate
+			}
+		}
+		delete(m.jobs, oldest.ID)
+	}
 	m.jobs[job.ID] = job
+	m.activeID = job.ID
+	m.workers.Add(1)
+	return *job, nil
+}
+
+func (m *TransferManager) releaseJob(id string) {
+	m.mu.Lock()
+	if m.activeID == id {
+		m.activeID = ""
+	}
 	m.mu.Unlock()
-	return *job
+	m.workers.Done()
+}
+func (m *TransferManager) Close() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.closed = true
+	m.cancel()
+	m.mu.Unlock()
+	m.workers.Wait()
+}
+
+type TransferOverview struct {
+	InstanceID       string        `json:"instanceId"`
+	ActiveJobID      string        `json:"activeJobId,omitempty"`
+	MaxArchiveBytes  int64         `json:"maxArchiveBytes"`
+	MaxFiles         int           `json:"maxFiles"`
+	MaxManifestBytes int           `json:"maxManifestBytes"`
+	MaxJobs          int           `json:"maxJobs"`
+	Jobs             []TransferJob `json:"jobs"`
+}
+
+func (m *TransferManager) Overview() TransferOverview {
+	m.mu.RLock()
+	result := TransferOverview{InstanceID: m.instanceID, ActiveJobID: m.activeID, MaxArchiveBytes: MaxTransferArchiveBytes, MaxFiles: MaxTransferFiles, MaxManifestBytes: MaxTransferManifestBytes, MaxJobs: MaxTransferJobs, Jobs: []TransferJob{}}
+	for _, job := range m.jobs {
+		clone := *job
+		if job.Report != nil {
+			report := *job.Report
+			report.Files = nil
+			if report.Backup != nil {
+				backup := *report.Backup
+				report.Backup = &backup
+			}
+			clone.Report = &report
+		}
+		result.Jobs = append(result.Jobs, clone)
+	}
+	m.mu.RUnlock()
+	for i := range result.Jobs {
+		result.Jobs[i].DownloadAvailable = m.downloadable(&result.Jobs[i])
+	}
+	sort.Slice(result.Jobs, func(i, j int) bool { return result.Jobs[i].CreatedAt.After(result.Jobs[j].CreatedAt) })
+	return result
+}
+func (m *TransferManager) downloadable(job *TransferJob) bool {
+	if (job.Kind != "export" && job.Kind != "sqlite_backup") || job.Status != TransferCompleted || job.Artifact == "" {
+		return false
+	}
+	if rejectSymlinks(job.Artifact) != nil {
+		return false
+	}
+	info, err := os.Stat(job.Artifact)
+	return err == nil && info.Mode().IsRegular()
+}
+
+func (m *TransferManager) workContext() context.Context {
+	if m.ctx == nil {
+		return context.Background()
+	}
+	return m.ctx
 }
 
 func (m *TransferManager) updateJob(id string, update func(*TransferJob)) {
@@ -191,29 +318,26 @@ func (m *TransferManager) updateJob(id string, update func(*TransferJob)) {
 func (m *TransferManager) failJob(id string, err error) {
 	m.updateJob(id, func(job *TransferJob) {
 		job.Status = TransferFailed
+		job.Stage = "failed"
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			job.Status = TransferCancelled
+			job.Stage = "cancelled"
+		}
 		job.Error = err.Error()
+		now := time.Now().UTC()
+		job.CompletedAt = &now
 	})
 }
 
 func (m *TransferManager) runExport(id string) {
-	m.updateJob(id, func(job *TransferJob) { job.Status = TransferRunning })
+	m.updateJob(id, func(job *TransferJob) { job.Status = TransferRunning; job.Stage = "archiving" })
 	archivePath := filepath.Join(m.exportDir, id+".zip")
 	if err := m.exportArchive(archivePath); err != nil {
 		_ = os.Remove(archivePath)
 		m.failJob(id, err)
 		return
 	}
-	now := time.Now().UTC()
-	m.updateJob(id, func(job *TransferJob) {
-		job.Status = TransferCompleted
-		job.Artifact = archivePath
-		job.CompletedAt = &now
-	})
-}
-
-func (m *TransferManager) runImport(id, archivePath string) {
-	m.updateJob(id, func(job *TransferJob) { job.Status = TransferRunning })
-	err := m.validateArchive(archivePath)
+	report, err := readTransferReport(archivePath)
 	if err != nil {
 		_ = os.Remove(archivePath)
 		m.failJob(id, err)
@@ -222,24 +346,75 @@ func (m *TransferManager) runImport(id, archivePath string) {
 	now := time.Now().UTC()
 	m.updateJob(id, func(job *TransferJob) {
 		job.Status = TransferCompleted
+		job.Stage = "completed"
+		job.Report = report
 		job.Artifact = archivePath
-		job.NextAction = "stop the bot, then run datactl restore-files --archive imports/.upload-" + id + ".zip with the configured data directory"
+		job.CompletedAt = &now
+	})
+}
+
+func (m *TransferManager) runImport(id, archivePath string) {
+	m.updateJob(id, func(job *TransferJob) { job.Status = TransferRunning; job.Stage = "validating" })
+	err := m.validateArchive(archivePath)
+	if err != nil {
+		_ = os.Remove(archivePath)
+		m.failJob(id, err)
+		return
+	}
+	report, err := readTransferReport(archivePath)
+	if err != nil {
+		_ = os.Remove(archivePath)
+		m.failJob(id, err)
+		return
+	}
+	now := time.Now().UTC()
+	m.updateJob(id, func(job *TransferJob) {
+		job.Status = TransferCompleted
+		job.Stage = "validated"
+		job.Report = report
+		job.Artifact = archivePath
+		job.NextAction = "stop the bot and wait for its final flush; use datactl restore-files --archive <DATA_DIR>/imports/.upload-" + id + ".zip with the configured data/sqlite/backup paths for file data only; use restore-sqlite for SQLite"
 		job.CompletedAt = &now
 	})
 }
 
 func (m *TransferManager) exportArchive(destination string) error {
-	files, err := collectTransferFiles(m.root, m.exportDir, m.importDir, m.protectedPaths...)
+	ctx := m.workContext()
+	files, err := collectTransferFilesContext(ctx, m.root, m.exportDir, m.importDir, m.protectedPaths...)
 	if err != nil {
 		return err
 	}
 	manifest := transferManifest{Version: TransferManifestVersion, CreatedAt: time.Now().UTC(), Files: make([]transferFile, 0, len(files))}
+	if len(files) > MaxTransferFiles {
+		return errors.New("export exceeds 4096 files")
+	}
+	var totalBytes int64
 	for _, file := range files {
-		entry, err := hashTransferFile(m.root, file)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		input, err := os.Open(filepath.Join(m.root, filepath.FromSlash(file)))
 		if err != nil {
 			return err
 		}
+		digest, size, err := hashReader(&contextReader{ctx: ctx, reader: io.LimitReader(input, MaxTransferArchiveBytes-totalBytes+1)})
+		input.Close()
+		if err != nil {
+			return err
+		}
+		if size > MaxTransferArchiveBytes-totalBytes {
+			return errors.New("export uncompressed size exceeds limit")
+		}
+		totalBytes += size
+		entry := transferFile{Path: file, Size: size, SHA256: digest}
 		manifest.Files = append(manifest.Files, entry)
+	}
+	manifestData, err := json.Marshal(manifest)
+	if err != nil {
+		return err
+	}
+	if len(manifestData) > MaxTransferManifestBytes {
+		return errors.New("export manifest exceeds size limit")
 	}
 	temporary := destination + ".tmp"
 	file, err := os.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
@@ -247,7 +422,6 @@ func (m *TransferManager) exportArchive(destination string) error {
 		return fmt.Errorf("create export archive: %w", err)
 	}
 	archive := zip.NewWriter(file)
-	manifestData, err := json.Marshal(manifest)
 	if err == nil {
 		var writer io.Writer
 		writer, err = archive.Create("manifest.json")
@@ -269,8 +443,13 @@ func (m *TransferManager) exportArchive(destination string) error {
 			err = openErr
 			break
 		}
-		_, err = io.Copy(writer, input)
+		hash := sha256.New()
+		var size int64
+		size, err = io.Copy(io.MultiWriter(writer, hash), &contextReader{ctx: ctx, reader: io.LimitReader(input, entry.Size+1)})
 		_ = input.Close()
+		if err == nil && (size != entry.Size || hex.EncodeToString(hash.Sum(nil)) != entry.SHA256) {
+			err = fmt.Errorf("export source changed while archiving: %s", entry.Path)
+		}
 	}
 	if closeErr := archive.Close(); err == nil {
 		err = closeErr
@@ -282,6 +461,14 @@ func (m *TransferManager) exportArchive(destination string) error {
 		_ = os.Remove(temporary)
 		return fmt.Errorf("write export archive: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		_ = os.Remove(temporary)
+		return err
+	}
+	if info, err := os.Stat(temporary); err != nil || info.Size() > MaxTransferArchiveBytes {
+		_ = os.Remove(temporary)
+		return errors.New("export archive exceeds size limit or is unavailable")
+	}
 	if err := os.Rename(temporary, destination); err != nil {
 		_ = os.Remove(temporary)
 		return fmt.Errorf("publish export archive: %w", err)
@@ -290,6 +477,10 @@ func (m *TransferManager) exportArchive(destination string) error {
 }
 
 func (m *TransferManager) validateArchive(archivePath string) error {
+	ctx := m.workContext()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	archive, err := zip.OpenReader(archivePath)
 	if err != nil {
 		return fmt.Errorf("open import archive: %w", err)
@@ -300,6 +491,9 @@ func (m *TransferManager) validateArchive(archivePath string) error {
 	entries := make(map[string]*zip.File)
 	var totalUncompressed uint64
 	for _, entry := range archive.File {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		rel, err := validateTransferPath(entry.Name)
 		if err != nil {
 			return err
@@ -326,7 +520,7 @@ func (m *TransferManager) validateArchive(archivePath string) error {
 		if entry.FileInfo().IsDir() {
 			continue
 		}
-		if len(entries) >= 4096 {
+		if len(entries) >= MaxTransferFiles {
 			return errors.New("import archive exceeds 4096 files")
 		}
 		if _, exists := entries[rel]; exists {
@@ -339,12 +533,12 @@ func (m *TransferManager) validateArchive(archivePath string) error {
 		if openErr != nil {
 			return openErr
 		}
-		manifestData, readErr := io.ReadAll(io.LimitReader(reader, (1<<20)+1))
+		manifestData, readErr := io.ReadAll(&contextReader{ctx: ctx, reader: io.LimitReader(reader, MaxTransferManifestBytes+1)})
 		_ = reader.Close()
 		if readErr != nil {
 			return readErr
 		}
-		if len(manifestData) > 1<<20 {
+		if len(manifestData) > MaxTransferManifestBytes {
 			return errors.New("import manifest exceeds size limit")
 		}
 		if err := json.Unmarshal(manifestData, &manifest); err != nil {
@@ -381,7 +575,7 @@ func (m *TransferManager) validateArchive(archivePath string) error {
 		if openErr != nil {
 			return openErr
 		}
-		digest, size, hashErr := hashReader(io.LimitReader(reader, expected.Size+1))
+		digest, size, hashErr := hashReader(&contextReader{ctx: ctx, reader: io.LimitReader(reader, expected.Size+1)})
 		_ = reader.Close()
 		if hashErr != nil {
 			return hashErr
@@ -402,8 +596,15 @@ func (m *TransferManager) validateArchive(archivePath string) error {
 }
 
 func collectTransferFiles(root, exportDir, importDir string, protectedPaths ...string) ([]string, error) {
+	return collectTransferFilesContext(context.Background(), root, exportDir, importDir, protectedPaths...)
+}
+
+func collectTransferFilesContext(ctx context.Context, root, exportDir, importDir string, protectedPaths ...string) ([]string, error) {
 	files := make([]string, 0)
 	err := filepath.WalkDir(root, func(current string, entry os.DirEntry, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if walkErr != nil {
 			return walkErr
 		}
@@ -434,6 +635,9 @@ func collectTransferFiles(root, exportDir, importDir string, protectedPaths ...s
 			return nil
 		}
 		files = append(files, rel)
+		if len(files) > MaxTransferFiles {
+			return errors.New("export exceeds 4096 files")
+		}
 		return nil
 	})
 	if err != nil {
@@ -441,19 +645,6 @@ func collectTransferFiles(root, exportDir, importDir string, protectedPaths ...s
 	}
 	sort.Strings(files)
 	return files, nil
-}
-
-func hashTransferFile(root, rel string) (transferFile, error) {
-	file, err := os.Open(filepath.Join(root, filepath.FromSlash(rel)))
-	if err != nil {
-		return transferFile{}, err
-	}
-	digest, size, hashErr := hashReader(file)
-	_ = file.Close()
-	if hashErr != nil {
-		return transferFile{}, hashErr
-	}
-	return transferFile{Path: rel, Size: size, SHA256: digest}, nil
 }
 
 func hashReader(reader io.Reader) (string, int64, error) {
@@ -531,22 +722,32 @@ func protectedTransferPath(root, rel string, paths ...string) bool {
 }
 
 func (m *TransferManager) StartSQLiteBackup(p *Persistence) (TransferJob, error) {
+	if m == nil {
+		return TransferJob{}, errors.New("transfer manager is not configured")
+	}
 	if p == nil || !p.Status().Ready || p.Status().Backend != BackendSQLite {
 		return TransferJob{}, errors.New("active SQLite persistence is required")
 	}
-	job := m.newJob("sqlite_backup")
+	job, err := m.newJob("sqlite_backup")
+	if err != nil {
+		return TransferJob{}, err
+	}
 	go func() {
-		m.updateJob(job.ID, func(job *TransferJob) { job.Status = TransferRunning })
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer m.releaseJob(job.ID)
+		m.updateJob(job.ID, func(job *TransferJob) { job.Status = TransferRunning; job.Stage = "backing_up" })
+		ctx, cancel := context.WithTimeout(m.ctx, 10*time.Minute)
 		defer cancel()
 		destination := filepath.Join(p.Status().BackupDirectory, job.ID+".sqlite")
-		if _, err := p.BackupSQLite(ctx, destination); err != nil {
+		report, err := p.BackupSQLite(ctx, destination)
+		if err != nil {
 			m.failJob(job.ID, err)
 			return
 		}
 		now := time.Now().UTC()
 		m.updateJob(job.ID, func(job *TransferJob) {
 			job.Status = TransferCompleted
+			job.Stage = "completed"
+			job.Report = &TransferReport{Backup: &report}
 			job.Artifact = destination
 			job.CompletedAt = &now
 		})
@@ -582,5 +783,43 @@ func newTransferID(kind string) string {
 
 func cloneTransferJob(job *TransferJob) *TransferJob {
 	clone := *job
+	if job.Report != nil {
+		report := *job.Report
+		report.Files = append([]transferFile(nil), job.Report.Files...)
+		if report.Backup != nil {
+			backup := *report.Backup
+			report.Backup = &backup
+		}
+		clone.Report = &report
+	}
 	return &clone
+}
+
+// The archive is already bounded/validated by the caller; reports never expose
+// server absolute paths or restore rollback locations.
+func readTransferReport(name string) (*TransferReport, error) {
+	archive, err := zip.OpenReader(name)
+	if err != nil {
+		return nil, err
+	}
+	defer archive.Close()
+	for _, entry := range archive.File {
+		if entry.Name == "manifest.json" {
+			reader, err := entry.Open()
+			if err != nil {
+				return nil, err
+			}
+			defer reader.Close()
+			var manifest transferManifest
+			if err := json.NewDecoder(io.LimitReader(reader, MaxTransferManifestBytes+1)).Decode(&manifest); err != nil {
+				return nil, err
+			}
+			report := &TransferReport{FileCount: len(manifest.Files), Files: manifest.Files}
+			for _, file := range manifest.Files {
+				report.TotalBytes += file.Size
+			}
+			return report, nil
+		}
+	}
+	return nil, errors.New("manifest missing")
 }

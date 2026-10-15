@@ -6,6 +6,7 @@ import { PromptPage } from "./pages/PromptPage";
 import { LogsPage } from "./pages/LogsPage";
 import { StatePage } from "./pages/StatePage";
 import { EventsPage } from "./pages/EventsPage";
+import { DataOperationsPage } from "./pages/DataOperationsPage";
 import { AuthLoadingPage, LoginPage } from "./pages/LoginPage";
 import { getAdminSession, logoutAdmin } from "./api/adminApi";
 import { useAdminPanel } from "./hooks/useAdminPanel";
@@ -25,6 +26,10 @@ const MENU_ITEMS = [
   {
     key: "events", label: "事件诊断", icon: "⌁", note: "实时追踪",
     description: "按关联 ID 追踪历史与实时事件，查看连接状态、断线补发和历史缺口。"
+  },
+  {
+    key: "data", label: "数据运维", icon: "⇅", note: "传输与恢复",
+    description: "导出数据、备份 SQLite、检查上传包，并按停机流程恢复数据。"
   },
   {
     key: "ai",
@@ -165,6 +170,7 @@ function AdminConsole({ onLogout }) {
           {active === "logs" ? <LogsPage panel={panel} /> : null}
           {active === "state" ? <StatePage /> : null}
           {active === "events" ? <EventsPage /> : null}
+          {active === "data" ? <DataOperationsPage /> : null}
         </section>
       </main>
     </div>

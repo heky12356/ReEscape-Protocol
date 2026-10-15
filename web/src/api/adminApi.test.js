@@ -1,17 +1,101 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { adminApi, openEventSocket } from "./adminApi";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
-it("uses an exact event cursor and the same filters for HTTP and Cookie websocket connections", async () => {
+it("uploads multipart archives and creates jobs with Cookie credentials and abort signals", async () => {
+  const fetch = vi
+    .fn()
+    .mockImplementation(
+      async () =>
+        new Response('{"id":"import_validation-one"}', {
+          status: 202,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+  vi.stubGlobal("fetch", fetch);
+  const controller = new AbortController();
+  const file = new File(["zip"], "state.zip");
+  await adminApi.startTransferImport(file, { signal: controller.signal });
+  const [url, options] = fetch.mock.calls[0];
+  expect(url).toBe("/api/admin/transfers/import");
+  expect(options).toMatchObject({
+    method: "POST",
+    credentials: "include",
+    signal: controller.signal,
+  });
+  expect(options.body.get("archive")).toBe(file);
+  expect(options.headers["Content-Type"]).toBeUndefined();
+  await adminApi.startTransferExport();
+  expect(fetch.mock.calls.at(-1)[0]).toBe("/api/admin/transfers/export");
+  await adminApi.startSQLiteBackup();
+  expect(fetch.mock.calls.at(-1)[0]).toBe("/api/admin/persistence/backup");
+});
+
+it("preflights a download then uses a native link without buffering the artifact", async () => {
   const fetch = vi
     .fn()
     .mockResolvedValue(
-      new Response('{"events":[]}', {
+      new Response(
+        '{"id":"sqlite_backup-one","kind":"sqlite_backup","downloadAvailable":true}',
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+  vi.stubGlobal("fetch", fetch);
+  let download;
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+    function () {
+      download = { path: this.getAttribute("href"), filename: this.download };
+    },
+  );
+  await adminApi.downloadTransfer("sqlite_backup-one");
+  expect(fetch).toHaveBeenCalledOnce();
+  expect(fetch.mock.calls[0][0]).toBe("/api/admin/transfers/sqlite_backup-one");
+  expect(download).toEqual({
+    path: "/api/admin/transfers/sqlite_backup-one/download",
+    filename: "sqlite_backup-one.sqlite",
+  });
+  expect(document.querySelector("a[download]")).toBeNull();
+});
+
+it("does not start a download when the artifact is gone or the login expired", async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(
+      new Response('{"downloadAvailable":false}', {
         status: 200,
         headers: { "Content-Type": "application/json" },
       }),
+    )
+    .mockResolvedValueOnce(
+      new Response('{"error":"expired"}', {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
     );
+  vi.stubGlobal("fetch", fetch);
+  const click = vi
+    .spyOn(HTMLAnchorElement.prototype, "click")
+    .mockImplementation(() => {});
+  await expect(adminApi.downloadTransfer("export-missing")).rejects.toThrow(
+    "产物已不存在",
+  );
+  await expect(
+    adminApi.downloadTransfer("export-expired"),
+  ).rejects.toMatchObject({ status: 401 });
+  expect(click).not.toHaveBeenCalled();
+});
+
+it("uses an exact event cursor and the same filters for HTTP and Cookie websocket connections", async () => {
+  const fetch = vi.fn().mockResolvedValue(
+    new Response('{"events":[]}', {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
   const Socket = vi.fn(function () {});
   vi.stubGlobal("fetch", fetch);
   vi.stubGlobal("WebSocket", Socket);
@@ -38,14 +122,12 @@ it("uses an exact event cursor and the same filters for HTTP and Cookie websocke
 it("preserves replay conflict metadata for an explicit view reset", async () => {
   vi.stubGlobal(
     "fetch",
-    vi
-      .fn()
-      .mockResolvedValue(
-        new Response('{"reason":"retention_gap","earliestCursor":"100"}', {
-          status: 409,
-          headers: { "Content-Type": "application/json" },
-        }),
-      ),
+    vi.fn().mockResolvedValue(
+      new Response('{"reason":"retention_gap","earliestCursor":"100"}', {
+        status: 409,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ),
   );
   await expect(adminApi.getEventPage({ after: "1" })).rejects.toMatchObject({
     status: 409,

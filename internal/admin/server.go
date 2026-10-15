@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"project-yume/internal/agent"
@@ -224,6 +225,8 @@ type server struct {
 	sessions            *sessionStore
 	loginLimiter        *loginLimiter
 	transfers           *storage.TransferManager
+	transfersMu         sync.Mutex
+	transfersClosed     bool
 	persistence         *storage.Persistence
 	eventStreamID       string
 }
@@ -261,6 +264,18 @@ func Start(ctx context.Context, reloadRuntimeConfig func() error, persistence *s
 
 	go func() {
 		<-ctx.Done()
+		s.transfersMu.Lock()
+		s.transfersClosed = true
+		manager := s.transfers
+		s.transfersMu.Unlock()
+		managerDone := make(chan struct{})
+		// Cancel/drain work concurrently so OS I/O cannot postpone HTTP shutdown.
+		go func() {
+			if manager != nil {
+				manager.Close()
+			}
+			close(managerDone)
+		}()
 		shutdownTimeout := time.Duration(config.GetConfig().ShutdownTimeoutMs) * time.Millisecond
 		if shutdownTimeout <= 0 {
 			shutdownTimeout = 3 * time.Second
@@ -268,6 +283,10 @@ func Start(ctx context.Context, reloadRuntimeConfig func() error, persistence *s
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 		_ = httpServer.Shutdown(shutdownCtx)
+		select {
+		case <-managerDone:
+		case <-shutdownCtx.Done():
+		}
 	}()
 
 	utils.Info("admin web server listening on %s", listenAddr)
@@ -335,6 +354,8 @@ func (s *server) routes() *gin.Engine {
 		adminGroup.POST("/persistence/backup", s.handleSQLiteBackup)
 		adminGroup.POST("/transfers/export", s.handleStartExport)
 		adminGroup.POST("/transfers/import", s.handleStartImport)
+		adminGroup.GET("/transfers", s.handleTransfers)
+		adminGroup.POST("/transfers/:id/restore", s.handleRestoreTransfer)
 		adminGroup.GET("/transfers/:id/download", s.handleDownloadTransfer)
 		adminGroup.GET("/transfers/:id", s.handleGetTransfer)
 		adminGroup.GET("/affection/:userID", s.handleAffection)
@@ -358,13 +379,18 @@ func (s *server) transferManager() (*storage.TransferManager, error) {
 	if s == nil {
 		return nil, errors.New("transfer manager is not configured")
 	}
+	s.transfersMu.Lock()
+	defer s.transfersMu.Unlock()
+	if s.transfersClosed {
+		return nil, storage.ErrTransferClosed
+	}
+	if s.persistence == nil || !s.persistence.Status().Ready {
+		return nil, errors.New("persistence is not ready")
+	}
 	if s.transfers != nil {
 		return s.transfers, nil
 	}
 	status := s.persistence.Status()
-	if !status.Ready {
-		return nil, errors.New("persistence is not ready")
-	}
 	manager, err := storage.NewTransferManager(status.DataDir, status.DatabasePath, status.BackupDirectory)
 	if err != nil {
 		return nil, err
@@ -381,7 +407,7 @@ func (s *server) handleStartExport(c *gin.Context) {
 	}
 	job, err := manager.StartExport()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		transferError(c, err)
 		return
 	}
 	c.JSON(http.StatusAccepted, job)
@@ -408,7 +434,16 @@ func (s *server) handleStartImport(c *gin.Context) {
 	}
 	header, err := c.FormFile("archive")
 	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "import upload exceeds size limit"})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": "multipart field archive is required"})
+		return
+	}
+	if header.Size > storage.MaxTransferArchiveBytes {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "import archive exceeds size limit"})
 		return
 	}
 	file, err := header.Open()
@@ -419,13 +454,14 @@ func (s *server) handleStartImport(c *gin.Context) {
 	defer file.Close()
 	job, err := manager.StartImport(file)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		transferError(c, err)
 		return
 	}
 	c.JSON(http.StatusAccepted, job)
 }
 
 func (s *server) handleGetTransfer(c *gin.Context) {
+	setNoCacheHeaders(c)
 	manager, err := s.transferManager()
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
@@ -440,6 +476,7 @@ func (s *server) handleGetTransfer(c *gin.Context) {
 }
 
 func (s *server) handleDownloadTransfer(c *gin.Context) {
+	setNoCacheHeaders(c)
 	manager, err := s.transferManager()
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})

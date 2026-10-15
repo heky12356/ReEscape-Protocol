@@ -4,6 +4,42 @@
 
 ZIP 范围是 `DATA_DIR` 中允许传输的运行数据文件，排除 `exports`、`imports`、备份目录、`.maintenance`、`.env*`、管理会话、进程锁和数据库文件。自定义 `SQLITE_PATH`、其 WAL/SHM/journal 及 `SQLITE_BACKUP_DIR` 也受保护，不受数据库文件名或是否位于 DATA_DIR 内影响。
 
+## WebUI 数据运维
+
+登录后打开“数据运维”。页面根据活动后端显示 ZIP 导出、SQLite 备份、上传预检查、任务阶段/失败原因和下载入口。file 后端不显示 SQLite 备份操作；SQLite 的 ZIP 只包含普通文件，不包含活动快照、事件或状态，目录中遗留的旧 JSON 也不能代替数据库备份。
+
+选择非空 ZIP 后点击“上传并预检查”，完成后查看文件数量、总大小及折叠的详细清单。`预检查通过` 会同时显示“数据尚未恢复（applied=false）”。页面没有在线覆盖按钮；下方按后端展示停机、保留旧数据、替换范围、CLI 参数和恢复后检查步骤。占位路径必须按实际部署填写，`datactl` 不自动加载 `.env`。
+
+任务列表活跃时每秒查询，空闲时每 5 秒查询；请求失败使用最长 30 秒的退避。创建/上传失败不会自动重复 POST，网络结果不明确时应先刷新列表核对。关闭页面会取消未完成的客户端请求并停止轮询；已被服务器接受的任务继续执行。401 返回登录页。
+
+浏览器 localStorage 只保留最近 50 个已知 Job ID，帮助刷新后再次查询，不保存密钥、路径、正文、上传包或产物。存储不可用时提示限制，当前列表仍可使用。下载前重新查询任务和认证，再由浏览器原生下载处理 ZIP/数据库，页面不把大文件缓冲为 Blob。
+
+### 任务列表与生命周期
+
+```http
+GET /api/admin/transfers
+```
+
+返回 `instanceId`、`backend`、`restoreMode: "offline"`、`activeJobId`（有活动任务时）、`maxArchiveBytes`、`maxFiles`、`maxManifestBytes`、`maxJobs`、`retention: "manual"` 和 `jobs`。列表省略大文件清单，完整结果通过 `/api/admin/transfers/{id}` 按需读取。响应不公开产物绝对路径。
+
+每个 Job 提供 `status`、`stage`、创建/更新时间、终态时间、`error`、`downloadAvailable`、`applied` 和可选 `report`：
+
+| 类型 | 主要阶段 | 完成结果 |
+|---|---|---|
+| `export` | queued → archiving → completed | `report.fileCount/totalBytes/files`；每个文件含相对路径、大小、SHA-256 |
+| `import_validation` | staging → validating → validated | 同上；`applied=false`，保留预检查包供停机流程使用 |
+| `sqlite_backup` | queued → backing_up → completed | `report.backup` 含 schema、大小、SHA-256、快照和事件数量 |
+
+失败为 `status=failed/stage=failed`；服务停止发出取消请求，协作中止的任务为 `cancelled`。已完成的提交不因取消而回滚。整个 Manager 同时只接受一个导出、上传暂存/预检查或 SQLite 备份；并发创建返回 `409`、`code: "transfer_busy"`，关闭后拒绝新任务。
+
+Job 元数据仅保存在进程内，最多 100 条，创建新任务时回收最早的终态记录；不因此删除产物。服务重启、记录回收或未知 ID 返回 `404`，WebUI 将已知旧任务标为“已失效 / 不存在”，不会一直轮询或把旧状态冒充当前任务。重启后不会自动续跑；保留的包不会自动应用。
+
+成功 ZIP 位于 `DATA_DIR/exports/<id>.zip`，成功预检查包位于 `DATA_DIR/imports/.upload-<id>.zip`，SQLite 备份位于实际 `SQLITE_BACKUP_DIR`。成功产物不自动过期；部署方应定期安排停机、确认没有任务/下载后按自己的保留策略清理。记录被回收或服务重启后，保留文件不再通过旧 Job URL 下载，应通过服务器维护流程取回。
+
+正常失败/取消会删除失败上传包和 ZIP 临时文件；SQLite 备份自身清理私有暂存文件。进程被强制终止或崩溃时可能遗留 `.tmp`、`.upload-*` 或备份暂存文件，需停机核对后人工清理，不自动恢复执行。恢复 journal、回滚旧文件与完整原文件集应保留用于排错，不按普通传输临时文件删除。
+
+若产物被人工删除或替换为符号链接，`downloadAvailable=false`，下载返回 `404`；成功 Job 的历史结果仍保留。任务错误和清单可能包含敏感文件名，详细结果默认折叠，不能当作脱敏报告公开。
+
 ## 导出
 
 创建导出任务：
@@ -25,6 +61,8 @@ GET /api/admin/transfers/{id}/download
 ```
 
 导出 ZIP 包含版本化 `manifest.json`，每个文件记录相对路径、大小和 SHA-256。导出和压缩过程在后台执行，客户端应轮询 Job 状态。
+
+ZIP 导出同样遵守 128 MiB、4096 文件和 1 MiB manifest 上限。打包时再次核对文件大小/hash，源文件在扫描与写入之间变化会失败，不发布清单不匹配的 ZIP；失败后可在低流量时重试。
 
 ## 上传与导入预检查
 
@@ -99,6 +137,10 @@ go run ./cmd/datactl restore-files --data-dir ./data --sqlite-path ./data/runtim
 恢复目录 `DATA_DIR/.maintenance/restore-*` 保留源包、旧文件和 journal，报告通过 `rollbackDirectory` 返回位置。中途失败会回滚整组文件；进程中断时，下一次维护或机器人启动会先回滚 `prepared` 记录，再加载 Manager。journal 损坏、旧文件缺失或回滚失败会阻止启动，应保留该目录排查，不通过删除 journal 跳过恢复。
 
 恢复成功后启动机器人，重新登录并检查会话、记忆、事件和未完成任务。旧 Worker 已随进程停止，不会继续刷盘覆盖恢复数据。备份/预检查本身不触发消息投递；恢复后重启会恢复正常调度行为。
+
+`POST /api/admin/transfers/{id}/restore` 不执行恢复。存在的 Job 返回 `409`、`code: "offline_restore_required"`、`applied: false` 和停机提示；未知 Job 返回 `404`。该拒绝入口也受认证与 Cookie Origin 保护。运行中不能通过 WebUI 绕过离线工具的进程锁。
+
+当前交付包括查询、事件诊断、传输 Job 与停机恢复入口。在线恢复/热切库、所有 Manager 的增量写入、永久聊天归档、持久化 Job 编排与插件平台均不在当前范围。
 
 ## SQLite 读模型查询
 

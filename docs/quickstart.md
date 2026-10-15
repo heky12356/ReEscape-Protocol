@@ -40,26 +40,7 @@ go run ./cmd/bot
 
 默认管理后台地址为 `http://127.0.0.1:8088`。启动后可检查 `/healthz`、`/readyz` 和 `/metrics`。
 
-生产环境建议通过 HTTPS 反向代理暴露管理后台，Go 服务只监听 `127.0.0.1:8088`。例如 Nginx：
-
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name admin.example.com;
-
-    ssl_certificate     /etc/letsencrypt/live/admin.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/admin.example.com/privkey.pem;
-
-    location / {
-        proxy_pass http://127.0.0.1:8088;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-    }
-}
-```
+生产环境建议通过 HTTPS 反向代理暴露管理后台，Go 服务只监听 `127.0.0.1:8088`。完整 Nginx 配置见[管理后台部署](./security.md#管理后台部署)，包含事件 WebSocket Upgrade、日志 SSE 和 ZIP 上传大小设置。
 
 生产 CORS 只配置 `https://admin.example.com` 这类明确来源，不要使用 `*`。防火墙也不应直接开放后端 `8088`。
 
@@ -71,3 +52,7 @@ npm run dev
 ```
 
 前端开发服务器默认运行在 `http://localhost:5173`，并将 `/api` 请求代理到后端管理服务。
+
+## 查询与数据运维
+
+登录后，“会话与状态”提供 SQLite 状态和聊天分页，“事件诊断”提供两种后端的实时事件与断线补发。“数据运维”提供 ZIP 导出、上传预检查、任务结果和 SQLite 整库备份。预检查完成不表示已恢复，实际恢复需要停止机器人后使用 datactl；操作和保留策略见[运维与数据查询](./operations.md)。

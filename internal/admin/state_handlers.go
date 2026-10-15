@@ -36,7 +36,7 @@ func (s *server) handleSQLiteBackup(c *gin.Context) {
 	}
 	job, err := manager.StartSQLiteBackup(s.persistence)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		transferError(c, err)
 		return
 	}
 	c.JSON(http.StatusAccepted, job)

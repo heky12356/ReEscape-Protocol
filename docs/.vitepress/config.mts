@@ -21,6 +21,7 @@ export default defineConfig({
             { text: '配置参考', link: '/configuration' },
             { text: '运维与数据查询', link: '/operations' },
             { text: '事件实时诊断', link: '/operations#事件实时诊断' },
+            { text: '数据运维', link: '/operations#webui-数据运维' },
             { text: '架构概览', link: '/architecture' }
           ]
         },

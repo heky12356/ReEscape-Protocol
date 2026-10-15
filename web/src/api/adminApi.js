@@ -53,6 +53,34 @@ export function logoutAdmin() {
 }
 
 export const adminApi = {
+  getTransfers(options = {}) {
+    return fetchJSON("/api/admin/transfers", { cache: "no-store", ...options });
+  },
+  getTransferJob(id, options = {}) {
+    return fetchJSON(`/api/admin/transfers/${encodeURIComponent(id)}`, { cache: "no-store", ...options });
+  },
+  startTransferExport(options = {}) {
+    return fetchJSON("/api/admin/transfers/export", { ...options, method: "POST" });
+  },
+  startSQLiteBackup(options = {}) {
+    return fetchJSON("/api/admin/persistence/backup", { ...options, method: "POST" });
+  },
+  startTransferImport(file, options = {}) {
+    const form = new FormData();
+    form.append("archive", file);
+    return fetchJSON("/api/admin/transfers/import", { ...options, method: "POST", body: form });
+  },
+  async downloadTransfer(id, options = {}) {
+    const job = await this.getTransferJob(id, options);
+    if (!job.downloadAvailable) throw new Error("产物已不存在或任务尚未完成，请刷新任务列表。");
+    if (options.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    // Let the browser stream large SQLite files instead of buffering a Blob.
+    const link = document.createElement("a");
+    link.href = `/api/admin/transfers/${encodeURIComponent(id)}/download`;
+    link.download = `${id}.${job.kind === "sqlite_backup" ? "sqlite" : "zip"}`;
+    document.body.appendChild(link); link.click(); link.remove();
+    return job;
+  },
   getEventPage(filters = {}, options = {}) {
     return fetchJSON(`/api/admin/events${queryString(filters)}`, { cache: "no-store", ...options });
   },

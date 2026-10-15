@@ -25,6 +25,23 @@ func (s *server) handlePersistence(c *gin.Context) {
 	c.JSON(http.StatusOK, info)
 }
 
+func (s *server) handleSQLiteBackup(c *gin.Context) {
+	if s.stateQueryStore(c) == nil {
+		return
+	}
+	manager, err := s.transferManager()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	job, err := manager.StartSQLiteBackup(s.persistence)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusAccepted, job)
+}
+
 func (s *server) stateQueryStore(c *gin.Context) *storage.SQLiteQueryStore {
 	if s.persistence == nil || !s.persistence.Status().Ready {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "persistence is not ready"})

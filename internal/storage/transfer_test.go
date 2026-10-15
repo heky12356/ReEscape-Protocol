@@ -3,6 +3,7 @@ package storage
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -58,6 +59,15 @@ func TestTransferManagerExportsAndImportsManifestedFiles(t *testing.T) {
 	importJob = waitTransferJob(t, target, importJob.ID)
 	if importJob.Status != TransferCompleted {
 		t.Fatalf("import status = %s, error = %s", importJob.Status, importJob.Error)
+	}
+	if importJob.Applied || importJob.NextAction == "" {
+		t.Fatal("upload must only validate")
+	}
+	if _, err := os.Stat(filepath.Join(targetDir, "state.json")); !os.IsNotExist(err) {
+		t.Fatal("online validation changed files")
+	}
+	if _, err := RestoreFilesOffline(context.Background(), PersistenceOptions{DataDir: targetDir}, importJob.Artifact); err != nil {
+		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(targetDir, "state.json"))
 	if err != nil || string(data) != `{"ok":true}` {

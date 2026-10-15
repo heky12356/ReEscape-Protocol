@@ -86,6 +86,13 @@ func migrateSQLite(database *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("read SQLite migrations: %w", err)
 	}
+	var currentVersion int
+	if err := database.QueryRow("SELECT COALESCE(MAX(version),0) FROM schema_migrations").Scan(&currentVersion); err != nil {
+		return err
+	}
+	if currentVersion > len(entries) {
+		return fmt.Errorf("SQLite schema %d is newer than supported schema %d", currentVersion, len(entries))
+	}
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
 			continue

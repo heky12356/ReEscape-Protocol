@@ -2,6 +2,7 @@ package storage
 
 import (
 	"archive/zip"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -33,6 +34,8 @@ const (
 )
 
 type TransferJob struct {
+	Applied     bool              `json:"applied"`
+	NextAction  string            `json:"nextAction,omitempty"`
 	ID          string            `json:"id"`
 	Kind        string            `json:"kind"`
 	Status      TransferJobStatus `json:"status"`
@@ -60,21 +63,30 @@ type TransferManager struct {
 	exportDir string
 	importDir string
 
-	mu   sync.RWMutex
-	jobs map[string]*TransferJob
+	mu             sync.RWMutex
+	jobs           map[string]*TransferJob
+	protectedPaths []string
 }
 
-func NewTransferManager(dataDir string) (*TransferManager, error) {
+func NewTransferManager(dataDir string, protectedPaths ...string) (*TransferManager, error) {
 	root := strings.TrimSpace(dataDir)
 	if root == "" {
 		root = "./data"
 	}
-	root = filepath.Clean(root)
+	var err error
+	root, err = filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	if err := rejectSymlinks(root); err != nil {
+		return nil, err
+	}
 	manager := &TransferManager{
-		root:      root,
-		exportDir: filepath.Join(root, "exports"),
-		importDir: filepath.Join(root, "imports"),
-		jobs:      make(map[string]*TransferJob),
+		root:           root,
+		exportDir:      filepath.Join(root, "exports"),
+		importDir:      filepath.Join(root, "imports"),
+		jobs:           make(map[string]*TransferJob),
+		protectedPaths: append([]string(nil), protectedPaths...),
 	}
 	if err := os.MkdirAll(manager.exportDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create transfer export directory: %w", err)
@@ -101,7 +113,7 @@ func (m *TransferManager) StartImport(source io.Reader) (TransferJob, error) {
 	if source == nil {
 		return TransferJob{}, errors.New("import archive is empty")
 	}
-	job := m.newJob("import")
+	job := m.newJob("import_validation")
 	archivePath := filepath.Join(m.importDir, ".upload-"+job.ID+".zip")
 	file, err := os.OpenFile(archivePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
@@ -152,7 +164,7 @@ func (m *TransferManager) Get(id string) (TransferJob, bool) {
 
 func (m *TransferManager) DownloadPath(id string) (string, bool) {
 	job, ok := m.Get(id)
-	if !ok || job.Kind != "export" || job.Status != TransferCompleted || job.Artifact == "" {
+	if !ok || (job.Kind != "export" && job.Kind != "sqlite_backup") || job.Status != TransferCompleted || job.Artifact == "" {
 		return "", false
 	}
 	return job.Artifact, true
@@ -201,21 +213,23 @@ func (m *TransferManager) runExport(id string) {
 
 func (m *TransferManager) runImport(id, archivePath string) {
 	m.updateJob(id, func(job *TransferJob) { job.Status = TransferRunning })
-	err := m.importArchive(archivePath)
-	_ = os.Remove(archivePath)
+	err := m.validateArchive(archivePath)
 	if err != nil {
+		_ = os.Remove(archivePath)
 		m.failJob(id, err)
 		return
 	}
 	now := time.Now().UTC()
 	m.updateJob(id, func(job *TransferJob) {
 		job.Status = TransferCompleted
+		job.Artifact = archivePath
+		job.NextAction = "stop the bot, then run datactl restore-files --archive imports/.upload-" + id + ".zip with the configured data directory"
 		job.CompletedAt = &now
 	})
 }
 
 func (m *TransferManager) exportArchive(destination string) error {
-	files, err := collectTransferFiles(m.root, m.exportDir, m.importDir)
+	files, err := collectTransferFiles(m.root, m.exportDir, m.importDir, m.protectedPaths...)
 	if err != nil {
 		return err
 	}
@@ -275,7 +289,7 @@ func (m *TransferManager) exportArchive(destination string) error {
 	return nil
 }
 
-func (m *TransferManager) importArchive(archivePath string) error {
+func (m *TransferManager) validateArchive(archivePath string) error {
 	archive, err := zip.OpenReader(archivePath)
 	if err != nil {
 		return fmt.Errorf("open import archive: %w", err)
@@ -293,6 +307,15 @@ func (m *TransferManager) importArchive(archivePath string) error {
 		if entry.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("import archive contains symbolic link: %s", entry.Name)
 		}
+		if !entry.FileInfo().IsDir() && rel != entry.Name {
+			return errors.New("import entry path is not canonical")
+		}
+		if !entry.FileInfo().IsDir() {
+			if entry.UncompressedSize64 > MaxTransferArchiveBytes || totalUncompressed > MaxTransferArchiveBytes-entry.UncompressedSize64 {
+				return errors.New("import archive uncompressed size exceeds limit")
+			}
+			totalUncompressed += entry.UncompressedSize64
+		}
 		if rel == "manifest.json" {
 			if manifestEntry != nil {
 				return errors.New("duplicate import manifest")
@@ -303,9 +326,8 @@ func (m *TransferManager) importArchive(archivePath string) error {
 		if entry.FileInfo().IsDir() {
 			continue
 		}
-		totalUncompressed += entry.UncompressedSize64
-		if totalUncompressed > MaxTransferArchiveBytes {
-			return errors.New("import archive uncompressed size exceeds limit")
+		if len(entries) >= 4096 {
+			return errors.New("import archive exceeds 4096 files")
 		}
 		if _, exists := entries[rel]; exists {
 			return fmt.Errorf("duplicate import path: %s", rel)
@@ -317,10 +339,16 @@ func (m *TransferManager) importArchive(archivePath string) error {
 		if openErr != nil {
 			return openErr
 		}
-		decodeErr := json.NewDecoder(io.LimitReader(reader, 1<<20)).Decode(&manifest)
+		manifestData, readErr := io.ReadAll(io.LimitReader(reader, (1<<20)+1))
 		_ = reader.Close()
-		if decodeErr != nil {
-			return fmt.Errorf("decode import manifest: %w", decodeErr)
+		if readErr != nil {
+			return readErr
+		}
+		if len(manifestData) > 1<<20 {
+			return errors.New("import manifest exceeds size limit")
+		}
+		if err := json.Unmarshal(manifestData, &manifest); err != nil {
+			return fmt.Errorf("decode import manifest: %w", err)
 		}
 	}
 	if manifest.Version != TransferManifestVersion {
@@ -342,7 +370,7 @@ func (m *TransferManager) importArchive(archivePath string) error {
 			return fmt.Errorf("duplicate import manifest path: %s", rel)
 		}
 		manifestPaths[rel] = struct{}{}
-		if isProtectedTransferPath(rel) {
+		if m.isProtected(rel) {
 			return fmt.Errorf("import path is protected: %s", rel)
 		}
 		entry := entries[rel]
@@ -353,7 +381,7 @@ func (m *TransferManager) importArchive(archivePath string) error {
 		if openErr != nil {
 			return openErr
 		}
-		digest, size, hashErr := hashReader(reader)
+		digest, size, hashErr := hashReader(io.LimitReader(reader, expected.Size+1))
 		_ = reader.Close()
 		if hashErr != nil {
 			return hashErr
@@ -370,48 +398,10 @@ func (m *TransferManager) importArchive(archivePath string) error {
 			return err
 		}
 	}
-	for _, expected := range manifest.Files {
-		rel, _ := validateTransferPath(expected.Path)
-		entry := entries[rel]
-		if err := m.restoreTransferFile(entry, rel); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
-func (m *TransferManager) restoreTransferFile(entry *zip.File, rel string) error {
-	if err := ensureNoSymlinkPath(m.root, rel); err != nil {
-		return err
-	}
-	target := filepath.Join(m.root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return err
-	}
-	temporary, err := os.CreateTemp(filepath.Dir(target), ".restore-*")
-	if err != nil {
-		return err
-	}
-	temporaryName := temporary.Name()
-	defer os.Remove(temporaryName)
-	reader, err := entry.Open()
-	if err == nil {
-		_, err = io.Copy(temporary, reader)
-		_ = reader.Close()
-	}
-	if closeErr := temporary.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		return fmt.Errorf("stage import file %s: %w", rel, err)
-	}
-	if err := os.Rename(temporaryName, target); err != nil {
-		return fmt.Errorf("restore import file %s: %w", rel, err)
-	}
-	return nil
-}
-
-func collectTransferFiles(root, exportDir, importDir string) ([]string, error) {
+func collectTransferFiles(root, exportDir, importDir string, protectedPaths ...string) ([]string, error) {
 	files := make([]string, 0)
 	err := filepath.WalkDir(root, func(current string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -429,15 +419,18 @@ func collectTransferFiles(root, exportDir, importDir string) ([]string, error) {
 			}
 			return nil
 		}
-		if !entry.Type().IsRegular() {
-			return nil
-		}
 		rel, err := filepath.Rel(root, current)
 		if err != nil {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
-		if isProtectedTransferPath(rel) {
+		if protectedTransferPath(root, rel, protectedPaths...) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !entry.Type().IsRegular() {
 			return nil
 		}
 		files = append(files, rel)
@@ -473,21 +466,92 @@ func hashReader(reader io.Reader) (string, int64, error) {
 }
 
 func validateTransferPath(raw string) (string, error) {
-	if strings.TrimSpace(raw) == "" || strings.Contains(raw, "\\") || strings.HasPrefix(raw, "/") {
+	if strings.TrimSpace(raw) == "" || strings.ContainsAny(raw, "\\:\x00") || strings.HasPrefix(raw, "/") {
 		return "", fmt.Errorf("unsafe import path: %q", raw)
 	}
 	clean := path.Clean(raw)
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
 		return "", fmt.Errorf("unsafe import path: %q", raw)
 	}
+	for _, component := range strings.Split(clean, "/") {
+		if strings.TrimRight(component, ". ") != component {
+			return "", fmt.Errorf("non-portable import path")
+		}
+		base := strings.ToUpper(strings.SplitN(component, ".", 2)[0])
+		if base == "CON" || base == "PRN" || base == "AUX" || base == "NUL" || (len(base) == 4 && (strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT")) && base[3] >= '1' && base[3] <= '9') {
+			return "", fmt.Errorf("reserved import path")
+		}
+	}
 	return clean, nil
 }
 
 func isProtectedTransferPath(rel string) bool {
-	first := strings.Split(rel, "/")[0]
+	first := strings.ToLower(strings.Split(rel, "/")[0])
+	base := strings.ToLower(path.Base(rel))
+	if strings.HasPrefix(base, ".sqlite-backup-") || strings.HasPrefix(base, ".sqlite-restore-") || strings.HasPrefix(base, ".json-migration-") {
+		return true
+	}
+	if extension := strings.ToLower(path.Ext(base)); extension == ".sqlite" || extension == ".sqlite3" || extension == ".db" {
+		return true
+	}
+	if first == "backups" || first == ".maintenance" || strings.HasPrefix(base, ".env") || strings.HasSuffix(base, ".runtime.lock") || strings.Contains(base, ".pre-restore-") {
+		return true
+	}
 	return first == "exports" || first == "imports" || strings.EqualFold(rel, ".env") || strings.EqualFold(rel, "admin_session") ||
 		strings.EqualFold(rel, "runtime.sqlite") || strings.EqualFold(rel, "runtime.sqlite-wal") ||
 		strings.EqualFold(rel, "runtime.sqlite-shm") || strings.EqualFold(rel, "runtime.sqlite-journal")
+}
+
+func (m *TransferManager) isProtected(rel string) bool {
+	return protectedTransferPath(m.root, rel, m.protectedPaths...)
+}
+
+func protectedTransferPath(root, rel string, paths ...string) bool {
+	if isProtectedTransferPath(rel) {
+		return true
+	}
+	target, _ := filepath.Abs(filepath.Join(root, filepath.FromSlash(rel)))
+	for _, name := range paths {
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		absolute, err := filepath.Abs(name)
+		if err != nil {
+			return true
+		}
+		if strings.EqualFold(target, absolute) || strings.EqualFold(target, absolute+"-wal") || strings.EqualFold(target, absolute+"-shm") || strings.EqualFold(target, absolute+"-journal") {
+			return true
+		}
+		relative, err := filepath.Rel(absolute, target)
+		if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *TransferManager) StartSQLiteBackup(p *Persistence) (TransferJob, error) {
+	if p == nil || !p.Status().Ready || p.Status().Backend != BackendSQLite {
+		return TransferJob{}, errors.New("active SQLite persistence is required")
+	}
+	job := m.newJob("sqlite_backup")
+	go func() {
+		m.updateJob(job.ID, func(job *TransferJob) { job.Status = TransferRunning })
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		destination := filepath.Join(p.Status().BackupDirectory, job.ID+".sqlite")
+		if _, err := p.BackupSQLite(ctx, destination); err != nil {
+			m.failJob(job.ID, err)
+			return
+		}
+		now := time.Now().UTC()
+		m.updateJob(job.ID, func(job *TransferJob) {
+			job.Status = TransferCompleted
+			job.Artifact = destination
+			job.CompletedAt = &now
+		})
+	}()
+	return job, nil
 }
 
 func ensureNoSymlinkPath(root, rel string) error {

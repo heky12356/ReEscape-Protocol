@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -47,6 +48,7 @@ type Persistence struct {
 	closeOnce sync.Once
 	closeErr  error
 	closed    atomic.Bool
+	lease     *persistenceLease
 }
 
 func OpenPersistence(options PersistenceOptions) (*Persistence, error) {
@@ -56,6 +58,21 @@ func OpenPersistence(options PersistenceOptions) (*Persistence, error) {
 	}
 	if backend != BackendFile && backend != BackendSQLite {
 		return nil, fmt.Errorf("unsupported persistence backend %q", options.Backend)
+	}
+	options.Backend = string(backend)
+	options = maintenanceOptions(options)
+	lease, err := acquirePersistenceLease(options)
+	if err != nil {
+		return nil, err
+	}
+	owned := false
+	defer func() {
+		if !owned {
+			_ = lease.Close()
+		}
+	}()
+	if err := recoverPendingFileRestores(options); err != nil {
+		return nil, err
 	}
 
 	dataDir := strings.TrimSpace(options.DataDir)
@@ -80,11 +97,13 @@ func OpenPersistence(options PersistenceOptions) (*Persistence, error) {
 			_ = database.Close()
 			return nil, fmt.Errorf("migrate SQLite database: %w", err)
 		}
-		if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		if err := os.MkdirAll(backupDir, 0o700); err != nil {
 			_ = database.Close()
 			return nil, fmt.Errorf("create SQLite backup directory: %w", err)
 		}
+		owned = true
 		return &Persistence{
+			lease:     lease,
 			Snapshots: NewSQLiteSnapshotStore(database),
 			status: PersistenceStatus{
 				Backend:         BackendSQLite,
@@ -100,7 +119,9 @@ func OpenPersistence(options PersistenceOptions) (*Persistence, error) {
 		return nil, fmt.Errorf("create persistence data directory: %w", err)
 	}
 
+	owned = true
 	return &Persistence{
+		lease:     lease,
 		Snapshots: NewFileSnapshotStore(dataDir),
 		status: PersistenceStatus{
 			Backend:         BackendFile,
@@ -130,6 +151,9 @@ func (p *Persistence) Close() error {
 		if p.database != nil {
 			p.closeErr = p.database.Close()
 		}
+		if err := p.lease.Close(); err != nil {
+			p.closeErr = errors.Join(p.closeErr, err)
+		}
 	})
 	return p.closeErr
 }
@@ -141,6 +165,7 @@ type ReadModelCapability struct {
 }
 
 type PersistenceInfo struct {
+	RestoreMode                  string                `json:"restoreMode"`
 	Backend                      BackendKind           `json:"backend"`
 	Ready                        bool                  `json:"ready"`
 	SchemaVersion                int                   `json:"schemaVersion"`
@@ -156,10 +181,11 @@ func (p *Persistence) Info(ctx context.Context) (PersistenceInfo, error) {
 	status := p.Status()
 	info := PersistenceInfo{Backend: status.Backend, Ready: status.Ready, DefaultLimit: DefaultQueryLimit,
 		MaxLimit: MaxQueryLimit, ReadModels: []ReadModelCapability{}, Capabilities: []string{}, StorageChangesRequireRestart: true}
+	info.RestoreMode = "offline"
 	if !status.Ready {
 		return info, nil
 	}
-	info.Capabilities = append(info.Capabilities, "snapshots", "event_cursor")
+	info.Capabilities = append(info.Capabilities, "snapshots", "event_cursor", "archive_validation", "offline_file_restore", "json_migration")
 	if status.Backend != BackendSQLite {
 		return info, nil
 	}
@@ -196,7 +222,7 @@ func (p *Persistence) Info(ctx context.Context) (PersistenceInfo, error) {
 		}
 		info.ReadModels = append(info.ReadModels, ReadModelCapability{Kind: kind, Filters: filters, RefreshedAt: refreshed[kind]})
 	}
-	info.Capabilities = append(info.Capabilities, "state_query", "state_detail", "delivery_projection_rebuild")
+	info.Capabilities = append(info.Capabilities, "state_query", "state_detail", "delivery_projection_rebuild", "sqlite_backup", "offline_sqlite_restore")
 	return info, tx.Commit()
 }
 

@@ -229,7 +229,8 @@ func Start(ctx context.Context, reloadRuntimeConfig func() error, persistence *s
 		loginLimiter:        newLoginLimiter(),
 		persistence:         persistence,
 	}
-	if transferManager, err := storage.NewTransferManager(config.GetConfig().DataDir); err != nil {
+	status := persistence.Status()
+	if transferManager, err := storage.NewTransferManager(status.DataDir, status.DatabasePath, status.BackupDirectory); err != nil {
 		utils.Error("initialize transfer manager failed: %v", err)
 	} else {
 		s.transfers = transferManager
@@ -319,6 +320,7 @@ func (s *server) routes() *gin.Engine {
 		adminGroup.GET("/state/:kind/:id", s.handleStateDetail)
 		adminGroup.POST("/state/deliveries/rebuild", s.handleRebuildDeliveries)
 		adminGroup.GET("/persistence", s.handlePersistence)
+		adminGroup.POST("/persistence/backup", s.handleSQLiteBackup)
 		adminGroup.POST("/transfers/export", s.handleStartExport)
 		adminGroup.POST("/transfers/import", s.handleStartImport)
 		adminGroup.GET("/transfers/:id/download", s.handleDownloadTransfer)
@@ -347,7 +349,11 @@ func (s *server) transferManager() (*storage.TransferManager, error) {
 	if s.transfers != nil {
 		return s.transfers, nil
 	}
-	manager, err := storage.NewTransferManager(config.GetConfig().DataDir)
+	status := s.persistence.Status()
+	if !status.Ready {
+		return nil, errors.New("persistence is not ready")
+	}
+	manager, err := storage.NewTransferManager(status.DataDir, status.DatabasePath, status.BackupDirectory)
 	if err != nil {
 		return nil, err
 	}
@@ -370,6 +376,19 @@ func (s *server) handleStartExport(c *gin.Context) {
 }
 
 func (s *server) handleStartImport(c *gin.Context) {
+	// Bound the request before multipart parsing can spill an arbitrary upload
+	// to disk. The file itself has the stricter archive limit in StartImport.
+	const maxMultipartBytes = storage.MaxTransferArchiveBytes + (1 << 20)
+	if c.Request.ContentLength > maxMultipartBytes {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "import upload exceeds size limit"})
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxMultipartBytes)
+	defer func() {
+		if c.Request.MultipartForm != nil {
+			_ = c.Request.MultipartForm.RemoveAll()
+		}
+	}()
 	manager, err := s.transferManager()
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
@@ -419,7 +438,11 @@ func (s *server) handleDownloadTransfer(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "completed export not found"})
 		return
 	}
-	c.Header("Content-Type", "application/zip")
+	contentType := "application/zip"
+	if filepath.Ext(archivePath) == ".sqlite" {
+		contentType = "application/octet-stream"
+	}
+	c.Header("Content-Type", contentType)
 	c.Header("Content-Disposition", `attachment; filename="`+filepath.Base(archivePath)+`"`)
 	c.File(archivePath)
 }

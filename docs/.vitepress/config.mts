@@ -20,6 +20,7 @@ export default defineConfig({
             { text: '快速开始', link: '/quickstart' },
             { text: '配置参考', link: '/configuration' },
             { text: '运维与数据查询', link: '/operations' },
+            { text: '事件实时诊断', link: '/operations#事件实时诊断' },
             { text: '架构概览', link: '/architecture' }
           ]
         },

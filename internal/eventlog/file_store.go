@@ -192,6 +192,50 @@ func (s *FileStore) Flush() error {
 	return store.Save(SnapshotName, data)
 }
 
+func (s *FileStore) Replay(ctx context.Context, options ReplayOptions) (ReplayPage, error) {
+	if err := ctx.Err(); err != nil {
+		return ReplayPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	page := ReplayPage{Events: []Event{}, Latest: s.nextCursor, Cursor: s.nextCursor}
+	if len(s.events) > 0 {
+		page.Earliest = s.events[0].Cursor
+	}
+	limit := replayLimit(options.Limit)
+	start, end := 0, len(s.events)
+	if options.After != nil {
+		after := *options.After
+		if after < 0 {
+			return page, fmt.Errorf("negative event cursor")
+		}
+		if after > page.Latest {
+			page.Reason = "cursor_reset"
+			return page, nil
+		}
+		if page.Earliest > 0 && after < page.Earliest-1 {
+			page.Reason = "retention_gap"
+			return page, nil
+		}
+		page.Cursor = after
+		for start < end && s.events[start].Cursor <= after {
+			start++
+		}
+		if end-start > limit {
+			end = start + limit
+			page.HasMore = true
+		}
+		if end > start {
+			page.Cursor = s.events[end-1].Cursor
+		}
+	} else if end > limit {
+		start = end - limit
+	}
+	page.Events = append(page.Events, s.events[start:end]...)
+	filterReplay(&page, options.Filters)
+	return page, nil
+}
+
 func (s *FileStore) trimLocked() {
 	if len(s.events) <= maxEvents {
 		return

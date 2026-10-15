@@ -202,3 +202,64 @@ POST /api/admin/state/deliveries/rebuild
 ```
 
 该接口受管理认证和 Cookie Origin 校验保护，仅重建派生表，不修改事件、调用模型或重发消息。重建失败回滚已有投影；成功重建会使旧 Delivery 分页 cursor 失效。大量事件的重建会占用当前 SQLite 单连接，应安排在低流量窗口。
+
+## 事件实时诊断
+
+登录后打开“事件诊断”。页面先读取最近 200 条事实的历史窗口，再从响应中的检查点连接 WebSocket。可按事件类型、request/turn/session/intent/delivery ID 和工具名精确筛选，多项条件使用 AND；点击事件详情中的关联值可以单独追踪该关联。工具优先匹配 `tool_name`，旧事件回退到 `tool`。原始事件默认折叠，正文作为纯文本显示，不自动加载其中的远程 URL。
+
+页面区分加载、连接、补发、实时、等待重连、暂停和错误。网络失败按 1/2/4/8/16/30 秒重试，之后上限保持 30 秒；连接建立超时 10 秒，已连接后超过 15 秒没有协议帧会重连。暂停会断开连接并保留当前 cursor，继续时尝试补发。切换筛选、离开页面、退出登录会取消请求、关闭连接并清理定时器。401 或 WebSocket 4001 返回登录页，不继续重连。
+
+界面只保留最近 500 条匹配事件，超出后移出旧条目并显示数量；这不是事实删除。首次历史窗口只有 200 条原始事件，所以匹配事件可能更少，不能把这个页面当作全量归档或全文检索。file 后端仍只保留 1000 条事件；窗口外历史无法补回。
+
+### HTTP 历史与检查点
+
+```http
+GET /api/admin/events?limit=200&session_id=private%3A42
+GET /api/admin/events?after=123&stream_id=event-stream-example&limit=200&request_id=request-example
+```
+
+| 参数 | 说明 |
+|---|---|
+| `limit` | 一次扫描的原始事件数，默认 200，范围 1–1000 |
+| `after` | 非负 int64 cursor；省略时读取最近窗口，`0` 表示明确要求从头补发 |
+| `stream_id` | `after` 所属的服务实例 ID，取自前一次响应；必须与 `after` 一起使用 |
+| `type` | 事件类型，精确匹配 |
+| `request_id`、`turn_id`、`session_id`、`intent_id`、`delivery_id` | 对应顶层关联字段，精确匹配 |
+| `tool` | 工具名，兼容旧字段 |
+
+未知、重复、空参数或非法范围返回 `400`。未提供原子补发能力的 Store 返回 `501`；正常 file/sqlite 均支持。响应保留兼容的 `events` 数组，并增加：
+
+```json
+{
+  "events": [],
+  "eventCursors": [],
+  "cursor": "123",
+  "earliestCursor": "1",
+  "latestCursor": "123",
+  "hasMore": false,
+  "streamId": "event-stream-example"
+}
+```
+
+`eventCursors` 与 `events` 按位置一一对应，是精确的十进制字符串。`cursor`、边界 cursor 也使用字符串，避免 JavaScript 丢失 int64 精度；旧 `event.cursor` 数字字段保留兼容，新客户端应使用这些字符串。基线、边界和检查点来自同一个锁/数据库事务快照。
+
+带 `after` 的查询按 cursor 升序扫描，筛选只影响返回事件，不影响扫描进度。`cursor` 是最后扫描位置，即使没有匹配事件也应推进；`hasMore` 表示还有原始事件待扫描，不表示一定存在匹配事件。无 `after` 的基线按最近窗口选取并升序返回，`hasMore=false`，后续从其 cursor 接流，不补发窗口之前的旧历史。
+
+### WebSocket 与缺口
+
+```text
+/api/admin/events/stream?after=123&stream_id=event-stream-example&limit=200&session_id=private%3A42
+```
+
+WebSocket 使用同样的参数与筛选，每批最多扫描 200 条；积压超过一批会继续补发，不以一次 limit 截断。未给 `after` 时仅接收连接时最新位置之后的事件。浏览器使用现有 HttpOnly Cookie，HTTPS 页面自动使用 WSS，URL 中不传管理密钥；CLI 保留请求头密钥兼容。反向代理需要支持 Upgrade，配置见[管理后台部署](./security.md#管理后台部署)。
+
+协议帧：
+
+- `event`：包含 `event`、精确字符串 `cursor` 和 `streamId`；客户端按 cursor 去重，并在应用后记录进度。
+- `checkpoint`：包含 `cursor`、`streamId`、`hasMore`；只在该批事件写出后发送。空筛选批也发送检查点，空闲时每 500ms 检查并发送，用于连接活性检测。
+- `gap`：`reason=retention_gap`，请求位置已早于 file 保留窗口。
+- `reset`：`reason=cursor_reset`（请求 cursor 超过当前末尾）或 `stream_changed`（服务实例变化）。
+
+HTTP 遇到上述缺口/重置返回 `409` 和 `reason`、边界信息；WebSocket 发送对应帧后关闭。页面会清空旧视图、显示缺口说明并重新建立近期基线，不声称已经找回被删除的历史。每次后台重新启动都会换 `streamId`，即使 cursor 数字恰好复用也不会混入旧视图；SQLite 幂等插入产生的正常序号空洞不被当作缺口。持续重置会进入退避，避免反复快速请求。
+
+现有连接每批重新校验认证，会话过期、撤销或密钥轮换后以 WebSocket close code `4001` 结束。WS 只提供读取诊断，客户端发送的数据不会执行控制操作；日志页原有 SSE 保留。

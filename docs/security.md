@@ -27,7 +27,14 @@ ADMIN_COOKIE_SECURE=true
 
 后端只监听本机，由 HTTPS 反向代理负责证书和域名转发：
 
+下面的 `map` 放在 Nginx 的 `http` 块中，`server` 使用相应的 Upgrade 变量：
+
 ```nginx
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
 server {
     listen 443 ssl http2;
     server_name admin.example.com;
@@ -42,11 +49,17 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 60s;
+        proxy_buffering off;
     }
 }
 ```
 
 `ADMIN_CORS_ORIGINS` 必须列出实际管理域名，禁止使用 `*`。防火墙只公开代理端口，不要直接公开后端 `8088`。
+
+事件诊断 WebSocket 复用 HttpOnly Cookie 与 Origin 校验；浏览器不通过 URL 或 localStorage 传密钥。已建立的事件连接会持续检查会话有效性，过期/撤销后关闭并返回登录。原始事件可能含正文、参数或 URL，默认折叠不等于脱敏，展开内容和截图仍只供管理员使用。
 
 ## 生产验收
 

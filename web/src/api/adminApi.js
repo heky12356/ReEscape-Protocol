@@ -1,9 +1,10 @@
 class AdminApiError extends Error {
-  constructor(message, status, code) {
+  constructor(message, status, code, details) {
     super(message);
     this.name = "AdminApiError";
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -23,8 +24,8 @@ async function fetchJSON(url, options = {}) {
     if (resp.status === 401 && notifyUnauthorized) {
       window.dispatchEvent(new Event("admin:unauthorized"));
     }
-    if (isJSON && data?.error) {
-      throw new AdminApiError(data.error, resp.status, data.code);
+    if (isJSON && (data?.error || data?.reason)) {
+      throw new AdminApiError(data.error || data.reason, resp.status, data.code || data.reason, data);
     }
     throw new AdminApiError(typeof data === "string" ? data : "request failed", resp.status);
   }
@@ -52,6 +53,9 @@ export function logoutAdmin() {
 }
 
 export const adminApi = {
+  getEventPage(filters = {}, options = {}) {
+    return fetchJSON(`/api/admin/events${queryString(filters)}`, { cache: "no-store", ...options });
+  },
   getPersistence(options = {}) {
     return fetchJSON("/api/admin/persistence", { cache: "no-store", ...options });
   },
@@ -135,6 +139,12 @@ export const adminApi = {
     );
   }
 };
+
+export function openEventSocket(filters) {
+  const url = new URL(`/api/admin/events/stream${queryString(filters)}`, window.location.href);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return new WebSocket(url);
+}
 
 function queryString(filters) {
   const params = new URLSearchParams();

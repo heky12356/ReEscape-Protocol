@@ -19,7 +19,7 @@ npm run docs:build
 
 Linux CI 还会运行 `go test -race ./...`。
 
-Web 行为测试使用 Vitest、Testing Library 与 jsdom，覆盖查询筛选/分页、迟到请求隔离、会话切换、能力提示、鉴权失效和安全正文展示，不需要真实服务或 Provider。测试工具使用自己的 Vite 6 依赖（package.json 的定向 override），应用构建保留现有 Vite 5，避免为引入测试而改变应用构建工具的大版本。测试命令需 Node.js 20 或更高版本。
+Web 行为测试使用 Vitest、Testing Library 与 jsdom，覆盖查询筛选/分页、迟到请求隔离、会话切换、能力提示、鉴权失效和安全正文展示，以及事件基线接流、重连去重、暂停续接、缺口重建、退避/超时与连接清理，不需要真实服务或 Provider。测试工具使用自己的 Vite 6 依赖（package.json 的定向 override），应用构建保留现有 Vite 5，避免为引入测试而改变应用构建工具的大版本。测试命令需 Node.js 20 或更高版本。
 
 ## 目录约定
 

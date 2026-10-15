@@ -42,6 +42,10 @@ ReAct Runtime 是消息处理的唯一主链路。关闭 `ENABLE_REACT_AGENT` �
 
 事件存储和扩展通知通过 `HookedStore` 分层：blocking Hook 在事实写入前串行执行，可以返回错误阻止写入；observe Hook 在写入成功后异步执行，超时、错误和 panic 会被隔离，不会改变事实日志。
 
+HTTP 历史与事件 WebSocket 共用 `ReplayStore`：file 在锁内、SQLite 在读取事务内确定窗口、事件和扫描检查点，再统一应用关联筛选。筛选不阻塞 cursor 前进，事件批完成后发送 checkpoint；下一次连接从最后应用的 cursor 继续。服务实例 ID、保留窗口 gap 和 cursor reset 明确区分历史缺失与正常序号空洞。
+
+WebUI 事件页先建立近期基线，再接流；客户端按精确字符串 cursor 去重，列表最多保留 500 条。暂停、切换筛选、卸载会清理连接与定时器，重连前再次验证 HTTP 认证，已打开的 WS 也会重新检查会话有效性。事件读取不会执行投递、工具或恢复操作。
+
 观测指标通过 Prometheus 文本接口暴露。工具指标包含 `tool`、`provider`、`origin` 和结果标签，并记录调用次数与耗时；AI 指标按请求类型和模型记录成功/失败与耗时；Delivery 指标记录投递状态、主动触达维度和每个消息单元的结果。
 
 模型调用经过 `internal/llm` 的 ModelTask、Provider 和 Orchestrator 边界。当前 Agent 使用 `reply` 任务；`memory` 与 `planner` 已预留独立模型配置，分别由 `AI_MEMORY_MODEL` 和 `AI_PLANNER_MODEL` 指定，未配置时回退到 `AI_MODEL`。

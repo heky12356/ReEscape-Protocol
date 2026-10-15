@@ -188,3 +188,14 @@ func (s *HookedStore) LatestCursor(ctx context.Context) (int64, error) {
 	}
 	return store.LatestCursor(ctx)
 }
+
+func (s *HookedStore) Replay(ctx context.Context, options ReplayOptions) (ReplayPage, error) {
+	if s == nil || s.Store == nil {
+		return ReplayPage{}, fmt.Errorf("event store is not configured")
+	}
+	store, ok := s.Store.(ReplayStore)
+	if !ok {
+		return ReplayPage{}, fmt.Errorf("event store does not support atomic replay")
+	}
+	return store.Replay(ctx, options)
+}

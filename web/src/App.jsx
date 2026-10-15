@@ -5,6 +5,7 @@ import { AIConfigPage } from "./pages/AIConfigPage";
 import { PromptPage } from "./pages/PromptPage";
 import { LogsPage } from "./pages/LogsPage";
 import { StatePage } from "./pages/StatePage";
+import { EventsPage } from "./pages/EventsPage";
 import { AuthLoadingPage, LoginPage } from "./pages/LoginPage";
 import { getAdminSession, logoutAdmin } from "./api/adminApi";
 import { useAdminPanel } from "./hooks/useAdminPanel";
@@ -20,6 +21,10 @@ const MENU_ITEMS = [
   {
     key: "state", label: "会话与状态", icon: "▤", note: "持久化查询",
     description: "浏览会话、意图、待办与投递状态，按会话查看已经保存的聊天历史。"
+  },
+  {
+    key: "events", label: "事件诊断", icon: "⌁", note: "实时追踪",
+    description: "按关联 ID 追踪历史与实时事件，查看连接状态、断线补发和历史缺口。"
   },
   {
     key: "ai",
@@ -159,6 +164,7 @@ function AdminConsole({ onLogout }) {
           {active === "prompt" ? <PromptPage panel={panel} /> : null}
           {active === "logs" ? <LogsPage panel={panel} /> : null}
           {active === "state" ? <StatePage /> : null}
+          {active === "events" ? <EventsPage /> : null}
         </section>
       </main>
     </div>

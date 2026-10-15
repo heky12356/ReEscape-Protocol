@@ -1,18 +1,67 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { adminApi } from "./adminApi";
+import { adminApi, openEventSocket } from "./adminApi";
 
 afterEach(() => vi.unstubAllGlobals());
 
-it("preserves exact filters, escapes IDs, passes abort and Cookie credentials", async () => {
+it("uses an exact event cursor and the same filters for HTTP and Cookie websocket connections", async () => {
   const fetch = vi
     .fn()
-    .mockImplementation(
-      async () =>
-        new Response(JSON.stringify({ messages: [] }), {
-          status: 200,
+    .mockResolvedValue(
+      new Response('{"events":[]}', {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+  const Socket = vi.fn(function () {});
+  vi.stubGlobal("fetch", fetch);
+  vi.stubGlobal("WebSocket", Socket);
+  const filters = {
+    after: "9007199254740993",
+    stream_id: "run-one",
+    request_id: "r:1",
+    tool: "search",
+    limit: 200,
+  };
+  await adminApi.getEventPage(filters);
+  openEventSocket(filters);
+  const httpURL = new URL(fetch.mock.calls[0][0], window.location.href);
+  const websocketURL = Socket.mock.calls[0][0];
+  expect(websocketURL.search).toBe(httpURL.search);
+  expect(websocketURL.pathname).toBe("/api/admin/events/stream");
+  expect(websocketURL.protocol).toBe(
+    window.location.protocol === "https:" ? "wss:" : "ws:",
+  );
+  expect(websocketURL.searchParams.has("key")).toBe(false);
+  expect(fetch.mock.calls[0][1].credentials).toBe("include");
+});
+
+it("preserves replay conflict metadata for an explicit view reset", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        new Response('{"reason":"retention_gap","earliestCursor":"100"}', {
+          status: 409,
           headers: { "Content-Type": "application/json" },
         }),
-    );
+      ),
+  );
+  await expect(adminApi.getEventPage({ after: "1" })).rejects.toMatchObject({
+    status: 409,
+    code: "retention_gap",
+    details: { earliestCursor: "100" },
+  });
+});
+
+it("preserves exact filters, escapes IDs, passes abort and Cookie credentials", async () => {
+  const fetch = vi.fn().mockImplementation(
+    async () =>
+      new Response(JSON.stringify({ messages: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+  );
   vi.stubGlobal("fetch", fetch);
   const controller = new AbortController();
   await adminApi.getState(
